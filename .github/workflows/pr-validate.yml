@@ -41,8 +41,13 @@ jobs:
             subprocess.check_call([sys.executable,'-m','pip','install','pynacl'])
             from nacl.signing import VerifyKey
             from nacl.exceptions import BadSignatureError
+          # Prefer RFC8785 JCS canonicalization if available
           def canonical(obj):
-            return json.dumps(obj, sort_keys=True, separators=(",",":"), ensure_ascii=False).encode('utf-8')
+            try:
+              import rfc8785
+              return rfc8785.canonicalize(obj).encode('utf-8')
+            except Exception:
+              return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode('utf-8')
           seed = json.load(open('ssi_pack/CONTEXT_SEED.json','r',encoding='utf-8'))
           pubmap = {k['key_id']:k['public_key_b64'] for k in seed.get('public_keys',[])}
           base = f"origin/{os.environ['GITHUB_BASE_REF']}"
