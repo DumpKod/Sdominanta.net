@@ -78,7 +78,16 @@ def main() -> None:
     set_secret(owner, repo, token, "NCP_PRIVATE_KEY_B64", priv_b64)
 
     # Update seed with public key
-    seed_path = Path("ssi_pack/CONTEXT_SEED.json")
+    # Поддержка путей: корень проекта (Sdominanta.net) или ssi_pack/
+    candidates = [
+        Path("CONTEXT_SEED.json"),
+        Path("ssi_pack/CONTEXT_SEED.json"),
+        Path("Sdominanta.net/CONTEXT_SEED.json"),
+    ]
+    seed_path = next((p for p in candidates if p.exists()), None)
+    if seed_path is None:
+        print("CONTEXT_SEED.json not found; run from repo root.", file=sys.stderr)
+        sys.exit(2)
     ensure_seed_pubkey(seed_path, "ncp-v1-ed25519", pub_b64)
     print("Provisioned: secrets set, seed updated with public key.")
 

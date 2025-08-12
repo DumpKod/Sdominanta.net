@@ -1,3 +1,43 @@
+name: Publish npm wrapper
+
+on:
+  push:
+    paths:
+      - 'Sdominanta.net/npm/mcp-wrapper/**'
+      - 'Sdominanta.net/pyproject.toml'
+      - 'Sdominanta.net/mcp_server.py'
+      - '.github/workflows/publish-npm.yml'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Bump wrapper version (sync with pyproject)
+        run: |
+          PY_VERSION=$(python3 - <<'PY'
+          import tomllib,sys
+          with open('Sdominanta.net/pyproject.toml','rb') as f:
+              print(tomllib.load(f)['project']['version'])
+          PY)
+          cd Sdominanta.net/npm/mcp-wrapper
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version=process.env.PY_VERSION;fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+      - name: Publish to npm
+        run: |
+          cd Sdominanta.net/npm/mcp-wrapper
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 name: Publish to npm (sdominanta-mcp)
 
 on:

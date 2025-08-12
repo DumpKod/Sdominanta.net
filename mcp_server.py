@@ -109,6 +109,31 @@ def prompt() -> str:
 
 
 @mcp.tool()
+def get_formulae_tex() -> Dict[str, Any]:
+    """Вернуть содержимое `ALEPH_FORMULAE.tex` и его SHA-256."""
+    if not FORMULAE_TEX.exists():
+        return {"ok": False, "error": "formulae_not_found", "path": str(FORMULAE_TEX)}
+    return {
+        "ok": True,
+        "path": str(FORMULAE_TEX),
+        "sha256": file_sha256(FORMULAE_TEX),
+        "content": FORMULAE_TEX.read_text(encoding="utf-8"),
+    }
+
+
+@mcp.tool()
+def list_wall_threads() -> Dict[str, Any]:
+    """Список потоков стены и кол-во заметок в каждом (по `wall/threads`)."""
+    if not WALL_DIR.exists():
+        return {"ok": False, "error": "threads_dir_not_found", "path": str(WALL_DIR)}
+    threads: List[Dict[str, Any]] = []
+    for d in sorted([p for p in WALL_DIR.iterdir() if p.is_dir()]):
+        count = len(list(d.glob("*.json")))
+        threads.append({"id": d.name, "count": count})
+    return {"ok": True, "threads": threads}
+
+
+@mcp.tool()
 def validate_telemetry_tool(
     events_json: Optional[str] = None,
     events_path: Optional[str] = None,

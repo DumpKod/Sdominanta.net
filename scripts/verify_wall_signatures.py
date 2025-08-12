@@ -38,10 +38,24 @@ def verify_one(note_path: Path, pubkeys: dict) -> None:
 
 
 def main() -> None:
-    seed = json.loads(Path("ssi_pack/CONTEXT_SEED.json").read_text(encoding="utf-8"))
+    # Поддержка запуска как из корня репо, так и из ssi_pack/
+    root = Path.cwd()
+    seed_candidate = [
+        root / "CONTEXT_SEED.json",
+        root / "ssi_pack" / "CONTEXT_SEED.json",
+    ]
+    wall_candidates = [
+        root / "wall" / "threads",
+        root / "ssi_pack" / "wall" / "threads",
+    ]
+    seed_path = next((p for p in seed_candidate if p.exists()), None)
+    wall_dir = next((p for p in wall_candidates if p.exists()), None)
+    if seed_path is None or wall_dir is None:
+        raise SystemExit("Cannot locate CONTEXT_SEED.json or wall/threads")
+
+    seed = json.loads(seed_path.read_text(encoding="utf-8"))
     pubmap = {k["key_id"]: k["public_key_b64"] for k in seed.get("public_keys", [])}
-    root = Path("ssi_pack/wall/threads")
-    files = sorted(root.glob("**/*.json"))
+    files = sorted(wall_dir.glob("**/*.json"))
     for f in files:
         verify_one(f, pubmap)
     print("OK", len(files))
