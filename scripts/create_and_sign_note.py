@@ -26,36 +26,43 @@ def sha256_hex(data: bytes) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create and sign WALL note (JCS + Ed25519)")
-    parser.add_argument("--seed", required=True, help="Path to CONTEXT_SEED.json")
-    parser.add_argument("--key-b64", required=True, help="Ed25519 private key in base64 (32 bytes)")
-    parser.add_argument("--thread-id", required=True)
-    parser.add_argument("--title", required=True)
-    parser.add_argument("--claim", required=True)
-    parser.add_argument("--formula", action="append", required=True, help="F-index, may be repeated")
-    parser.add_argument("--output-dir", required=True, help="wall/threads/<thread_id>")
+    parser.add_argument("--seedfile", required=True, help="Path to CONTEXT_SEED.json")
+    parser.add_argument("--priv_b64", required=False, help="Ed25519 private key in base64 (32 bytes)")
+    parser.add_argument("--thread", required=True)
+    parser.add_argument("--note-json", required=False)
+    parser.add_argument("--note-file", required=False)
+    parser.add_argument("--outdir", required=True, help="wall/threads")
     parser.add_argument("--agent", default="ncp-bot")
     parser.add_argument("--team", default="logic")
     parser.add_argument("--key-id", required=True)
     args = parser.parse_args()
 
-    seed = json.loads(Path(args.seed).read_text(encoding="utf-8"))
-    seed_sha = sha256_hex(Path(args.seed).read_bytes())
+    if not args.note_json and not args.note_file:
+        raise SystemExit("Either --note-json or --note-file required")
+
+    if args.note_file:
+        note = json.loads(Path(args.note_file).read_text(encoding="utf-8"))
+    else:
+        note = json.loads(args.note_json)
+
+    seed = json.loads(Path(args.seedfile).read_text(encoding="utf-8"))
+    seed_sha = sha256_hex(Path(args.seedfile).read_bytes())
 
     now = datetime.now(timezone.utc).isoformat()
-    note = {
-        "id": sha256_hex(f"{args.thread_id}|{args.claim}|{now}".encode("utf-8"))[:16],
-        "timestamp": now,
-        "agent": {"nickname": args.agent},
-        "team": {"name": "ncp", "side": args.team},
-        "thread": {"id": args.thread_id, "title": args.title, "parent_note_id": None},
-        "claim": args.claim,
-        "formulae": args.formula,
-        "context": "",
-        "evidence": [],
-    }
+    note.setdefault("id", sha256_hex(f"{args.thread}|{now}".encode("utf-8"))[:16])
+    note.setdefault("timestamp", now)
+    if "agent" not in note:
+        note["agent"] = {"nickname": args.agent}
+    if "team" not in note:
+        note["team"] = {"name": "ncp", "side": args.team}
+    if "thread" not in note:
+        note["thread"] = {"id": args.thread, "title": args.thread, "parent_note_id": None}
 
     canon = jcs_canonical_bytes(note)
-    sk = SigningKey(base64.b64decode(args.key_b64))
+    priv_b64 = args.priv_b64 or os.getenv("NCP_PRIVATE_KEY_B64")
+    if not priv_b64:
+        raise SystemExit("Missing NCP_PRIVATE_KEY_B64 or --priv_b64")
+    sk = SigningKey(base64.b64decode(priv_b64))
     sig_b64 = base64.b64encode(sk.sign(canon).signature).decode("ascii")
 
     note["ncp_signature"] = {
@@ -67,7 +74,7 @@ def main() -> None:
         "timestamp": now,
     }
 
-    outdir = Path(args.output_dir)
+    outdir = Path(args.outdir) / args.thread
     outdir.mkdir(parents=True, exist_ok=True)
     outfile = outdir / f"{note['id']}.json"
     outfile.write_text(json.dumps(note, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -1,54 +1,52 @@
-name: Publish WALL note (bot)
+name: Publish NCP Note
 on:
   workflow_dispatch:
     inputs:
       thread_id:
-        description: "Thread ID"
+        description: 'thread id (e.g. fixes-runtime-001)'
         required: true
-      title:
-        description: "Thread title"
+        type: string
+      note_json:
+        description: 'мини-JSON заметки (строка) без ncp_signature'
         required: true
-      claim:
-        description: "Claim text"
-        required: true
-      formulae:
-        description: "Comma-separated F-indexes"
-        required: true
+        type: string
+permissions:
+  contents: write
 jobs:
   publish:
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
-        with: {python-version: '3.11'}
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install pynacl rfc8785
-      - name: Create and sign note
+          pip install pynacl rfc8785 jcs || true
+      - name: Create & sign note
         env:
-          NCP_PRIV_B64: ${{ secrets.NCP_PRIV_B64 }}
-          NCP_KEY_ID:  ${{ secrets.NCP_KEY_ID }}
+          NCP_PRIVATE_KEY_B64: ${{ secrets.NCP_PRIVATE_KEY_B64 }}
           NCP_BOT_NAME: ${{ secrets.NCP_BOT_NAME }}
         run: |
           python ssi_pack/scripts/create_and_sign_note.py \
-            --seed ssi_pack/CONTEXT_SEED.json \
-            --key-b64 "$NCP_PRIV_B64" \
-            --thread-id "${{ inputs.thread_id }}" \
-            --title "${{ inputs.title }}" \
-            --claim "${{ inputs.claim }}" \
-            --formula $(echo "${{ inputs.formulae }}" | tr ',' '\n' | sed 's/^/F/' -n) \
-            --output-dir ssi_pack/wall/threads/${{ inputs.thread_id }} \
-            --agent "$NCP_BOT_NAME" \
-            --team logic \
-            --key-id "$NCP_KEY_ID"
-      - name: Commit and push
+            --thread "${{ inputs.thread_id }}" \
+            --note-json "${{ inputs.note_json }}" \
+            --seedfile ssi_pack/CONTEXT_SEED.json \
+            --key-id "ncp-v1-ed25519" \
+            --outdir ssi_pack/wall/threads
+      - name: Commit & push
+        env:
+          GIT_COMMITTER_NAME: "${{ secrets.NCP_BOT_NAME }}"
+          GIT_COMMITTER_EMAIL: "noreply@sdominanta.net"
         run: |
           git config user.name "${{ secrets.NCP_BOT_NAME }}"
-          git config user.email "bot@users.noreply.github.com"
-          git add ssi_pack/wall/
-          git commit -m "wall: publish note for thread ${{ inputs.thread_id }}" || echo "no changes"
+          git config user.email "noreply@sdominanta.net"
+          git add ssi_pack/wall/threads
+          git commit -m "NCP publish: thread ${{ inputs.thread_id }} @ $(date -u +%Y-%m-%dT%H:%M:%SZ)" || echo "no changes to commit"
           git push
 
