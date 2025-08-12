@@ -4,9 +4,7 @@
   "description": "MCP stdio wrapper for Sdominanta MCP server (spawns Python CLI via pipx)",
   "type": "commonjs",
   "files": ["bin/index.js"],
-  "bin": {
-    "@sdominanta/mcp": "bin/index.js"
-  },
+  "bin": "bin/index.js",
   "keywords": ["mcp", "model-context-protocol", "stdio", "cursor", "claude"],
   "author": "Sdominanta.net",
   "license": "MIT",
