@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "sdominanta-mcp": {
+      "command": "pipx",
+      "args": [
+        "run",
+        "--spec",
+        "sdominanta-mcp",
+        "sdominanta-mcp",
+        "--base",
+        "B:\\projects\\🜄Sdominanta.net\\Sdominanta.net"
+      ],
+      "type": "stdio",
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}
