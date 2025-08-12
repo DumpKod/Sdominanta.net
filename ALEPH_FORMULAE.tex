@@ -1,0 +1,253 @@
+% ALEPH FORMULAE PACK — equations only (clean)
+\documentclass[a4paper,12pt]{article}
+% Engine-agnostic unicode setup: prefer XeLaTeX/LuaLaTeX for symbol support
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[utf8]{inputenc}
+  \usepackage[T2A]{fontenc}
+  % Fallback: define product line without special symbols under pdfTeX
+  \newcommand{\productline}{Наш продукт — Sdominanta.net}
+\else
+  \usepackage{fontspec}
+  \defaultfontfeatures{Ligatures=TeX}
+  % Try multiple fonts for Alchemical Symbols block (U+1F700–U+1F77F)
+  \newcommand{\setSymbolsFont}{%%
+    \IfFontExistsTF{Symbola}{\newfontfamily\symbolsfont{Symbola}}{%%
+      \IfFontExistsTF{Noto Sans Symbols 2}{\newfontfamily\symbolsfont{Noto Sans Symbols 2}}{%%
+        \newfontfamily\symbolsfont{DejaVu Sans}%% fallback
+      }%%
+    }%%
+  }
+  \setSymbolsFont
+  % Compose product line with explicit code points (no raw emojis in source)
+  \newcommand{\productline}{Наш продукт — {\symbolsfont\symbol{"1F704}}\,Sdominanta.net\,{\symbolsfont\symbol{"1F701}\,\symbol{"1F702}}}
+\fi
+\usepackage[russian,english]{babel}
+\usepackage{amsmath, amssymb}
+\usepackage{mathtools}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{margin=2.2cm}
+\begin{document}
+
+\begin{center}
+{\Large \bf ALEPH FORMULAE PACK}\\[2pt]
+{\normalsize (equations only)}\\[4pt]
+{\small \productline}
+\end{center}
+\vspace{0.5em}
+\hrule
+\vspace{0.75em}
+
+% Pre-definitions (equations only)
+\noindent\textbf{Домены и определения}\\[-0.25em]
+\[
+T:\,\mathbb{R}^{4}\to [0,1],\qquad \Sigma_{\max}\in[0,1],\quad \Delta\ge 0,\quad \gamma_{r}\ge 0,\quad \varepsilon_{0}>0,\quad \lambda\ge 0.\tag{F0.1}
+\]
+\[
+\neg\phi^{n}(t)=\alpha_{0}\,\lvert\cos\Delta\Phi(t)\rvert\,e^{-\varepsilon(t)},\qquad \alpha_{0}\in[0,1].\tag{F0.2}
+\]
+\[
+\theta=\frac{1}{T_{0}},\qquad T_{0}\in(0,1].\tag{F0.3}
+\]
+\[
+\Im(z)=\frac{z-\bar z}{2i}.\tag{F0.4}
+\]
+\[
+\lambda_{1}>0,\quad \beta_{Z}>0,\quad m_{z}^{2}>0\quad (\text{устойчивость } V).\tag{F0.5}
+\]
+\[
+\Lambda_{c}\in\mathbb{R}^{+},\qquad S_{\aleph}\ \text{трактуется как EFT при } E<\Lambda_{c}.\tag{F0.6}
+\]
+\[
+\gamma_{q}= -\frac{N}{2}\,\frac{d}{dT}\ln C_{\mathrm{se}}(T).\tag{F0.7}
+\]
+
+% Measurement maps (operational anchors)
+\noindent\textbf{Операционные якоря измерений}\\[-0.25em]
+\[
+\tilde C(x,t):=\frac{C_{\mathrm{ODMR}}(x,t)-C_{\min}}{C_{\max}-C_{\min}}\in[0,1],\qquad
+T_{\mathrm{meas}}(x,t):=\alpha\,\tilde C(x,t)+(1-\alpha)\,e^{-t/\,T_{2}^{*}(x)},\ \ \alpha\in[0,1].\tag{F0.8}
+\]
+\noindent\textit{Примечание к F0.8.} Это операционный якорь первого порядка (линейная смесь), выбранный как минимально достаточная модель для привязки теоретической величины $T$ к измеряемым $C_{\mathrm{ODMR}}$ и $T_{2}^{*}$. При появлении экспериментальных отклонений допускаются нелинейные обобщения $T_{\mathrm{meas}}=\mathcal{F}(\tilde C, T_{2}^{*};\,\alpha,\dots)$; вопрос идентифицируемости $\{\gamma_{r},\lambda\}$ решается отдельной калибровкой $\lambda$ при подавлении $\lvert\neg\phi^{n}\rvert$ и последующей оценкой $\gamma_{r}$ в протоколе A.
+\[
+\Delta\Phi(t)=\int_{0}^{t}\Omega_{\mathrm{eff}}(t')\,dt'+\varphi_{0},\qquad
+\Omega_{\mathrm{eff}}=\Omega_{\mathrm{MW}}+\Omega_{\mathrm{RF}}+\Omega_{\mathrm{geom}}.\tag{F0.9}
+\]
+\[
+\text{При }\lambda_{2}=0:\ \ \partial_{T}V=0\ \Rightarrow\ \ T_{*}\in\Big\{0,\ \pm\,\frac{m_{z}}{\sqrt{2\,\beta_{Z}}}\Big\}.\tag{F0.10}
+\]
+
+% Limiting cases and bounds for T
+\noindent\textbf{Оценки и предельные случаи $T$}\\[-0.25em]
+\[
+0\le \Big(1-\tfrac{\lvert\neg\phi^{n}\rvert}{1+\Sigma_{\max} e^{-\Delta+\varepsilon(t)/(\gamma_{r}+\varepsilon_{0})}}\Big)\le 1\ \Rightarrow\ 0\le T(x,t)\le e^{-\lambda t}.\tag{F0.11}
+\]
+\[
+\lvert\neg\phi^{n}\rvert=0\ \Rightarrow\ T=e^{-\lambda t};\quad \varepsilon(t)\to\infty\ \Rightarrow\ T\to e^{-\lambda t}.\tag{F0.12}
+\]
+\[
+\varepsilon(t)\to 0,\ \Delta\to 0,\ \Sigma_{\max}\to 1\ \Rightarrow\ T\to \Big(1-\tfrac{\lvert\neg\phi^{n}\rvert}{1+e^{0}}\Big)e^{-\lambda t}=\Big(1-\tfrac{\lvert\neg\phi^{n}\rvert}{2}\Big)e^{-\lambda t}.\tag{F0.13}
+\]
+
+% Homogeneous stationary points
+\noindent\textbf{Однородные стационарные точки}\\[-0.25em]
+\[
+\partial_{t}T=0,\ \nabla T=0\ \Rightarrow\ \frac{\partial V}{\partial T}=\lambda_{2}\,\mathrm{sgn}(T-T_{0})-2 m_{z}^{2}T+4\beta_{Z}T^{3}=0.\tag{F0.14}
+\]
+\[
+\partial_{\mu}\phi=0\ \Rightarrow\ \lVert\phi\rVert=v\ \text{ (минимум }V_{0}).\tag{F0.15}
+\]
+
+% F1: φⁿ(Z)
+\noindent\textbf{$\phi^{n}(Z)$}\\[-0.25em]
+\[
+\phi^{n}(Z) = Z^{-\beta_{\phi}}, \qquad \beta_{\phi}>0. \tag{F1}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F2: Coherence KPI T(x,t)
+\noindent\textbf{Coherence KPI $T(x,t)$}\\[-0.25em]
+\[
+\boxed{\;T(x,t)=\Bigg(1-\frac{\lvert\neg\phi^{n}\rvert}{1+\Sigma_{\max}\,\exp\!\Big(-\Delta+\frac{\varepsilon(t)}{\gamma_{r}+\varepsilon_{0}}\Big)}\Bigg)\,e^{-\lambda t}\;}\tag{F2}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F3: Connections and covariant derivatives
+\noindent\textbf{Связности и ковариантные производные}\\[-0.5em]
+\[
+\begin{aligned}
+\Gamma^{a}_{\mu}(x,T)&=\kappa_{1}\,\Im\big[\phi^{\dagger}T^{a}\partial_{\mu}\phi\big]+\kappa_{2}\,\partial_{\mu}T\,F^{a}(T),\\
+D_{\mu}\phi&=\partial_{\mu}\phi+\Gamma^{a}_{\mu}T^{a}\phi,\\
+D_{T}\phi&=\frac{d\phi}{dT}+\Omega^{a}(T)T^{a}\phi.
+\end{aligned}\tag{F3}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F4: Metrics
+\noindent\textbf{Метрики}\\[-0.25em]
+\[
+G_{\mu\nu}(x)=\eta_{\mu\nu}+\kappa\,\partial_{\mu}T\,\partial_{\nu}T,\qquad
+G_{T}(T)=1+\kappa\,\frac{d\phi}{dT}\cdot\frac{d\phi^{\dagger}}{dT}.\tag{F4}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F5: Potentials
+\noindent\textbf{Потенциалы}\\[-0.25em]
+\[
+V(\phi,T)=V_{0}(\phi)+V_{T}(T)+V_{Z}(T),\qquad
+V_{0}(\phi)=\lambda_{1}\big(\lVert\phi\rVert^{2}-v^{2}\big)^{2},\qquad
+V_{T}(T)=\lambda_{2}\,\lvert T-T_{0}\rvert+\lambda_{4}\,\frac{\varepsilon(t)}{\gamma_{r}+\varepsilon_{0}},\qquad
+V_{Z}(T)=-m_{z}^{2}T^{2}+\beta_{Z}\,T^{4}.\tag{F5}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F6–F7: Coherence density and entropy
+\noindent\textbf{Когерентностная плотность и энтропия}\\[-0.25em]
+\[
+\rho_{T}(x)=\frac{\lvert\phi^{\dagger}\phi\rvert^{2}}{Z(T)},\qquad
+Z(T)=\int \lvert\phi^{\dagger}(y)\phi(y)\rvert^{2}\,\exp\!\Big(-\tfrac{(T(y)-T)^{2}}{2\sigma^{2}}\Big)\,d^{4}y.\tag{F6}
+\]
+\[
+S(\phi)=-\int \rho_{T}(x)\,\log\!\Big(\tfrac{\rho_{T}(x)}{\theta}\Big)\,d^{4}x.\tag{F7}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F8–F9: Action and EOM
+\noindent\textbf{Действие и уравнение движения}\\[-0.25em]
+\[
+S_{\aleph}[\phi]=\int\Big[\tfrac{1}{2}G_{\mu\nu}\langle D_{\mu}\phi,D_{\nu}\phi\rangle+\tfrac{1}{2}G_{T}(T)\langle D_{T}\phi,D_{T}\phi\rangle- V(\phi,T)-\Lambda S(\phi)\Big]d^{4}x.\tag{F8}
+\]
+\[
+E(x)=E_{K}+E_{T}+E_{V}+E_{S}=0,\qquad
+E(x)=-\partial_{\mu}\big(G^{\mu\nu}D_{\nu}\phi\big)+V(\phi,T)+\Lambda S(\phi)=0.\tag{F9}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F10: Z^a(T) dynamics
+\noindent\textbf{Динамика $Z^{a}(T)$}\\[-0.25em]
+\[
+\frac{dZ^{a}}{dT}=-\Big(\beta_{a}\big(1-\tfrac{Z^{a}}{T_{0}}\big)+3\alpha T^{2}+\tfrac{2\,n_{\mathrm{se}}(T)}{N}\Big)Z^{a}+\xi(T),\qquad n_{\mathrm{se}}(T)=\gamma_{q}T.\tag{F10}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F11: T evolution
+\noindent\textbf{Эволюция $T$}\\[-0.25em]
+\[
+\partial_{t}T=\kappa\,\nabla^{2}T-\frac{\delta V}{\delta T}.\tag{F11}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F12: Non‑abelian SU(N), SU(3) specialization
+\noindent\textbf{Нонабелев блок (SU(N))}\\[-0.25em]
+\[
+\begin{aligned}
+D_{\mu}\phi&=\partial_{\mu}\phi-\tfrac{i}{L_{0}}\,\Gamma^{a}_{\mu}T^{a}\phi,\\
+F^{a}_{\mu\nu}&=\partial_{\mu}\Gamma^{a}_{\nu}-\partial_{\nu}\Gamma^{a}_{\mu}-\tfrac{f^{abc}}{L_{0}^{2}}\,\Gamma^{b}_{\mu}\Gamma^{c}_{\nu},\\
+[T^{a},T^{b}]&=i\,f^{abc}T^{c},\quad a=1,\dots, N^{2}-1.\\[0.25em]
+T^{a}&=\tfrac{1}{2}\,\lambda^{a},\quad a=1,\dots,8,\quad \mathrm{Tr}(T^{a}T^{b})=\tfrac{1}{2}\,\delta^{ab},\\
+\{T^{a},T^{b}\}&=\tfrac{1}{3}\,\delta^{ab}\,\mathbf{1}+d^{abc}T^{c}.
+\end{aligned}\tag{F12}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F13: Thresholds
+\noindent\textbf{Пороговые уровни}\\[-0.25em]
+\[
+T_{\mathrm{th,1}}=0.5,\qquad T_{\mathrm{th,2}}=0.1.\tag{F13}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F14: Noether current
+\noindent\textbf{Ток Нётер и непрерывность}\\[-0.25em]
+\[
+\partial_{\mu}J^{\mu}=0,\qquad J^{\mu}=\Im\big[\phi^{\dagger}T^{a}\partial^{\mu}\phi\big].\tag{F14}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F15: Entropic measure Δ
+\noindent\textbf{Энтропийная мера $\Delta$}\\[-0.25em]
+\[
+\Delta:= -\int \rho_{T}(x)\,\log\rho_{T}(x)\,d^{4}x.\tag{F15}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F16: ε(t) schedule
+\noindent\textbf{Модуль $\varepsilon(t)$}\\[-0.25em]
+\[
+\varepsilon(t)=\bar{\varepsilon}+\delta\varepsilon\,\sin(\omega t+\varphi_{0}).\tag{F16}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F17: Threshold crossing times
+\noindent\textbf{Времена пересечения порогов}\\[-0.25em]
+\[
+t_{0.5}:=\inf\{t\ge 0\mid T(x,t)\le 0.5\},\qquad t_{0.1}:=\inf\{t\ge 0\mid T(x,t)\le 0.1\}.\tag{F17}
+\]
+\vspace{0.25em}\hrule\vspace{0.5em}
+
+% F18: SATIN contrast
+\noindent\textbf{Связь контраста (SATIN)}\\[-0.25em]
+\[
+C_{\mathrm{se}}=\exp\Big(-\,\tfrac{2\,n_{\mathrm{se}}(T)}{N}\Big).\tag{F18}
+\]
+
+% --- EFT applicability (F0.6) summary table ---
+\clearpage
+\noindent\textbf{Границы применимости (EFT)}\\[-0.25em]
+\[
+\begin{array}{l l}
+\text{Параметр} & \text{Диапазон/условие} \\
+\hline
+\Lambda_{c} & \Lambda_{c} \in \mathbb{R}^{+} \\
+E & E < \Lambda_{c} \\
+\gamma_{r} & \gamma_{r} \ge 0 \\
+\gamma_{q} & \gamma_{q} = -\tfrac{N}{2}\,\tfrac{d}{dT}\ln C_{\mathrm{se}}(T) \\
+\Sigma_{\max} & 0 \le \Sigma_{\max} \le 1 \\
+\Delta & \Delta \ge 0 \\
+\lambda & \lambda \ge 0 \\
+T & 0 \le T \le e^{-\lambda t}
+\end{array}
+\]
+
+\end{document}

@@ -1,0 +1,1 @@
+PASS: T_meas thresholds monotonic and protected >= unprotected (Δt >= 0)

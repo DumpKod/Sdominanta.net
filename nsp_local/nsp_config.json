@@ -1,0 +1,13 @@
+{
+  "seed": "../CONTEXT_SEED.json",
+  "telemetry_schema": "../TELEMETRY_SCHEMA.json",
+  "system_prelude": "./prelude.txt",
+  "out_prompt": "./nsp_prompt.txt",
+  "rules": {
+    "language": "ru",
+    "enforce_notation": true,
+    "enforce_json_validity": true
+  }
+}
+
+

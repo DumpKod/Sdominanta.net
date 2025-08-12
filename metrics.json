@@ -1,0 +1,46 @@
+{
+  "T": {
+    "t_0.5": {
+      "unprotected": 52.129695378190064,
+      "protected": 53.60213598791752,
+      "Delta_t": 1.4724406097274567
+    },
+    "t_0.1": {
+      "unprotected": NaN,
+      "protected": NaN,
+      "Delta_t": NaN
+    }
+  },
+  "T_meas": {
+    "t_0.5": {
+      "unprotected": 0.9706219601621181,
+      "protected": 1.1091515391901114,
+      "Delta_t": 0.13852957902799334
+    },
+    "t_0.1": {
+      "unprotected": 3.2238417307431386,
+      "protected": 3.684305052083197,
+      "Delta_t": 0.4604633213400584
+    }
+  },
+  "config": {
+    "gamma_r": {
+      "unprotected": 1.0,
+      "protected": 0.5
+    },
+    "alpha": 0.5,
+    "T2star_us": {
+      "unprotected": 1.4,
+      "protected": 1.6
+    },
+    "ODMR": {
+      "Cmin": 0.1,
+      "Cmax": 0.4
+    },
+    "nphi": 0.3,
+    "Sigma_max": 0.9,
+    "Delta": 0.2,
+    "epsilon_t": 0.22,
+    "epsilon0": 0.1
+  }
+}

@@ -1,0 +1,70 @@
+name: PR Validate (block wall edits)
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Detect wall changes
+        id: detect
+        run: |
+          base="origin/${{ github.event.pull_request.base.ref }}"
+          git fetch origin ${{ github.event.pull_request.base.ref }} --depth=1
+          changed=$(git diff --name-only "$base"...HEAD | tr '\n' ' ')
+          echo "changed=$changed" >> $GITHUB_OUTPUT
+          if echo "$changed" | grep -qE "\bssi_pack/wall/"; then echo "wall_changed=true" >> $GITHUB_OUTPUT; else echo "wall_changed=false" >> $GITHUB_OUTPUT; fi
+      - name: Fail if human modifies wall/
+        if: steps.detect.outputs.wall_changed == 'true'
+        run: |
+          PR_USER='${{ github.event.pull_request.user.login }}'
+          echo "PR author: $PR_USER"
+          if [ "$PR_USER" != "${{ secrets.NCP_BOT_NAME }}" ]; then
+            echo "Wall modifications are restricted to NCP bot"
+            exit 1
+          fi
+      - name: Setup Python
+        if: steps.detect.outputs.wall_changed == 'true'
+        uses: actions/setup-python@v4
+        with: {python-version: '3.11'}
+      - name: Verify wall signatures
+        if: steps.detect.outputs.wall_changed == 'true'
+        run: |
+          python - <<'PY'
+          import json,base64,subprocess,os,sys
+          try:
+            from nacl.signing import VerifyKey
+            from nacl.exceptions import BadSignatureError
+          except Exception:
+            subprocess.check_call([sys.executable,'-m','pip','install','pynacl'])
+            from nacl.signing import VerifyKey
+            from nacl.exceptions import BadSignatureError
+          def canonical(obj):
+            return json.dumps(obj, sort_keys=True, separators=(",",":"), ensure_ascii=False).encode('utf-8')
+          seed = json.load(open('ssi_pack/CONTEXT_SEED.json','r',encoding='utf-8'))
+          pubmap = {k['key_id']:k['public_key_b64'] for k in seed.get('public_keys',[])}
+          base = f"origin/{os.environ['GITHUB_BASE_REF']}"
+          res = subprocess.check_output(['git','diff','--name-only',base,'...','HEAD']).decode()
+          files = [f for f in res.splitlines() if f.startswith('ssi_pack/wall/') and f.endswith('.json')]
+          if not files:
+            print('no wall files changed'); sys.exit(0)
+          for f in files:
+            print('verify',f)
+            j = json.load(open(f,'r',encoding='utf-8'))
+            sig = j.get('ncp_signature')
+            if not sig:
+              print('missing ncp_signature',f); sys.exit(2)
+            key_id = sig.get('key_id'); sig_b64 = sig.get('signature')
+            if key_id not in pubmap:
+              print('unknown key_id',key_id); sys.exit(3)
+            vk = VerifyKey(base64.b64decode(pubmap[key_id]))
+            j2 = dict(j); j2.pop('ncp_signature',None)
+            try:
+              vk.verify(canonical(j2), base64.b64decode(sig_b64))
+            except BadSignatureError:
+              print('bad signature',f); sys.exit(4)
+          print('OK')
+          PY
+
