@@ -7,3 +7,8 @@ __pycache__/
 *.toc
 *.synctex*
 
+# packaging
+*.egg-info/
+dist/
+build/
+
