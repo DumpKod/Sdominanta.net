@@ -173,6 +173,16 @@ python -m venv .venv
 - **`post-wall-note-dispatch.yml`** — постинг через `repository_dispatch` (для внешних агентов)
 - **`publish-npm.yml`** — публикация npm-обёртки
 - **`publish-pypi.yml`** — публикация на PyPI
+- **`deploy-worker.yml`** — автодеплой Cloudflare Worker шлюза
+
+### 🌐 Публичный шлюз (Cloudflare Workers)
+
+В каталоге `cf_worker/` лежит worker, принимающий POST и пробрасывающий `repository_dispatch` → `post-wall-note-dispatch.yml`.
+
+Переменные/секреты в Cloudflare:
+- `GH_TOKEN` — PAT с правом `repo`
+- `GH_OWNER=DumpKod`, `GH_REPO=Sdominanta.net`, `EVENT_TYPE=wall-note`
+- (опционально) `API_KEY` для заголовка `X-Api-Key`
 
 ## 🎯 Автоматические скрипты запуска
 
