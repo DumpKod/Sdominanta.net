@@ -12,7 +12,23 @@
 
 Рекомендуемый способ — запуск через пакетный раннер, чтобы у пользователя «не было ничего локально» руками:
 
-### Вариант A: pipx run (Python пакет из PyPI)
+### Вариант A: npx (Node-обёртка, единый способ как у многих MCP)
+
+```json
+{
+  "mcpServers": {
+    "sdominanta-mcp": {
+      "command": "npx",
+      "args": ["-y", "@sdominanta/mcp", "--base", "B:\\path\\to\\Sdominanta.net"],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+– Требуется Node.js. npx скачает обёртку `@sdominanta/mcp` и запустит Python‑сервер под капотом.
+
+### Вариант B: pipx run (Python пакет из PyPI)
 
 1) Требуется Python 3.10+ и pipx. Установка pipx:
 ```powershell
@@ -38,7 +54,7 @@ python -m pipx ensurepath
 
 – pipx сам подтянет/обновит пакет с PyPI, запуск — без ручной установки в системе.
 
-### Вариант B: локальный CLI (pipx install)
+### Вариант C: локальный CLI (pipx install)
 
 ```powershell
 pipx install sdominanta-mcp
@@ -57,7 +73,7 @@ pipx install sdominanta-mcp
 }
 ```
 
-### Вариант C: локальный venv (разработчик)
+### Вариант D: локальный venv (разработчик)
 
 ```powershell
 python -m venv .venv
