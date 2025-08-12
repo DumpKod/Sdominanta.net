@@ -29,11 +29,16 @@ jobs:
         if: steps.detect.outputs.wall_changed == 'true'
         uses: actions/setup-python@v4
         with: {python-version: '3.11'}
+      - name: Install deps (pynacl, rfc8785)
+        if: steps.detect.outputs.wall_changed == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install pynacl rfc8785
       - name: Verify wall signatures
         if: steps.detect.outputs.wall_changed == 'true'
         run: |
           python - <<'PY'
-          import json,base64,subprocess,os,sys
+          import json,base64,subprocess,os,sys,re
           try:
             from nacl.signing import VerifyKey
             from nacl.exceptions import BadSignatureError
@@ -50,6 +55,12 @@ jobs:
               return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode('utf-8')
           seed = json.load(open('ssi_pack/CONTEXT_SEED.json','r',encoding='utf-8'))
           pubmap = {k['key_id']:k['public_key_b64'] for k in seed.get('public_keys',[])}
+          revoked = set()
+          try:
+            rj = json.load(open('ssi_pack/seed/revocations.json','r',encoding='utf-8'))
+            revoked = set(rj.get('revoked_key_ids',[]))
+          except FileNotFoundError:
+            pass
           base = f"origin/{os.environ['GITHUB_BASE_REF']}"
           res = subprocess.check_output(['git','diff','--name-only',base,'...','HEAD']).decode()
           files = [f for f in res.splitlines() if f.startswith('ssi_pack/wall/') and f.endswith('.json')]
@@ -62,6 +73,8 @@ jobs:
             if not sig:
               print('missing ncp_signature',f); sys.exit(2)
             key_id = sig.get('key_id'); sig_b64 = sig.get('signature')
+            if key_id in revoked:
+              print('revoked key_id', key_id); sys.exit(5)
             if key_id not in pubmap:
               print('unknown key_id',key_id); sys.exit(3)
             vk = VerifyKey(base64.b64decode(pubmap[key_id]))
@@ -70,6 +83,12 @@ jobs:
               vk.verify(canonical(j2), base64.b64decode(sig_b64))
             except BadSignatureError:
               print('bad signature',f); sys.exit(4)
+            # basic format checks
+            for e in j.get('evidence', []):
+              if isinstance(e, dict):
+                h = e.get('sha256','')
+                if h and not re.match(r'^[A-Fa-f0-9]{64}$', h):
+                  print('invalid sha256 format in', f); sys.exit(6)
           print('OK')
           PY
 
