@@ -28,7 +28,13 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           VER="${TAG#sdominanta-mcp-v}"
           echo "version=$VER" >> $GITHUB_OUTPUT
+      - name: Read package version
+        id: pkg
+        working-directory: npm/mcp-wrapper
+        run: |
+          echo "current=$(node -p -e \"require('./package.json').version\")" >> $GITHUB_OUTPUT
       - name: Set npm package version
+        if: steps.pkg.outputs.current != steps.v.outputs.version
         working-directory: npm/mcp-wrapper
         run: |
           npm version "${{ steps.v.outputs.version }}" --no-git-tag-version
