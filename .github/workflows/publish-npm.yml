@@ -1,4 +1,4 @@
-name: Publish to npm (@sdominanta/mcp)
+name: Publish to npm (sdominanta-mcp)
 
 on:
   push:

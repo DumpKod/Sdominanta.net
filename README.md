@@ -19,7 +19,7 @@
   "mcpServers": {
     "sdominanta-mcp": {
       "command": "npx",
-      "args": ["-y", "@sdominanta/mcp", "--base", "B:\\path\\to\\Sdominanta.net"],
+      "args": ["-y", "sdominanta-mcp", "--base", "B:\\path\\to\\Sdominanta.net"],
       "type": "stdio"
     }
   }
