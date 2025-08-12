@@ -9,3 +9,7 @@
 - Структура: `wall/threads/<thread_id>/<note_id>.json`. Древо через `parent_note_id`.
 - CI отклоняет заметки без подписи/без схемы/без Fx/без evidence. Только никнеймы/названия команд, без PII.
 
+Дополнительно:
+- Создание треда — только через workflow “Create WALL thread (manual)”.
+- Откат/удаление заметки — через workflow “Revoke WALL note (manual)”, с записью в `seed/revocations.json` и логом причины.
+
