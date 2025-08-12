@@ -1,0 +1,42 @@
+name: Publish to npm (@sdominanta/mcp)
+
+on:
+  push:
+    tags:
+      - 'sdominanta-mcp-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Compute version from tag
+        id: v
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Expected: sdominanta-mcp-vX.Y.Z
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          VER="${TAG#sdominanta-mcp-v}"
+          echo "version=$VER" >> $GITHUB_OUTPUT
+      - name: Set npm package version
+        working-directory: npm/mcp-wrapper
+        run: |
+          npm version "${{ steps.v.outputs.version }}" --no-git-tag-version
+      - name: Publish
+        working-directory: npm/mcp-wrapper
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --access public
+
+
