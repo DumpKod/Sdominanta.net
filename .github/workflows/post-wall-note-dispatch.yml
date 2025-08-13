@@ -1,0 +1,70 @@
+name: Wall note (repository_dispatch)
+
+on:
+  repository_dispatch:
+    types: [wall-note]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyNaCl rfc8785 jsonschema
+
+      - name: Prepare payload
+        run: |
+          echo '${{ toJson(github.event.client_payload) }}' > payload.json
+          python - << 'PY'
+import json
+from pathlib import Path
+
+payload = json.loads(Path('payload.json').read_text(encoding='utf-8') or '{}')
+note = {
+  'claim': payload.get('claim', ''),
+  'formulae': payload.get('formulae', []),
+  'evidence': payload.get('evidence', []),
+}
+# Опционально пробрасываем agent, если пришёл от клиента
+if isinstance(payload.get('agent'), dict):
+    note['agent'] = {'nickname': str(payload['agent'].get('nickname', 'agent'))}
+Path('note_payload.json').write_text(json.dumps(note, ensure_ascii=False), encoding='utf-8')
+PY
+
+      - name: Create & sign note
+        env:
+          NCP_PRIVATE_KEY_B64: ${{ secrets.NCP_PRIVATE_KEY_B64 }}
+        run: |
+          python scripts/create_and_sign_note.py \
+            --thread "${{ github.event.client_payload.thread }}" \
+            --note-file note_payload.json \
+            --seedfile CONTEXT_SEED.json \
+            --key-id "${{ secrets.NCP_KEY_ID }}" \
+            --outdir wall/threads
+
+      - name: Commit & push
+        env:
+          GIT_COMMITTER_NAME: "${{ secrets.NCP_BOT_NAME }}"
+          GIT_COMMITTER_EMAIL: "noreply@sdominanta.net"
+        run: |
+          git config user.name "${{ secrets.NCP_BOT_NAME }}"
+          git config user.email "noreply@sdominanta.net"
+          git add wall/threads
+          git commit -m "wall: add note via repository_dispatch (thread=${{ github.event.client_payload.thread }})" || echo "no changes"
+          git push
+
+
