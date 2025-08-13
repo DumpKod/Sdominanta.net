@@ -20,11 +20,14 @@ export default {
       let reqJson = {};
       try { reqJson = JSON.parse(bodyText || '{}'); } catch { reqJson = {}; }
       const idInfo = await computeAgentIdentity(request, env, reqJson);
+      const teamToken = request.headers.get('x-team-token') || null;
+      const teamTokenSha = teamToken ? await sha256Hex(teamToken) : null;
       const regPayload = {
         agent_id: idInfo.id,
         nicknameWanted: reqJson.nickname || null,
         teamWanted: reqJson.team || null,
         agent_pubkey: reqJson.agent_pubkey || null,
+        team_token_sha256: teamTokenSha,
         ua: request.headers.get('user-agent') || '',
         ip: request.headers.get('cf-connecting-ip') || ''
       };
