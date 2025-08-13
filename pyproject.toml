@@ -1,6 +1,6 @@
 [project]
 name = "sdominanta-mcp"
-version = "0.1.6"
+version = "0.1.7"
 description = "Autonomous MCP server for Sdominanta.net (seed/schema/validators/wall signatures)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,6 +20,6 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["mcp_server", "sdominanta_mcp_entry"]
+py-modules = ["mcp_server"]
 
 

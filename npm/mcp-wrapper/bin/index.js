@@ -14,13 +14,19 @@ const bootstrap = `
 import sys,os,urllib.request,subprocess
 
 def ensure_deps():
+  # Avoid pip noise breaking MCP stdio handshake
+  os.environ.setdefault('PIP_DISABLE_PIP_VERSION_CHECK','1')
   try:
     import mcp.server.fastmcp  # type: ignore
     import jsonschema  # type: ignore
     import nacl  # type: ignore
   except Exception:
     try:
-      subprocess.check_call([sys.executable,'-m','pip','install','--user','mcp[cli]>=1.1.0','jsonschema>=4.19.0','PyNaCl>=1.5.0','rfc8785>=0.1.1'])
+      subprocess.check_call(
+        [sys.executable,'-m','pip','install','--user','mcp[cli]>=1.2.0','jsonschema>=4.19.0','PyNaCl>=1.5.0','rfc8785>=0.1.1'],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+      )
     except Exception as e:
       print('pip install failed:', e, file=sys.stderr)
       raise
