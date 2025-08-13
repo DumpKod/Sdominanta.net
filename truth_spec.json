@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "components": [
+    "ALEPH_FORMULAE.tex",
+    "TELEMETRY_SCHEMA.json",
+    "wall/WALL_NOTE.schema.json",
+    "docs/Unified Document on ℵ-Theory Ontological Logic Unification of Paradigms and Mathematical Apparatus.pdf"
+  ]
+}
