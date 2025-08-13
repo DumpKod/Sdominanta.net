@@ -6,8 +6,12 @@ from pathlib import Path
 
 try:
     import rfc8785
+    _HAS_DUMPS = hasattr(rfc8785, "dumps")
+    _HAS_CANON = hasattr(rfc8785, "canonicalize")
 except Exception:
     rfc8785 = None
+    _HAS_DUMPS = False
+    _HAS_CANON = False
 
 from nacl.signing import VerifyKey
 from nacl.exceptions import BadSignatureError
@@ -15,7 +19,13 @@ from nacl.exceptions import BadSignatureError
 
 def canonical_bytes(obj: dict) -> bytes:
     if rfc8785 is not None:
-        return rfc8785.canonicalize(obj).encode("utf-8")
+        try:
+            if _HAS_DUMPS:
+                return rfc8785.dumps(obj).encode("utf-8")
+            if _HAS_CANON:
+                return rfc8785.canonicalize(obj).encode("utf-8")
+        except Exception:
+            pass
     import json as _json
     return _json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
