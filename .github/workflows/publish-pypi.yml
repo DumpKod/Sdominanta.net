@@ -21,23 +21,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Bump version (if provided)
-        if: inputs.version != ''
+      - name: Set version (if provided)
+        if: ${{ inputs.version != '' }}
         shell: bash
-        working-directory: Sdominanta.net
         run: |
-          ver="${{ inputs.version }}"
-          python - <<PY
-import re, pathlib, sys
-p = pathlib.Path('pyproject.toml')
-s = p.read_text(encoding='utf-8')
-s2 = re.sub(r'(?m)^(version\s*=\s*")([^"]+)(")$', lambda m: m.group(1)+"${{ inputs.version }}"+m.group(3), s)
-if s == s2:
-    # Fallback for inline table formats; be tolerant
-    s2 = re.sub(r'(?m)^(version\s*=\s*)([^\n]+)$', r'\\g<1>"${{ inputs.version }}"', s)
-p.write_text(s2, encoding='utf-8')
-print('Set version to', '${{ inputs.version }}')
-PY
+          sed -i -E 's/^version\s*=\s*"[^"]+"/version = "${{ inputs.version }}"/' Sdominanta.net/pyproject.toml
       - name: Install build tools
         run: |
           python -m pip install --upgrade pip
