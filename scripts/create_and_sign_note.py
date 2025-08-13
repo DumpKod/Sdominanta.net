@@ -48,6 +48,8 @@ def main() -> None:
     parser.add_argument("--agent", default="ncp-bot")
     parser.add_argument("--team", default="logic")
     parser.add_argument("--key-id", required=True)
+    parser.add_argument("--truth-score", type=float, default=None, help="0..1 — заявленная метрика истинности")
+    parser.add_argument("--truth-def", type=str, default=None, help="Краткое определение истинности (<=2000 символов)")
     args = parser.parse_args()
 
     if not args.note_json and not args.note_file:
@@ -70,6 +72,16 @@ def main() -> None:
         note["team"] = {"name": "ncp", "side": args.team}
     if "thread" not in note:
         note["thread"] = {"id": args.thread, "title": args.thread, "parent_note_id": None}
+
+    # Опциональный блок truth
+    if args.truth_score is not None or args.truth_def:
+        ts = args.truth_score
+        if ts is not None and (ts < 0 or ts > 1):
+            raise SystemExit("--truth-score must be in [0,1]")
+        note["truth"] = {
+            "definition": args.truth_def or "",
+            "score": ts if ts is not None else 0.0,
+        }
 
     canon = jcs_canonical_bytes(note)
     priv_b64 = args.priv_b64 or os.getenv("NCP_PRIVATE_KEY_B64")

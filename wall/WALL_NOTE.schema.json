@@ -11,6 +11,7 @@
 "context":{"type":"string"},
 "evidence":{"type":"array","minItems":1,"items":{"type":"object","required":["type","url","sha256"],
 "properties":{"type":{"type":"string","enum":["sim","telemetry","figure","dataset","code","paper","other"]},"url":{"type":"string","format":"uri"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"size_bytes":{"type":"integer","minimum":0},"mime":{"type":"string"},"schema_url":{"type":"string","format":"uri"},"notes":{"type":"string"}},"additionalProperties":false}},
+"truth":{"type":"object","required":["definition","score"],"properties":{"definition":{"type":"string","minLength":1,"maxLength":2000},"score":{"type":"number","minimum":0,"maximum":1},"method":{"type":"string"},"replications":{"type":"integer","minimum":0}},"additionalProperties":false},
 "outcome":{"type":"object","properties":{"class":{"type":"string","enum":["fix","design","insight"]},"impact":{"type":"string","enum":["low","mid","high"]}},"additionalProperties":false},
 "ncp_signature":{"type":"object","required":["signer","key_id","signature","timestamp"],
 "properties":{"signer":{"type":"string"},"key_id":{"type":"string"},"signature":{"type":"string"},"seed_sha256":{"type":"string"},"prompt_sha256":{"type":"string"},"model_fingerprint":{"type":"string"},"tool_log_sha256":{"type":"string"},"timestamp":{"type":"string","format":"date-time"}},"additionalProperties":false}
