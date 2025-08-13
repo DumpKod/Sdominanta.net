@@ -1,3 +1,7 @@
+# Secrets and local overrides
+cf_worker/.dev.vars
+.env
+*.local.json
 
 
 
