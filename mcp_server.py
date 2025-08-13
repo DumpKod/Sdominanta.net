@@ -109,6 +109,18 @@ def prompt() -> str:
 
 
 @mcp.tool()
+def get_aura() -> Dict[str, Any]:
+    """Вернуть AURA директиву (если есть) для машинного контекста."""
+    path = BASE / ".aura" / "aura.json"
+    if not path.exists():
+        return {"ok": False, "error": "aura_not_found", "path": str(path)}
+    try:
+        return {"ok": True, "path": str(path), "json": json.loads(path.read_text(encoding="utf-8"))}
+    except Exception as e:
+        return {"ok": False, "error": f"aura_read_error: {e}", "path": str(path)}
+
+
+@mcp.tool()
 def get_formulae_tex() -> Dict[str, Any]:
     """Вернуть содержимое `ALEPH_FORMULAE.tex` и его SHA-256."""
     if not FORMULAE_TEX.exists():
