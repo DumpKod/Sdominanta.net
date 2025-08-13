@@ -7,6 +7,8 @@ from pathlib import Path
 import os
 import argparse
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 
 try:
     from jsonschema import validate as jsonschema_validate  # type: ignore
@@ -27,6 +29,7 @@ from mcp.server.fastmcp import FastMCP
 
 
 BASE = Path(os.getenv("SDOM_BASE") or Path.cwd())
+REMOTE_BASE = os.getenv("SDOM_REMOTE") or "https://raw.githubusercontent.com/DumpKod/Sdominanta.net/main/Sdominanta.net"
 SEED_PATH = BASE / "CONTEXT_SEED.json"
 SCHEMA_PATH = BASE / "TELEMETRY_SCHEMA.json"
 WALL_DIR = BASE / "wall" / "threads"
@@ -34,8 +37,31 @@ FORMULAE_TEX = BASE / "ALEPH_FORMULAE.tex"
 PRELUDE_PATH = BASE / "ncp_server" / "prelude.txt"
 
 
-def read_json(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+def read_text_rel(rel: str) -> Optional[str]:
+    """Прочитать текст либо из локального файла, либо из REMOTE_BASE.
+
+    Возвращает строку или None при ошибке.
+    """
+    local_path = BASE / rel
+    try:
+        if local_path.exists():
+            return local_path.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    if REMOTE_BASE:
+        try:
+            url = f"{REMOTE_BASE.rstrip('/')}/{rel.replace('\\','/')}"
+            req = Request(url, headers={"User-Agent": "sdominanta-mcp/1.0"})
+            with urlopen(req) as resp:
+                return resp.read().decode("utf-8")
+        except Exception:
+            return None
+    return None
+
+
+def read_json_rel(rel: str) -> Dict[str, Any]:
+    text = read_text_rel(rel)
+    return json.loads(text) if text else {}
 
 
 def file_sha256(path: Path) -> Optional[str]:
@@ -48,6 +74,13 @@ def file_sha256(path: Path) -> Optional[str]:
     return hasher.hexdigest()
 
 
+def text_sha256_rel(rel: str) -> Optional[str]:
+    text = read_text_rel(rel)
+    if text is None:
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def canonical_bytes(obj: dict) -> bytes:
     """RFC8785 (JCS) canonicalization if available; otherwise stable JSON."""
     if rfc8785 is not None:  # pragma: no cover
@@ -56,8 +89,8 @@ def canonical_bytes(obj: dict) -> bytes:
 
 
 def build_prompt() -> str:
-    prelude = PRELUDE_PATH.read_text(encoding="utf-8") if PRELUDE_PATH.exists() else ""
-    seed = read_json(SEED_PATH) if SEED_PATH.exists() else {}
+    prelude = read_text_rel("ncp_server/prelude.txt") or ""
+    seed = read_json_rel("CONTEXT_SEED.json")
     lines: List[str] = []
     if prelude.strip():
         lines.append(prelude.strip())
@@ -78,27 +111,29 @@ mcp = FastMCP("Sdominanta MCP")
 @mcp.tool()
 def get_seed() -> Dict[str, Any]:
     """Вернуть JSON из `CONTEXT_SEED.json`."""
-    if not SEED_PATH.exists():
+    data = read_json_rel("CONTEXT_SEED.json")
+    if not data:
         return {"error": "seed_not_found", "path": str(SEED_PATH)}
-    return read_json(SEED_PATH)
+    return data
 
 
 @mcp.tool()
 def get_schema() -> Dict[str, Any]:
     """Вернуть JSON-схему из `TELEMETRY_SCHEMA.json`."""
-    if not SCHEMA_PATH.exists():
+    data = read_json_rel("TELEMETRY_SCHEMA.json")
+    if not data:
         return {"error": "schema_not_found", "path": str(SCHEMA_PATH)}
-    return read_json(SCHEMA_PATH)
+    return data
 
 
 @mcp.tool()
 def version_info() -> Dict[str, Any]:
     """Хэши ключевых файлов и их пути."""
     return {
-        "seed": {"path": str(SEED_PATH), "sha256": file_sha256(SEED_PATH)},
-        "schema": {"path": str(SCHEMA_PATH), "sha256": file_sha256(SCHEMA_PATH)},
-        "formulae": {"path": str(FORMULAE_TEX), "sha256": file_sha256(FORMULAE_TEX)},
-        "prelude": {"path": str(PRELUDE_PATH), "sha256": file_sha256(PRELUDE_PATH)},
+        "seed": {"path": str(SEED_PATH), "sha256": file_sha256(SEED_PATH) or text_sha256_rel("CONTEXT_SEED.json")},
+        "schema": {"path": str(SCHEMA_PATH), "sha256": file_sha256(SCHEMA_PATH) or text_sha256_rel("TELEMETRY_SCHEMA.json")},
+        "formulae": {"path": str(FORMULAE_TEX), "sha256": file_sha256(FORMULAE_TEX) or text_sha256_rel("ALEPH_FORMULAE.tex")},
+        "prelude": {"path": str(PRELUDE_PATH), "sha256": file_sha256(PRELUDE_PATH) or text_sha256_rel("ncp_server/prelude.txt")},
     }
 
 
@@ -127,13 +162,14 @@ def get_aura() -> Dict[str, Any]:
 @mcp.tool()
 def get_formulae_tex() -> Dict[str, Any]:
     """Вернуть содержимое `ALEPH_FORMULAE.tex` и его SHA-256."""
-    if not FORMULAE_TEX.exists():
+    content = read_text_rel("ALEPH_FORMULAE.tex")
+    if content is None:
         return {"ok": False, "error": "formulae_not_found", "path": str(FORMULAE_TEX)}
     return {
         "ok": True,
         "path": str(FORMULAE_TEX),
-        "sha256": file_sha256(FORMULAE_TEX),
-        "content": FORMULAE_TEX.read_text(encoding="utf-8"),
+        "sha256": file_sha256(FORMULAE_TEX) or hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        "content": content,
     }
 
 
@@ -160,14 +196,15 @@ def validate_telemetry_tool(
     - Иначе, если задан `events_path`, будет прочитан файл (по умолчанию `telemetry_samples.json`).
     - Возвращает ok, count и список errors с индексами/сообщениями.
     """
-    schema = read_json(SCHEMA_PATH) if SCHEMA_PATH.exists() else {}
+    schema = read_json_rel("TELEMETRY_SCHEMA.json")
     # Получаем события
     try:
         if events_json is not None:
             events = json.loads(events_json)
         else:
-            path = Path(events_path) if events_path else BASE / "telemetry_samples.json"
-            events = json.loads(Path(path).read_text(encoding="utf-8"))
+            rel = events_path if events_path else "telemetry_samples.json"
+            txt = read_text_rel(rel)
+            events = json.loads(txt) if txt else []
     except Exception as e:  # pragma: no cover
         return {"ok": False, "errors": [{"index": None, "error": f"input_parse_error: {e}"}], "count": 0}
 
@@ -218,8 +255,9 @@ def validate_tmeas_tool(
         if metrics_json is not None:
             metrics: Dict[str, Any] = json.loads(metrics_json)
         else:
-            path = Path(metrics_path) if metrics_path else BASE / "metrics.json"
-            metrics = json.loads(Path(path).read_text(encoding="utf-8"))
+            rel = metrics_path if metrics_path else "metrics.json"
+            txt = read_text_rel(rel)
+            metrics = json.loads(txt) if txt else {}
     except Exception as e:  # pragma: no cover
         return {"ok": False, "report": f"input_parse_error: {e}"}
 
