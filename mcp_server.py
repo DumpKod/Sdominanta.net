@@ -30,6 +30,10 @@ from mcp.server.fastmcp import FastMCP
 
 BASE = Path(os.getenv("SDOM_BASE") or Path.cwd())
 REMOTE_BASE = os.getenv("SDOM_REMOTE") or "https://raw.githubusercontent.com/DumpKod/Sdominanta.net/main/Sdominanta.net"
+# Параметры GitHub API для удалённого листинга при отсутствии локальной базы
+GITHUB_REPO = os.getenv("SDOM_GH_REPO", "DumpKod/Sdominanta.net")
+GITHUB_REF = os.getenv("SDOM_GH_REF", "main")
+GITHUB_SUBDIR = os.getenv("SDOM_GH_SUBDIR", "Sdominanta.net")
 SEED_PATH = BASE / "CONTEXT_SEED.json"
 SCHEMA_PATH = BASE / "TELEMETRY_SCHEMA.json"
 WALL_DIR = BASE / "wall" / "threads"
@@ -57,6 +61,66 @@ def read_text_rel(rel: str) -> Optional[str]:
         except Exception:
             return None
     return None
+
+
+def _gh_headers() -> Dict[str, str]:
+    headers = {"User-Agent": "sdominanta-mcp/1.0"}
+    token = os.getenv("GITHUB_TOKEN") or os.getenv("SDOM_GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def github_list_dir(rel_dir: str) -> List[Dict[str, Any]]:
+    """Вернуть список объектов из GitHub Contents API для каталога `rel_dir` внутри `GITHUB_SUBDIR`.
+
+    Возвращает пустой список при ошибке/404.
+    """
+    api_url = (
+        f"https://api.github.com/repos/{GITHUB_REPO}/contents/"
+        f"{GITHUB_SUBDIR}/{rel_dir.strip('/')}?ref={GITHUB_REF}"
+    )
+    try:
+        req = Request(api_url, headers=_gh_headers())
+        with urlopen(req) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def github_list_wall_threads() -> List[Dict[str, Any]]:
+    """Листинг потоков стены по GitHub API: [{id, count}]."""
+    result: List[Dict[str, Any]] = []
+    for item in github_list_dir("wall/threads"):
+        if not isinstance(item, dict) or item.get("type") != "dir":
+            continue
+        thread_id = item.get("name")
+        if not thread_id:
+            continue
+        count = 0
+        for file in github_list_dir(f"wall/threads/{thread_id}"):
+            if isinstance(file, dict) and file.get("type") == "file" and str(file.get("name", "")).endswith(".json"):
+                count += 1
+        result.append({"id": thread_id, "count": count})
+    return sorted(result, key=lambda x: x["id"])  # type: ignore
+
+
+def github_iter_wall_json_files() -> List[str]:
+    """Список относительных путей JSON заметок стены по GitHub API."""
+    rels: List[str] = []
+    for item in github_list_dir("wall/threads"):
+        if not isinstance(item, dict) or item.get("type") != "dir":
+            continue
+        thread_id = item.get("name")
+        if not thread_id:
+            continue
+        for file in github_list_dir(f"wall/threads/{thread_id}"):
+            if isinstance(file, dict) and file.get("type") == "file":
+                name = str(file.get("name", ""))
+                if name.endswith(".json"):
+                    rels.append(f"wall/threads/{thread_id}/{name}")
+    return sorted(rels)
 
 
 def read_json_rel(rel: str) -> Dict[str, Any]:
@@ -176,12 +240,14 @@ def get_formulae_tex() -> Dict[str, Any]:
 @mcp.tool()
 def list_wall_threads() -> Dict[str, Any]:
     """Список потоков стены и кол-во заметок в каждом (по `wall/threads`)."""
-    if not WALL_DIR.exists():
-        return {"ok": False, "error": "threads_dir_not_found", "path": str(WALL_DIR)}
-    threads: List[Dict[str, Any]] = []
-    for d in sorted([p for p in WALL_DIR.iterdir() if p.is_dir()]):
-        count = len(list(d.glob("*.json")))
-        threads.append({"id": d.name, "count": count})
+    if WALL_DIR.exists():
+        threads: List[Dict[str, Any]] = []
+        for d in sorted([p for p in WALL_DIR.iterdir() if p.is_dir()]):
+            count = len(list(d.glob("*.json")))
+            threads.append({"id": d.name, "count": count})
+        return {"ok": True, "threads": threads}
+    # Фолбэк: GitHub API
+    threads = github_list_wall_threads()
     return {"ok": True, "threads": threads}
 
 
@@ -315,39 +381,63 @@ def verify_wall_signatures_tool(
     - Опционально можно указать `threads_dir` (путь к каталогу с JSON-заметками).
     - Возвращает количество проверенных файлов и список ошибок.
     """
-    if not SEED_PATH.exists():
+    # seed можно читать из локального файла или через REMOTE_BASE
+    seed = read_json_rel("CONTEXT_SEED.json")
+    if not seed:
         return {"ok": False, "errors": [f"seed_not_found: {SEED_PATH}"]}
-    seed = read_json(SEED_PATH)
     pubmap = {k["key_id"]: k["public_key_b64"] for k in seed.get("public_keys", []) if isinstance(k, dict)}
     if not pubmap:
         return {"ok": False, "errors": ["no_public_keys_in_seed"]}
 
-    root = Path(threads_dir) if threads_dir else WALL_DIR
-    if not root.exists():
-        return {"ok": False, "errors": [f"threads_dir_not_found: {root}"]}
-
-    files = sorted(root.glob("**/*.json"))
     errors: List[str] = []
     verified = 0
-    for note_path in files:
-        try:
-            j = json.loads(note_path.read_text(encoding="utf-8"))
-            sig = j.get("ncp_signature")
-            if not sig:
-                raise RuntimeError("missing ncp_signature")
-            key_id = sig.get("key_id")
-            if key_id not in pubmap:
-                raise RuntimeError(f"unknown key_id: {key_id}")
-            vk = VerifyKey(base64.b64decode(pubmap[key_id]))
-            j2 = dict(j)
-            j2.pop("ncp_signature", None)
+
+    root = Path(threads_dir) if threads_dir else WALL_DIR
+    if root.exists():
+        files = sorted(root.glob("**/*.json"))
+        for note_path in files:
             try:
-                vk.verify(canonical_bytes(j2), base64.b64decode(sig.get("signature")))
-            except BadSignatureError:
-                raise RuntimeError("bad signature")
-            verified += 1
-        except Exception as e:  # pragma: no cover
-            errors.append(f"{note_path}: {e}")
+                j = json.loads(note_path.read_text(encoding="utf-8"))
+                sig = j.get("ncp_signature")
+                if not sig:
+                    raise RuntimeError("missing ncp_signature")
+                key_id = sig.get("key_id")
+                if key_id not in pubmap:
+                    raise RuntimeError(f"unknown key_id: {key_id}")
+                vk = VerifyKey(base64.b64decode(pubmap[key_id]))
+                j2 = dict(j)
+                j2.pop("ncp_signature", None)
+                try:
+                    vk.verify(canonical_bytes(j2), base64.b64decode(sig.get("signature")))
+                except BadSignatureError:
+                    raise RuntimeError("bad signature")
+                verified += 1
+            except Exception as e:  # pragma: no cover
+                errors.append(f"{note_path}: {e}")
+    else:
+        # Фолбэк: читать все заметки через REMOTE_BASE + GitHub listing
+        for rel in github_iter_wall_json_files():
+            try:
+                txt = read_text_rel(rel)
+                if not txt:
+                    raise RuntimeError("fetch_failed")
+                j = json.loads(txt)
+                sig = j.get("ncp_signature")
+                if not sig:
+                    raise RuntimeError("missing ncp_signature")
+                key_id = sig.get("key_id")
+                if key_id not in pubmap:
+                    raise RuntimeError(f"unknown key_id: {key_id}")
+                vk = VerifyKey(base64.b64decode(pubmap[key_id]))
+                j2 = dict(j)
+                j2.pop("ncp_signature", None)
+                try:
+                    vk.verify(canonical_bytes(j2), base64.b64decode(sig.get("signature")))
+                except BadSignatureError:
+                    raise RuntimeError("bad signature")
+                verified += 1
+            except Exception as e:  # pragma: no cover
+                errors.append(f"{rel}: {e}")
 
     return {"ok": len(errors) == 0, "verified": verified, "errors": errors}
 

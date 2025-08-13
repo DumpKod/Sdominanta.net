@@ -1,10 +1,11 @@
 name: Publish to npm (sdominanta-mcp)
 
 on:
-  push:
-    tags:
-      - 'sdominanta-mcp-v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g., 0.1.8). If empty, use package.json"
+        required: false
 
 permissions:
   contents: read
@@ -21,13 +22,12 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
-      - name: Compute version from tag (if available)
+      - name: Compute version
         id: v
         shell: bash
         run: |
-          TAG="${GITHUB_REF_NAME:-}"
-          if [[ -n "$TAG" && "$TAG" == sdominanta-mcp-v* ]]; then
-            echo "version=${TAG#sdominanta-mcp-v}" >> $GITHUB_OUTPUT
+          if [[ -n "${{ inputs.version }}" ]]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
           else
             echo "version=$(node -p \"require('./npm/mcp-wrapper/package.json').version\")" >> $GITHUB_OUTPUT
           fi

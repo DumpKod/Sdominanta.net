@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
 
 // Proxy-stdio wrapper to run python CLI 'sdominanta-mcp'
-// Usage: npx @sdominanta/mcp --base <path>
+// Usage: npx sdominanta-mcp --base <path>
 
 const args = process.argv.slice(2);
 
 const pythonCmd = process.env.SDOMINANTA_PYTHON || 'python';
 
-// Bootstrap: fetch python server from GitHub raw and exec without requiring pip install
+// Prefer local server file if present to avoid network dependency; otherwise use GitHub raw
 const REMOTE_BASE = process.env.SDOM_REMOTE || 'https://raw.githubusercontent.com/DumpKod/Sdominanta.net/main/Sdominanta.net';
+const localServerPath = path.resolve(__dirname, '../../../mcp_server.py');
+
 const bootstrap = `
 import sys,os,urllib.request,subprocess
 
@@ -38,8 +42,20 @@ def fetch(url_base, p):
 def main_boot():
   ensure_deps()
   ns={}
-  url=os.environ.get('SDOM_REMOTE') or '${REMOTE_BASE}'
-  code=fetch(url,'mcp_server.py')
+  local=os.environ.get('SDOM_LOCAL_SERVER')
+  code=None
+  if local and os.path.exists(local):
+    try:
+      code=open(local,'r',encoding='utf-8').read()
+    except Exception:
+      code=None
+  if not code:
+    url=os.environ.get('SDOM_REMOTE') or '${REMOTE_BASE}'
+    try:
+      code=fetch(url,'mcp_server.py')
+    except Exception as e:
+      print('bootstrap fetch failed:', e, file=sys.stderr)
+      raise
   exec(compile(code,'mcp_server.py','exec'),ns,ns)
   ns['main']()
 
@@ -47,9 +63,14 @@ if __name__=='__main__':
   main_boot()
 `;
 
+const env = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
+if (fs.existsSync(localServerPath)) {
+  env.SDOM_LOCAL_SERVER = localServerPath;
+}
+
 const child = spawn(pythonCmd, ['-c', bootstrap, ...args], {
   stdio: 'inherit',
-  env: process.env,
+  env,
 });
 
 child.on('exit', (code, signal) => {

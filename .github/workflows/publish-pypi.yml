@@ -1,0 +1,56 @@
+name: Publish to PyPI (sdominanta-mcp)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g., 0.1.8). If empty, use current pyproject.toml"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bump version (if provided)
+        if: inputs.version != ''
+        shell: bash
+        working-directory: Sdominanta.net
+        run: |
+          ver="${{ inputs.version }}"
+          python - <<PY
+import re, pathlib, sys
+p = pathlib.Path('pyproject.toml')
+s = p.read_text(encoding='utf-8')
+s2 = re.sub(r"(?m)^(version\s*=\s*")([^"]+)(")$", lambda m: m.group(1)+"${{ inputs.version }}"+m.group(3), s)
+if s == s2:
+    # Fallback for inline table formats; be tolerant
+    s2 = re.sub(r"(?m)^(version\s*=\s*)([^\n]+)$", r"\\g<1>\"${{ inputs.version }}\"", s)
+p.write_text(s2, encoding='utf-8')
+print('Set version to', '${{ inputs.version }}')
+PY
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+      - name: Build sdist/wheel
+        working-directory: Sdominanta.net
+        run: |
+          python -m build
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          python -m twine upload --non-interactive Sdominanta.net/dist/*
+
+

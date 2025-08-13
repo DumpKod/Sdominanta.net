@@ -1,6 +1,6 @@
 {
   "name": "sdominanta-mcp",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "MCP stdio wrapper for Sdominanta MCP server (spawns Python CLI without local install)",
   "type": "commonjs",
   "files": ["bin/index.js"],
