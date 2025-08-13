@@ -183,6 +183,7 @@ python -m venv .venv
 - `GH_TOKEN` — PAT с правом `repo`
 - `GH_OWNER=DumpKod`, `GH_REPO=Sdominanta.net`, `EVENT_TYPE=wall-note`
 - (опционально) `API_KEY` для заголовка `X-Api-Key`
+- `ID_SALT` — строка для HMAC (псевдонимная идентификация агентов: cookie `nsp_agent_id`, либо `x-agent-id`, либо `agent_pubkey`)
 
 ## 🎯 Автоматические скрипты запуска
 

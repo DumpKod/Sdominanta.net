@@ -51,6 +51,12 @@ export default {
       return json({ error: 'server_not_configured' }, 500);
     }
 
+    // Identity (pseudonymous by default)
+    const { nickname, newlyAssigned, cookieHeader } = await computeAgentIdentity(request, env, payload);
+    if (!payload.agent) {
+      payload.agent = { nickname };
+    }
+
     const ghResp = await fetch(`https://api.github.com/repos/${owner}/${repo}/dispatches`, {
       method: 'POST',
       headers: {
@@ -67,9 +73,11 @@ export default {
       return json({ ok: false, error: 'github_dispatch_failed', status: ghResp.status, body: text }, 502);
     }
 
-    return new Response(JSON.stringify({ ok: true }), {
+    const headers = { ...corsHeaders(), 'content-type': 'application/json' };
+    if (cookieHeader) headers['set-cookie'] = cookieHeader;
+    return new Response(JSON.stringify({ ok: true, agent: nickname, new: newlyAssigned === true }), {
       status: 202,
-      headers: { ...corsHeaders(), 'content-type': 'application/json' }
+      headers
     });
   }
 };
@@ -127,6 +135,55 @@ function validatePayload(p) {
     }
   }
   return { ok: errors.length === 0, errors };
+}
+
+async function computeAgentIdentity(request, env, payload) {
+  // Priority: explicit header, payload.pubkey, cookie, salted fingerprint, random
+  const hdrId = request.headers.get('x-agent-id');
+  if (hdrId && /^[a-zA-Z0-9._-]{6,128}$/.test(hdrId)) {
+    return { nickname: `agent-${hdrId.substring(0,12)}`, newlyAssigned: false };
+  }
+  if (payload && typeof payload.agent_pubkey === 'string' && payload.agent_pubkey.length > 8) {
+    const id = await sha256Hex(payload.agent_pubkey);
+    return { nickname: `agent-${id.substring(0,12)}`, newlyAssigned: false };
+  }
+  const cookie = parseCookie(request.headers.get('cookie') || '');
+  if (cookie.nsp_agent_id) {
+    return { nickname: `agent-${cookie.nsp_agent_id.substring(0,12)}`, newlyAssigned: false };
+  }
+  // Salted fingerprint (best-effort)
+  const ip = request.headers.get('cf-connecting-ip') || '';
+  const ua = request.headers.get('user-agent') || '';
+  let id;
+  if (env.ID_SALT) {
+    id = await hmacSha256Hex(env.ID_SALT, `${ip}|${ua}`);
+  } else {
+    id = crypto.randomUUID().replace(/-/g, '');
+  }
+  const short = id.substring(0,16);
+  const cookieHeader = `nsp_agent_id=${short}; Max-Age=31536000; Path=/; SameSite=Lax`;
+  return { nickname: `agent-${short.substring(0,12)}`, newlyAssigned: true, cookieHeader };
+}
+
+function parseCookie(s) {
+  const out = {};
+  s.split(';').forEach(p=>{
+    const i=p.indexOf('=');
+    if (i>0) out[p.slice(0,i).trim()] = decodeURIComponent(p.slice(i+1).trim());
+  });
+  return out;
+}
+
+async function sha256Hex(str) {
+  const d = new TextEncoder().encode(str);
+  const h = await crypto.subtle.digest('SHA-256', d);
+  return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+async function hmacSha256Hex(key, msg) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(msg));
+  return [...new Uint8Array(sig)].map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
 

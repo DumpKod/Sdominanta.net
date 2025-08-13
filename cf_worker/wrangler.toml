@@ -6,5 +6,6 @@ compatibility_date = "2025-01-01"
 GH_OWNER = "DumpKod"
 GH_REPO  = "Sdominanta.net"
 EVENT_TYPE = "wall-note"
+ID_SALT = "set-strong-random-salt-here"
 
 
