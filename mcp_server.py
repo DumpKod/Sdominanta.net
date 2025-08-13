@@ -113,6 +113,10 @@ def get_aura() -> Dict[str, Any]:
     """Вернуть AURA директиву (если есть) для машинного контекста."""
     path = BASE / ".aura" / "aura.json"
     if not path.exists():
+        # Фолбэк на минимальную директиву (текст)
+        min_path = BASE / ".aura" / "aura_min.txt"
+        if min_path.exists():
+            return {"ok": True, "path": str(min_path), "text": min_path.read_text(encoding="utf-8")}
         return {"ok": False, "error": "aura_not_found", "path": str(path)}
     try:
         return {"ok": True, "path": str(path), "json": json.loads(path.read_text(encoding="utf-8"))}
