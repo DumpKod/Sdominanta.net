@@ -1,49 +1,10 @@
-name: Publish npm wrapper
-
-on:
-  push:
-    paths:
-      - 'Sdominanta.net/npm/mcp-wrapper/**'
-      - 'Sdominanta.net/pyproject.toml'
-      - 'Sdominanta.net/mcp_server.py'
-      - '.github/workflows/publish-npm.yml'
-  workflow_dispatch:
-
-jobs:
-  publish:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-      - name: Bump wrapper version (sync with pyproject)
-        run: |
-          PY_VERSION=$(python3 - <<'PY'
-          import tomllib,sys
-          with open('Sdominanta.net/pyproject.toml','rb') as f:
-              print(tomllib.load(f)['project']['version'])
-          PY)
-          cd Sdominanta.net/npm/mcp-wrapper
-          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version=process.env.PY_VERSION;fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
-      - name: Publish to npm
-        run: |
-          cd Sdominanta.net/npm/mcp-wrapper
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 name: Publish to npm (sdominanta-mcp)
 
 on:
   push:
     tags:
       - 'sdominanta-mcp-v*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -60,21 +21,17 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
-      - name: Compute version from tag
+      - name: Compute version from tag (if available)
         id: v
+        shell: bash
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          # Expected: sdominanta-mcp-vX.Y.Z
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          VER="${TAG#sdominanta-mcp-v}"
-          echo "version=$VER" >> $GITHUB_OUTPUT
-      - name: Read package version
-        id: pkg
-        working-directory: npm/mcp-wrapper
-        run: |
-          echo "current=$(node -p -e \"require('./package.json').version\")" >> $GITHUB_OUTPUT
+          TAG="${GITHUB_REF_NAME:-}"
+          if [[ -n "$TAG" && "$TAG" == sdominanta-mcp-v* ]]; then
+            echo "version=${TAG#sdominanta-mcp-v}" >> $GITHUB_OUTPUT
+          else
+            echo "version=$(node -p \"require('./npm/mcp-wrapper/package.json').version\")" >> $GITHUB_OUTPUT
+          fi
       - name: Set npm package version
-        if: steps.pkg.outputs.current != steps.v.outputs.version
         working-directory: npm/mcp-wrapper
         run: |
           npm version "${{ steps.v.outputs.version }}" --no-git-tag-version
