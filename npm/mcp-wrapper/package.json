@@ -1,6 +1,6 @@
 {
   "name": "sdominanta-mcp",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "MCP stdio wrapper for Sdominanta MCP server (spawns Python CLI via pipx)",
   "type": "commonjs",
   "files": ["bin/index.js"],
