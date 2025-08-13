@@ -32,8 +32,7 @@ jobs:
           python -m pip install build twine
       - name: Build sdist/wheel
         run: |
-          cd Sdominanta.net
-          python -m build
+          python -m build Sdominanta.net
       - name: Publish to PyPI
         env:
           TWINE_USERNAME: __token__
