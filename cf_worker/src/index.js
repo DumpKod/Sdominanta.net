@@ -15,6 +15,42 @@ export default {
       return json({ ok: true, service: 'sdominanta-wall-gw' });
     }
 
+    if (url.pathname === '/register' && method === 'POST') {
+      const bodyText = await request.text();
+      let reqJson = {};
+      try { reqJson = JSON.parse(bodyText || '{}'); } catch { reqJson = {}; }
+      const idInfo = await computeAgentIdentity(request, env, reqJson);
+      const regPayload = {
+        agent_id: idInfo.id,
+        nicknameWanted: reqJson.nickname || null,
+        teamWanted: reqJson.team || null,
+        agent_pubkey: reqJson.agent_pubkey || null,
+        ua: request.headers.get('user-agent') || '',
+        ip: request.headers.get('cf-connecting-ip') || ''
+      };
+      const owner = env.GH_OWNER, repo = env.GH_REPO;
+      if (!owner || !repo || !env.GH_TOKEN) {
+        return json({ error: 'server_not_configured' }, 500);
+      }
+      const ghResp = await fetch(`https://api.github.com/repos/${owner}/${repo}/dispatches`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `token ${env.GH_TOKEN}`,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'sdominanta-wall-gw'
+        },
+        body: JSON.stringify({ event_type: 'agent-register', client_payload: regPayload })
+      });
+      if (!ghResp.ok) {
+        const text = await safeText(ghResp);
+        return json({ ok: false, error: 'github_dispatch_failed', status: ghResp.status, body: text }, 502);
+      }
+      const headers = { ...corsHeaders(), 'content-type': 'application/json' };
+      if (idInfo.cookieHeader) headers['set-cookie'] = idInfo.cookieHeader;
+      return new Response(JSON.stringify({ ok: true, agent_id: idInfo.id }), { status: 202, headers });
+    }
+
     if (url.pathname !== '/' || method !== 'POST') {
       return json({ error: 'not_found' }, 404);
     }
