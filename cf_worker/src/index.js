@@ -94,7 +94,7 @@ export default {
       return new Response(JSON.stringify({ ok: true, agent_id: idInfo.id }), { status: 202, headers });
     }
 
-  if (url.pathname !== '/' && url.pathname !== '/send' && url.pathname !== '/messages') {
+  if (url.pathname !== '/' && url.pathname !== '/send' && url.pathname !== '/messages' && url.pathname !== '/messages/has' && url.pathname !== '/rv/in' && url.pathname !== '/rv/has' && url.pathname !== '/rv/take') {
       return json({ error: 'not_found' }, 404);
     }
 
@@ -113,24 +113,33 @@ export default {
     }
 
     // Optional shared key
-    const providedKey = request.headers.get('x-api-key');
+    const providedKey = request.headers.get('x-api-key') || request.headers.get('x-k');
     if (env.API_KEY && providedKey !== env.API_KEY) {
       return json({ error: 'unauthorized' }, 401);
     }
 
   // Messaging endpoints (simple E2EE mailboxes)
-  if (url.pathname === '/send' && method === 'POST') {
-    const providedKey = request.headers.get('x-api-key');
-    if (env.API_KEY && providedKey !== env.API_KEY) {
+  if ((url.pathname === '/send' || url.pathname === '/rv/in') && method === 'POST') {
+    const providedKey2 = request.headers.get('x-api-key') || request.headers.get('x-k');
+    if (env.API_KEY && providedKey2 !== env.API_KEY) {
       return json({ error: 'unauthorized' }, 401);
     }
     const { to, envelope, ttl } = payload || {};
     if (!to || !envelope) {
       return json({ ok: false, error: 'missing to|envelope' }, 400);
     }
+    // Idempotency key (optional)
+    const idem = request.headers.get('x-idempotency-key') || request.headers.get('x-i');
+    if (idem) {
+      const seen = await env.KV.get(`seen:${idem}`);
+      if (seen) {
+        return json({ ok: true, duplicate: true });
+      }
+      await env.KV.put(`seen:${idem}`, '1', { expirationTtl: 1800 });
+    }
     const key = `mbox:${to}:${crypto.randomUUID()}`;
     await env.KV.put(key, typeof envelope === 'string' ? envelope : JSON.stringify(envelope), { expirationTtl: Math.max(60, Math.min(86400, Number(ttl || 3600))) });
-    return json({ ok: true });
+    return json({ ok: true, key });
   }
   if (url.pathname === '/messages' && method === 'POST') {
     const { agent_id } = payload || {};
@@ -143,6 +152,22 @@ export default {
       await env.KV.delete(k.name);
     }
     return json({ ok: true, messages: out });
+  }
+  if ((url.pathname === '/messages/has' || url.pathname === '/rv/has') && method === 'POST') {
+    const { agent_id } = payload || {};
+    if (!agent_id) return json({ ok: false, error: 'missing agent_id' }, 400);
+    const list = await env.KV.list({ prefix: `mbox:${agent_id}:` });
+    return json({ ok: true, has: list.keys.length > 0, count: list.keys.length });
+  }
+  if (url.pathname === '/rv/take' && method === 'POST') {
+    const { agent_id } = payload || {};
+    if (!agent_id) return json({ ok: false, error: 'missing agent_id' }, 400);
+    const list = await env.KV.list({ prefix: `mbox:${agent_id}:` });
+    if (!list.keys.length) return json({ ok: true, empty: true });
+    const first = list.keys.sort((a,b)=> a.name.localeCompare(b.name))[0];
+    const v = await env.KV.get(first.name);
+    await env.KV.delete(first.name);
+    return json({ ok: true, key: first.name, envelope: v });
   }
 
   const v = validatePayload(payload);

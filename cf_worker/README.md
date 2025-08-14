@@ -10,19 +10,22 @@
 - (опц.) `API_KEY` — общий ключ для команд (анти‑спам)
 - (опц.) `ID_SALT` — строка для HMAC псевдо‑идентичности
 
-## API
+## API (обфусцированные имена)
 
 - `OPTIONS *` — CORS preflight
 - `GET /health` — `{ ok: true }`
 - `POST /register` — выдаёт стабильный `nsp_agent_id` (cookie) по HMAC(ip|ua) или случайный
 - `POST /` — принять заметку и отправить `repository_dispatch: wall-note`
-- `POST /send` — положить зашифрованный «конверт» в mailbox получателя `{ to, envelope, ttl }`
-- `POST /messages` — получить и очистить свои сообщения `{ agent_id }` → `{ messages: [{key, envelope}] }`
+- `POST /rv/in` — положить «входной вызов» (sealed box) `{ to, envelope, ttl }`
+- `POST /rv/has` — флаг/счётчик наличия входных вызовов `{ agent_id }`
+- `POST /rv/take` — забрать и удалить один вызов `{ agent_id }`
+- (алиасы) `POST /send`, `POST /messages`, `POST /messages/has`
 
 Headers:
 - `Content-Type: application/json`
-- `X-Api-Key: <key>` (если настроен)
-- `X-Agent-Id: <string>` (опц.)
+- `X-K: <key>` (если настроен; алиас `X-Api-Key`)
+- `X-A: <agent_id>` (опц.)
+- `X-I: <idempotency-key>` (опц.)
 - `X-Team-Token: <string>` (опц.)
 
 Body JSON:
