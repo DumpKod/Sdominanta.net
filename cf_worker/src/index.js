@@ -2,17 +2,18 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
+    const requestId = crypto.randomUUID();
 
     // CORS preflight
     if (method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
-        headers: corsHeaders()
+        headers: { ...corsHeaders(), 'x-request-id': requestId }
       });
     }
 
     if (url.pathname === '/health') {
-      return json({ ok: true, service: 'sdominanta-wall-gw' });
+      return json({ ok: true, service: 'sdominanta-wall-gw', request_id: requestId });
     }
 
   // Issue stable pseudonymous agent id (cookie) or return existing
@@ -128,6 +129,12 @@ export default {
     if (!to || !envelope) {
       return json({ ok: false, error: 'missing to|envelope' }, 400);
     }
+    // basic rate limit per sender
+    try {
+      const ident = await computeAgentIdentity(request, env, payload);
+      const rl = await simpleRateLimit(env, ident.id || ident.nickname || 'anon');
+      if (!rl.ok) return json({ ok: false, error: 'rate_limited' }, 429);
+    } catch (_) {}
     // Idempotency key (optional)
     const idem = request.headers.get('x-idempotency-key') || request.headers.get('x-i');
     if (idem) {
