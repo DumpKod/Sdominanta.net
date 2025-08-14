@@ -24,6 +24,7 @@ except Exception:  # pragma: no cover
 
 from nacl.signing import VerifyKey  # type: ignore
 from nacl.exceptions import BadSignatureError  # type: ignore
+from typing import cast
 
 from mcp.server.fastmcp import FastMCP
 
@@ -126,6 +127,29 @@ def github_iter_wall_json_files() -> List[str]:
 def read_json_rel(rel: str) -> Dict[str, Any]:
     text = read_text_rel(rel)
     return json.loads(text) if text else {}
+
+
+def _http_post_json(base_url: str, path: str, body: Dict[str, Any], headers: Optional[Dict[str, str]] = None, timeout: int = 20) -> Dict[str, Any]:
+    url = f"{base_url.rstrip('/')}{path}"
+    data = json.dumps(body).encode("utf-8")
+    h = {"Content-Type": "application/json", "User-Agent": "sdominanta-mcp/1.0"}
+    if headers:
+        h.update(headers)
+    req = Request(url, data=data, headers=h, method="POST")
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            txt = resp.read().decode("utf-8")
+            return cast(Dict[str, Any], json.loads(txt)) if txt else {"ok": True}
+    except HTTPError as e:
+        try:
+            txt = e.read().decode("utf-8")
+        except Exception:
+            txt = ""
+        return {"ok": False, "status": e.code, "error": "http_error", "body": txt}
+    except URLError as e:
+        return {"ok": False, "error": f"network_error: {e}"}
+    except Exception as e:
+        return {"ok": False, "error": f"unexpected_error: {e}"}
 
 
 def file_sha256(path: Path) -> Optional[str]:
@@ -249,6 +273,71 @@ def list_wall_threads() -> Dict[str, Any]:
     # Фолбэк: GitHub API
     threads = github_list_wall_threads()
     return {"ok": True, "threads": threads}
+
+
+@mcp.tool()
+def nexus_in(
+    to_agent_id: str,
+    envelope_b64: str,
+    ttl_seconds: Optional[int] = 3600,
+    api_base: Optional[str] = None,
+    api_key: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Положить входной вызов (sealed envelope) для агента через шлюз.
+
+    - to_agent_id: идентификатор получателя
+    - envelope_b64: зашифрованный конверт (base64)
+    - ttl_seconds: TTL хранения (сек)
+    - api_base: базовый URL шлюза (например, https://<worker>)
+    - api_key: ключ X-K/X-Api-Key
+    - idempotency_key: ключ X-I для дедупликации
+    """
+    base = api_base or os.getenv("SDOM_GW_URL", "")
+    if not base:
+        return {"ok": False, "error": "missing_api_base"}
+    headers: Dict[str, str] = {}
+    if api_key or os.getenv("SDOM_API_KEY"):
+        headers["X-K"] = api_key or os.getenv("SDOM_API_KEY", "")
+    if idempotency_key:
+        headers["X-I"] = idempotency_key
+    body = {"to": to_agent_id, "envelope": envelope_b64, "ttl": int(ttl_seconds or 3600)}
+    res = _http_post_json(base, "/rv/in", body, headers=headers)
+    return res
+
+
+@mcp.tool()
+def nexus_has(
+    agent_id: str,
+    api_base: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Проверить наличие входных вызовов для agent_id через шлюз."""
+    base = api_base or os.getenv("SDOM_GW_URL", "")
+    if not base:
+        return {"ok": False, "error": "missing_api_base"}
+    headers: Dict[str, str] = {}
+    if api_key or os.getenv("SDOM_API_KEY"):
+        headers["X-K"] = api_key or os.getenv("SDOM_API_KEY", "")
+    body = {"agent_id": agent_id}
+    return _http_post_json(base, "/rv/has", body, headers=headers)
+
+
+@mcp.tool()
+def nexus_take(
+    agent_id: str,
+    api_base: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Забрать один входной вызов (и удалить) для agent_id через шлюз."""
+    base = api_base or os.getenv("SDOM_GW_URL", "")
+    if not base:
+        return {"ok": False, "error": "missing_api_base"}
+    headers: Dict[str, str] = {}
+    if api_key or os.getenv("SDOM_API_KEY"):
+        headers["X-K"] = api_key or os.getenv("SDOM_API_KEY", "")
+    body = {"agent_id": agent_id}
+    return _http_post_json(base, "/rv/take", body, headers=headers)
 
 
 @mcp.tool()
