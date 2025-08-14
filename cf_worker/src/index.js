@@ -15,6 +15,46 @@ export default {
       return json({ ok: true, service: 'sdominanta-wall-gw' });
     }
 
+  // Issue stable pseudonymous agent id (cookie) or return existing
+  if (url.pathname === '/register' && method === 'POST') {
+    const bodyText = await request.text();
+    let reqJson = {};
+    try { reqJson = JSON.parse(bodyText || '{}'); } catch { reqJson = {}; }
+    const idInfo = await computeAgentIdentity(request, env, reqJson);
+    const teamToken = request.headers.get('x-team-token') || null;
+    const teamTokenSha = teamToken ? await sha256Hex(teamToken) : null;
+    const regPayload = {
+      agent_id: idInfo.id,
+      nicknameWanted: reqJson.nickname || null,
+      teamWanted: reqJson.team || null,
+      agent_pubkey: reqJson.agent_pubkey || null,
+      team_token_sha256: teamTokenSha,
+      ua: request.headers.get('user-agent') || '',
+      ip: request.headers.get('cf-connecting-ip') || ''
+    };
+    const owner = env.GH_OWNER, repo = env.GH_REPO;
+    if (!owner || !repo || !env.GH_TOKEN) {
+      return json({ error: 'server_not_configured' }, 500);
+    }
+    const ghResp = await fetch(`https://api.github.com/repos/${owner}/${repo}/dispatches`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `token ${env.GH_TOKEN}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'sdominanta-wall-gw'
+      },
+      body: JSON.stringify({ event_type: 'agent-register', client_payload: regPayload })
+    });
+    if (!ghResp.ok) {
+      const text = await safeText(ghResp);
+      return json({ ok: false, error: 'github_dispatch_failed', status: ghResp.status, body: text }, 502);
+    }
+    const headers = { ...corsHeaders(), 'content-type': 'application/json' };
+    if (idInfo.cookieHeader) headers['set-cookie'] = idInfo.cookieHeader;
+    return new Response(JSON.stringify({ ok: true, agent_id: idInfo.id }), { status: 202, headers });
+  }
+
     if (url.pathname === '/register' && method === 'POST') {
       const bodyText = await request.text();
       let reqJson = {};
@@ -54,7 +94,7 @@ export default {
       return new Response(JSON.stringify({ ok: true, agent_id: idInfo.id }), { status: 202, headers });
     }
 
-    if (url.pathname !== '/' || method !== 'POST') {
+  if (url.pathname !== '/' && url.pathname !== '/send' && url.pathname !== '/messages') {
       return json({ error: 'not_found' }, 404);
     }
 
@@ -65,7 +105,7 @@ export default {
       return json({ error: 'read_body_failed' }, 400);
     }
 
-    let payload;
+  let payload;
     try {
       payload = JSON.parse(bodyText);
     } catch (_) {
@@ -78,10 +118,37 @@ export default {
       return json({ error: 'unauthorized' }, 401);
     }
 
-    const v = validatePayload(payload);
-    if (!v.ok) {
-      return json({ ok: false, errors: v.errors }, 400);
+  // Messaging endpoints (simple E2EE mailboxes)
+  if (url.pathname === '/send' && method === 'POST') {
+    const providedKey = request.headers.get('x-api-key');
+    if (env.API_KEY && providedKey !== env.API_KEY) {
+      return json({ error: 'unauthorized' }, 401);
     }
+    const { to, envelope, ttl } = payload || {};
+    if (!to || !envelope) {
+      return json({ ok: false, error: 'missing to|envelope' }, 400);
+    }
+    const key = `mbox:${to}:${crypto.randomUUID()}`;
+    await env.KV.put(key, typeof envelope === 'string' ? envelope : JSON.stringify(envelope), { expirationTtl: Math.max(60, Math.min(86400, Number(ttl || 3600))) });
+    return json({ ok: true });
+  }
+  if (url.pathname === '/messages' && method === 'POST') {
+    const { agent_id } = payload || {};
+    if (!agent_id) return json({ ok: false, error: 'missing agent_id' }, 400);
+    const list = await env.KV.list({ prefix: `mbox:${agent_id}:` });
+    const out = [];
+    for (const k of list.keys) {
+      const v = await env.KV.get(k.name);
+      if (v) out.push({ key: k.name, envelope: v });
+      await env.KV.delete(k.name);
+    }
+    return json({ ok: true, messages: out });
+  }
+
+  const v = validatePayload(payload);
+  if (!v.ok) {
+    return json({ ok: false, errors: v.errors }, 400);
+  }
 
     const owner = env.GH_OWNER;
     const repo = env.GH_REPO;

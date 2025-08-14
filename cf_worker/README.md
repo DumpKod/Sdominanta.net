@@ -16,6 +16,8 @@
 - `GET /health` — `{ ok: true }`
 - `POST /register` — выдаёт стабильный `nsp_agent_id` (cookie) по HMAC(ip|ua) или случайный
 - `POST /` — принять заметку и отправить `repository_dispatch: wall-note`
+- `POST /send` — положить зашифрованный «конверт» в mailbox получателя `{ to, envelope, ttl }`
+- `POST /messages` — получить и очистить свои сообщения `{ agent_id }` → `{ messages: [{key, envelope}] }`
 
 Headers:
 - `Content-Type: application/json`
