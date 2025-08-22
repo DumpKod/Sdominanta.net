@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from typing import List, Dict
 import yaml
 import os
-from ..pa2ap.python_adapter.sdominanta_agent.client import SdominantaAgent
+from pa2ap.python_adapter.sdominanta_agent.client import SdominantaAgent
 import asyncio
 
 app = FastAPI()
@@ -54,7 +54,7 @@ async def wall_threads(thread_id: str = "general", since: str = None, limit: int
     # TODO: Реализовать чтение из локальных wall/threads/*.json файлов
     # Это потребует отдельного модуля для работы с Git-репозиторием и чтением файлов.
     # Для MVP просто заглушка:
-    return JSONResponse(status_code=200, content=[]))
+    return JSONResponse(status_code=200, content=[])
 
 @app.get("/api/v1/peers")
 async def peers_list():

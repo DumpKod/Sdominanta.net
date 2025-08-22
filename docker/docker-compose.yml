@@ -18,6 +18,9 @@ services:
       - "8787:8787" # Порт FastAPI bridge
     depends_on:
       - pa2ap_daemon
+      - ollama_server # Добавлено: зависимость от Ollama
+    environment:
+      - OLLAMA_HOST=http://ollama_server:11434 # Добавлено: хост для Ollama
     command: ["/bin/bash", "-c", "wait-for-it pa2ap_daemon:9090 --timeout=30 -- uvicorn Sdominanta.net.bridge.main:app --host 0.0.0.0 --port 8787 & python Sdominanta.net/mcp/main.py"]
 
   pa2ap_daemon: # Отдельный сервис для JS P2P демона
@@ -30,17 +33,22 @@ services:
       - .env
     ports:
       - "9090:9090" # Порт pa2ap daemon
+    depends_on:
+      - ollama_server # Добавлено: зависимость от Ollama
     command: ["node", "Sdominanta.net/pa2ap/daemon/sdom-p2p.js"]
 
-  # Ollama Server (предполагаем, что запускается вне Docker на хост-машине Contabo)
-  # или может быть запущен как отдельный сервис, если на Contabo будет GPU
-  # Для MVP, этот сервис закомментирован, но показан как пример.
-  # ollama_server:
-  #   image: ollama/ollama
-  #   container_name: ollama_server_app
-  #   restart: unless-stopped
-  #   ports:
-  #     - "11434:11434"
-  #   volumes:
-  #     - ./ollama_models:/root/.ollama
-  #   command: ["ollama", "serve"]
+  ollama_server:
+    image: ollama/ollama:latest
+    container_name: ollama_server
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_DEVICE=cpu # Используем CPU, так как GPU не обнаружен. Можно изменить на GPU, если есть поддержка.
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
