@@ -1,0 +1,5 @@
+mode:
+  p2p_enabled: true
+network:
+  seed_file: "../../seed/bootstrap.json"
+  listen_ws: "127.0.0.1:8723"

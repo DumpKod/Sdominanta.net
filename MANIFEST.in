@@ -1,0 +1,11 @@
+include Sdominanta.net/.env.template
+include Sdominanta.net/bridge/config.yaml
+include Sdominanta.net/seed/bootstrap.json
+include Sdominanta.net/seed/topics.json
+include Sdominanta.net/wall/WALL_NOTE.schema.json
+include Sdominanta.net/wall/WALL_RULES.md
+recursive-include Sdominanta.net/wall/threads *
+recursive-include Sdominanta.net/docs *
+recursive-include Sdominanta.net/pa2ap/daemon * 
+recursive-include Sdominanta.net/examples * 
+recursive-include Sdominanta.net/docker *

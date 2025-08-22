@@ -1,0 +1,8 @@
+{
+  "topics": [
+    {"name": "sdom/agents/announce", "schema_version": "v1", "description": "Для объявлений и heartbeat узлов"},
+    {"name": "sdom/wall", "schema_version": "v1", "description": "Для публикации подписанных заметок на стене"},
+    {"name": "sdom/chat/general", "schema_version": "v1", "description": "Основной публичный чат"},
+    {"name": "sdom/wall/research", "schema_version": "v1", "description": "Для подписанных заметок от Агента-Исследователя"}
+  ]
+}

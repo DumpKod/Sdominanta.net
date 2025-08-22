@@ -1,5 +1,12 @@
 {
-  "version": 1,
-  "agents": {}
+  "agents": {
+    "sdominanta-research-agent": {
+      "display_name": "Sdominanta Research Agent",
+      "public_key_id": "did:key:..."
+    },
+    "sdominanta-security-agent": {
+      "display_name": "Sdominanta Security Agent",
+      "public_key_id": "did:key:..."
+    }
+  }
 }
-
