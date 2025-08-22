@@ -17,6 +17,9 @@ RUN adduser --system --no-create-home sdominanta
 # Копирование файлов проекта
 COPY --chown=sdominanta:nogroup . /app
 
+# Устанавливаем рабочую директорию
+WORKDIR /app
+
 # Установка Python зависимостей (от имени root)
 RUN pip install --no-cache-dir -r requirements.txt
 
