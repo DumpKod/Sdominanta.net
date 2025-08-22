@@ -13,19 +13,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Создание пользователя sdominanta
 RUN adduser --system --no-create-home sdominanta
-USER sdominanta
-WORKDIR /app
 
 # Копирование файлов проекта
 COPY --chown=sdominanta:nogroup . /app
 
-# Установка Python зависимостей
+# Установка Python зависимостей (от имени root)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Установка Node.js зависимостей для pa2ap/daemon
+# Установка Node.js зависимостей для pa2ap/daemon (от имени root)
 WORKDIR /app/pa2ap/daemon
 RUN npm install
 WORKDIR /app
+
+# Теперь переключаемся на непривилегированного пользователя
+USER sdominanta
 
 # Создание директории для SSH-ключей агентов (если они нужны)
 RUN mkdir -p /app/.ssh && chmod 700 /app/.ssh
