@@ -17,7 +17,7 @@ USER sdominanta
 WORKDIR /app
 
 # Копирование файлов проекта
-COPY --chown=sdominanta:sdominanta . /app
+COPY --chown=sdominanta:nogroup . /app
 
 # Установка Python зависимостей
 RUN pip install --no-cache-dir -r requirements.txt
