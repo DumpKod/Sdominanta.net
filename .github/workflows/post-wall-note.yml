@@ -1,0 +1,77 @@
+name: Post WALL note (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      thread:
+        description: "Thread ID (e.g. core-theory)"
+        required: true
+      claim:
+        description: "Short claim (<=400 chars)"
+        required: true
+      formulae:
+        description: "Comma-separated F-refs (e.g. F0.8,F2)"
+        required: true
+      evidence_url:
+        description: "Evidence URL"
+        required: true
+      evidence_sha256:
+        description: "Evidence SHA256"
+        required: true
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        working-directory: Sdominanta.net
+        run: |
+          python -m pip install -r requirements.txt
+      - name: Create note JSON
+        working-directory: Sdominanta.net
+        run: |
+          FORMULAE=$(python - <<'PY'
+          import os,json
+          fs=[f.strip() for f in os.environ['FREFS'].split(',') if f.strip()]
+          print(json.dumps(fs))
+          PY)
+          cat > note_tmp.json << JSON
+          {
+            "claim": "${{ github.event.inputs.claim }}",
+            "formulae": $FORMULAE,
+            "evidence": [{"type":"other","url":"${{ github.event.inputs.evidence_url }}","sha256":"${{ github.event.inputs.evidence_sha256 }}"}]
+          }
+          JSON
+        env:
+          FREFS: ${{ github.event.inputs.formulae }}
+      - name: Sign and write note
+        working-directory: Sdominanta.net
+        env:
+          NCP_PRIVATE_KEY_B64: ${{ secrets.NCP_PRIVATE_KEY_B64 }}
+        run: |
+          python scripts/create_and_sign_note.py \
+            --seedfile CONTEXT_SEED.json \
+            --thread "${{ github.event.inputs.thread }}" \
+            --note-file note_tmp.json \
+            --outdir wall/threads \
+            --agent "${{ secrets.NCP_BOT_NAME || 'ncp-bot' }}" \
+            --team logic \
+            --key-id ncp-v1-ed25519 | tee path.txt
+      - name: Validate and verify
+        working-directory: Sdominanta.net
+        run: |
+          python scripts/validate_wall_notes.py --base .
+          python scripts/verify_wall_signatures.py
+      - name: Commit and push
+        working-directory: Sdominanta.net
+        run: |
+          git config user.name "ncp-bot"
+          git config user.email "ncp-bot@users.noreply.github.com"
+          git add wall/threads
+          git commit -m "WALL: add note to ${{ github.event.inputs.thread }}"
+          git push
+

@@ -1,0 +1,139 @@
+name: Wall note (repository_dispatch)
+
+on:
+  repository_dispatch:
+    types: [wall-note]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyNaCl rfc8785 jsonschema requests
+
+      - name: Compute truth spec SHA256
+        id: truth
+        run: |
+          python - << 'PY'
+import hashlib, json
+from pathlib import Path
+paths = json.loads(Path('truth_spec.json').read_text(encoding='utf-8'))['components']
+def sha(p):
+    h=hashlib.sha256();
+    with open(p,'rb') as f:
+        while True:
+            b=f.read(65536)
+            if not b: break
+            h.update(b)
+    return h.hexdigest()
+items = { p: sha(p) for p in paths }
+txt = json.dumps(items, ensure_ascii=False)
+Path('truth_sha.json').write_text(txt, encoding='utf-8')
+print('::set-output name=truth_sha::'+txt)
+PY
+
+      - name: Prepare payload
+        run: |
+          echo '${{ toJson(github.event.client_payload) }}' > payload.json
+          python - << 'PY'
+import json
+from pathlib import Path
+
+payload = json.loads(Path('payload.json').read_text(encoding='utf-8') or '{}')
+note = {
+  'claim': payload.get('claim', ''),
+  'formulae': payload.get('formulae', []),
+  'evidence': payload.get('evidence', []),
+}
+# Опционально пробрасываем agent, если пришёл от клиента
+if isinstance(payload.get('agent'), dict):
+    note['agent'] = {'nickname': str(payload['agent'].get('nickname', 'agent'))}
+Path('note_payload.json').write_text(json.dumps(note, ensure_ascii=False), encoding='utf-8')
+PY
+
+      - name: Create & sign note
+        env:
+          NCP_PRIVATE_KEY_B64: ${{ secrets.NCP_PRIVATE_KEY_B64 }}
+        run: |
+          python scripts/create_and_sign_note.py \
+            --thread "${{ github.event.client_payload.thread }}" \
+            --note-file note_payload.json \
+            --seedfile CONTEXT_SEED.json \
+            --key-id "${{ secrets.NCP_KEY_ID }}" \
+            --outdir wall/threads
+
+      - name: Attest truth (reply)
+        env:
+          NCP_PRIVATE_KEY_B64: ${{ secrets.NCP_PRIVATE_KEY_B64 }}
+        run: |
+          python - << 'PY'
+import json, re
+from pathlib import Path
+import hashlib
+
+# Find latest created note path from previous step (by thread)
+thread = "${{ github.event.client_payload.thread }}"
+base = Path('wall/threads')/thread
+paths = sorted(base.glob('*.json'))
+if not paths:
+    raise SystemExit('no notes in thread yet')
+latest = paths[-1]
+note = json.loads(latest.read_text(encoding='utf-8'))
+
+truth = json.loads(Path('truth_sha.json').read_text(encoding='utf-8'))
+att = {
+  'thread': {'id': thread, 'title': thread, 'parent_note_id': note['id']},
+  'agent': {'nickname': 'ncp-attestor'},
+  'team': {'name':'ncp','side':'logic'},
+  'claim': 'truth attest',
+  'formulae': ['F2'],
+  'evidence': [{'type':'code','url':'https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}','sha256': hashlib.sha256(str(truth).encode('utf-8')).hexdigest()}],
+  'truth': {'definition': 'Computed by CI under truth_spec.json (SHA map + evidence audit)', 'score': 0.0, 'method': 'ci_truth_score.py'}
+}
+Path('attest_note.json').write_text(json.dumps(att, ensure_ascii=False), encoding='utf-8')
+PY
+          # compute truth score from evidence
+          python scripts/ci_truth_score.py --note "$latest" --schema TELEMETRY_SCHEMA.json > truth_out.json
+          python - << 'PY'
+import json
+from pathlib import Path
+att = json.loads(Path('attest_note.json').read_text(encoding='utf-8'))
+res = json.loads(Path('truth_out.json').read_text(encoding='utf-8'))
+att['truth']['score'] = float(res.get('score', 0))
+Path('attest_note.json').write_text(json.dumps(att, ensure_ascii=False), encoding='utf-8')
+print('truth_score', att['truth']['score'])
+PY
+          python scripts/create_and_sign_note.py \
+            --thread "${{ github.event.client_payload.thread }}" \
+            --note-file attest_note.json \
+            --seedfile CONTEXT_SEED.json \
+            --key-id "${{ secrets.NCP_KEY_ID }}" \
+            --outdir wall/threads
+
+      - name: Commit & push
+        env:
+          GIT_COMMITTER_NAME: "${{ secrets.NCP_BOT_NAME }}"
+          GIT_COMMITTER_EMAIL: "noreply@sdominanta.net"
+        run: |
+          git config user.name "${{ secrets.NCP_BOT_NAME }}"
+          git config user.email "noreply@sdominanta.net"
+          git add wall/threads
+          git commit -m "wall: add note via repository_dispatch (thread=${{ github.event.client_payload.thread }})" || echo "no changes"
+          git push
+
+

@@ -1,0 +1,45 @@
+name: Publish to npm (sdominanta-mcp)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g., 0.1.8). If empty, use package.json"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Compute version
+        id: v
+        shell: bash
+        run: |
+          if [[ -n "${{ inputs.version }}" ]]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=$(node -p \"require('./npm/mcp-wrapper/package.json').version\")" >> $GITHUB_OUTPUT
+          fi
+      - name: Set npm package version
+        working-directory: npm/mcp-wrapper
+        run: |
+          npm version "${{ steps.v.outputs.version }}" --no-git-tag-version
+      - name: Publish
+        working-directory: npm/mcp-wrapper
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --access public --provenance=false
+
+

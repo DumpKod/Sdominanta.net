@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 from setuptools import setup, find_packages
 
 setup(
@@ -6,9 +5,13 @@ setup(
     version='0.2.0',
     description='Sdominanta.net Multi-Agent Control Plane and Pa2ap Bridge',
     author='Sdominanta Project',
-    packages=find_packages(where='.', include=['Sdominanta.net*']),
-    package_dir={'Sdominanta.net': 'Sdominanta.net'},
+    packages=find_packages(where='.'),
+    package_dir={'': '.'},
     install_requires=[
+        'mcp[cli]>=1.2.0',
+        'jsonschema>=4.19.0',
+        'PyNaCl>=1.5.0',
+        'rfc8785>=0.1.1',
         'fastapi',
         'uvicorn',
         'python-multipart',
@@ -19,15 +22,26 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'sdom-mcp=Sdominanta.net.mcp.main:main',
-            'sdom-bridge=Sdominanta.net.bridge.main:app' 
+            'sdom-mcp=mcp.main:main',
+            'sdom-bridge=bridge.main:app'
         ],
     },
     include_package_data=True,
-    package_data={'Sdominanta.net': ['mcp/tools/*.py']},
+    package_data={
+        '': [
+            '.env.template',
+            'bridge/config.yaml',
+            'seed/bootstrap.json',
+            'seed/topics.json',
+            'seed/agents_registry.json',
+            'wall/WALL_NOTE.schema.json',
+            'wall/WALL_RULES.md',
+            'wall/threads/*',
+            'docs/*',
+            'pa2ap/daemon/*',
+            'examples/*',
+            'docker/*',
+            '.github/workflows/*',
+        ]
+    },
 )
-=======
-from setuptools import setup
-
-setup()
->>>>>>> 5d32ff69f52fcbea317316afcc875fb4a2ef2fe9
