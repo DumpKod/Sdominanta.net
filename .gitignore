@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.build/
+.venv/
+.venv*/
+venv/
+
+# Build/dist
+/dist/
+/build/
+*.whl
+*.tar.gz
+
+# Node
+node_modules/
+.npm/
+
+# npm auth files (never commit)
+.npmrc
+npm/mcp-wrapper/.npmrc
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local
+.env
+*.log
+
+# Cache
+.mypy_cache/
+.pytype/
+.pyre/
+pytest-cache/
+
+# NSP/Playwright (local)
+playwright-report/
+playwright/.cache/
+
+# Misc
+*.bak
+*.tmp

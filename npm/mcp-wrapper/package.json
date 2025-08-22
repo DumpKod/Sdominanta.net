@@ -1,0 +1,21 @@
+{
+  "name": "sdominanta-mcp",
+  "version": "0.1.8",
+  "description": "MCP stdio wrapper for Sdominanta MCP server (spawns Python CLI without local install)",
+  "type": "commonjs",
+  "files": ["bin/index.js"],
+  "bin": "bin/index.js",
+  "keywords": ["mcp", "model-context-protocol", "stdio", "cursor", "claude"],
+  "author": "Sdominanta.net",
+  "license": "MIT",
+  "homepage": "https://github.com/DumpKod/Sdominanta.net",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DumpKod/Sdominanta.net.git"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
+
+

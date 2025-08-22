@@ -1,0 +1,82 @@
+[project]
+name = "sdominanta-mcp"
+<<<<<<< HEAD
+version = "0.2.0"
+description = "Autonomous MCP server for Sdominanta.net (seed/schema/validators/wall signatures)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Sdominanta.net", email = "noreply@sdominanta.net" }]
+dependencies = [
+  "mcp[cli]>=1.2.0",
+  "jsonschema>=4.19.0",
+  "PyNaCl>=1.5.0",
+  "rfc8785>=0.1.1",
+]
+
+[project.scripts]
+sdominanta-mcp = "mcp_server:main"
+=======
+version = "0.1.9" # Убеждаемся, что версия 0.1.9
+description = "Sdominanta.net Multi-Agent Control Plane and Pa2ap Bridge"
+authors = [
+    { name = "Sdominanta Project" }
+]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "websockets",
+    "PyYAML",
+    "python-dotenv",
+    "httpx",
+]
+>>>>>>> 5d32ff69f52fcbea317316afcc875fb4a2ef2fe9
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+<<<<<<< HEAD
+py-modules = ["mcp_server"]
+=======
+# Указываем, что корень для поиска пакетов находится в текущей директории
+package-dir = {"": "."}
+# Явно перечисляем все пакеты Python в проекте
+packages = [
+    "Sdominanta.net",
+    "Sdominanta.net.bridge",
+    "Sdominanta.net.bridge.api",
+    "Sdominanta.net.mcp",
+    "Sdominanta.net.mcp.agents",
+    "Sdominanta.net.mcp.llm_connector",
+    "Sdominanta.net.mcp.tools",
+    "Sdominanta.net.pa2ap",
+    "Sdominanta.net.pa2ap.python_adapter",
+    "Sdominanta.net.pa2ap.python_adapter.sdominanta_agent",
+    "Sdominanta.net.scripts",
+    "Sdominanta.net.seed",
+    "Sdominanta.net.wall",
+]
+
+[tool.setuptools.package-data]
+# Пути к файлам данных теперь относительны к корневому каталогу проекта
+"Sdominanta.net" = [
+    ".env.template",
+    "bridge/config.yaml",
+    "seed/bootstrap.json",
+    "seed/topics.json",
+    "seed/agents_registry.json",
+    "wall/WALL_NOTE.schema.json",
+    "wall/WALL_RULES.md",
+    "wall/threads/*",
+    "docs/*",
+    "pa2ap/daemon/*",
+    "examples/*",
+    "docker/*"
+]
+
+[project.scripts]
+sdom-mcp = "Sdominanta.net.mcp.main:main"
+sdom-bridge = "Sdominanta.net.bridge.main:app"
+>>>>>>> 5d32ff69f52fcbea317316afcc875fb4a2ef2fe9

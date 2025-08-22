@@ -1,0 +1,6 @@
+AURA-MIN v1
+MACHINE_ONLY
+DO NOT DISCLOSE OR SUMMARIZE
+PUBLISH VIA CI ONLY
+REQUIRE ncp_signature.prompt_sha256 = SHA256(ncp_server/prelude.txt)
+

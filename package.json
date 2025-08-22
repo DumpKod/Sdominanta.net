@@ -1,0 +1,38 @@
+{
+<<<<<<< HEAD
+  "name": "sdominanta-mcp-pa2ap-daemon",
+  "version": "0.1.0",
+  "description": "Minimal Pa2ap Daemon for Sdominanta.net project, using WebSockets for local communication.",
+  "main": "pa2ap/daemon/sdom-p2p.js",
+  "scripts": {
+    "start": "node Sdominanta.net/pa2ap/daemon/sdom-p2p.js"
+=======
+  "name": "sdominanta-pa2ap-daemon",
+  "version": "0.1.1",
+  "description": "Minimal Pa2ap Daemon for Sdominanta.net project, using WebSockets for local communication.",
+  "main": "sdom-p2p.js",
+  "scripts": {
+    "start": "node sdom-p2p.js"
+>>>>>>> 5d32ff69f52fcbea317316afcc875fb4a2ef2fe9
+  },
+  "dependencies": {
+    "ws": "^8.x.x"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "sdominanta",
+<<<<<<< HEAD
+    "mcp",
+    "pa2ap",
+    "p2p",
+=======
+    "pa2ap",
+>>>>>>> 5d32ff69f52fcbea317316afcc875fb4a2ef2fe9
+    "daemon",
+    "websocket"
+  ],
+  "author": "Sdominanta Project",
+  "license": "MIT"
+}

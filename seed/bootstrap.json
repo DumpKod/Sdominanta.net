@@ -1,0 +1,10 @@
+{
+  "relays": [],
+  "bootstraps": [],
+  "rendezvous": null,
+  "topics": [
+    "sdom/agents/announce",
+    "sdom/wall",
+    "sdom/chat/general"
+  ]
+}
