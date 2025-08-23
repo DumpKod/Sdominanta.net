@@ -1,0 +1,20 @@
+### Переменные окружения (замените на ваши)
+@host = http://localhost:8787
+
+###
+# Простой пинг-запрос к Gemma
+POST {{host}}/api/v1/gemma/ask
+Content-Type: application/json
+
+{
+    "prompt": "Repeat the word 'test' three times."
+}
+
+###
+# Запрос на анализ протокола (пример)
+POST {{host}}/api/v1/gemma/ask
+Content-Type: application/json
+
+{
+    "prompt": "Analyze the basic principles of the WebRTC protocol for peer-to-peer communication. List 3 key advantages and 3 potential challenges."
+}
