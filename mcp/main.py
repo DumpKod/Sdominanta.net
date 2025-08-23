@@ -31,30 +31,33 @@ async def main():
     asyncio.create_task(research_agent.run_research_cycle(interval_seconds=3600)) # Исследовательский цикл раз в час
 
     print("\nMCP Server ready. Chief Architect Agent is awaiting high-level goals.")
-    print("Type your high-level goal, or 'exit' to quit.")
+    # print("Type your high-level goal, or 'exit' to quit.")
 
     # Основной цикл взаимодействия с ChiefArchitectAgent
+    # В контейнере мы не используем интерактивный ввод, агенты работают в фоне.
+    # Этот цикл будет просто поддерживать работу приложения.
     while True:
-        try:
-            user_input = await asyncio.to_thread(input, "CEO > ") # Используем asyncio.to_thread для блокирующего input
-            if user_input.lower() == 'exit':
-                print("Shutting down MCP Server.")
-                break
-            if not user_input.strip():
-                continue
-
-            print(f"\nCEO gave goal: '{user_input}'")
-            # ChiefArchitectAgent обрабатывает высокоуровневую цель
-            plan_result = await chief_architect_agent.plan_task(user_input)
-            print(f"Chief Architect's plan: {plan_result['plan']}")
-            # TODO: Здесь будет логика для распределения подзадач по другим агентам
-            # и вызова RunPodClient при необходимости
-
-        except KeyboardInterrupt:
-            print("\nShutting down MCP Server.")
-            break
-        except Exception as e:
-            print(f"An error occurred in main loop: {e}")
+        await asyncio.sleep(3600) # Просто спим, пока фоновые задачи работают
+        # try:
+        #     user_input = await asyncio.to_thread(input, "CEO > ") # Используем asyncio.to_thread для блокирующего input
+        #     if user_input.lower() == 'exit':
+        #         print("Shutting down MCP Server.")
+        #         break
+        #     if not user_input.strip():
+        #         continue
+        #
+        #     print(f"\nCEO gave goal: '{user_input}'")
+        #     # ChiefArchitectAgent обрабатывает высокоуровневую цель
+        #     plan_result = await chief_architect_agent.plan_task(user_input)
+        #     print(f"Chief Architect's plan: {plan_result['plan']}")
+        #     # TODO: Здесь будет логика для распределения подзадач по другим агентам
+        #     # и вызова RunPodClient при необходимости
+        #
+        # except KeyboardInterrupt:
+        #     print("\nShutting down MCP Server.")
+        #     break
+        # except Exception as e:
+        #     print(f"An error occurred in main loop: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
