@@ -10,7 +10,7 @@ services:
     env_file:
       - .env # Загрузка переменных окружения из .env файла
     volumes:
-      - ./wall/threads:/app/Sdominanta.net/wall/threads # Сохраняем состояние стены
+      - ./wall/threads:/app/wall/threads # Сохраняем состояние стены
       - ./logs:/var/log/sdominanta # Для логов агентов
       - /var/run/docker.sock:/var/run/docker.sock # Для управления Ollama/RunPod (если понадобится)
       - /app/.ssh:/app/.ssh # Если SSH-ключи агентов хранятся в Dockerfile, это не нужно
@@ -21,7 +21,7 @@ services:
       - ollama_server # Добавлено: зависимость от Ollama
     environment:
       - OLLAMA_HOST=http://ollama_server:11434 # Добавлено: хост для Ollama
-    command: ["/bin/bash", "-c", "wait-for-it pa2ap_daemon:9090 --timeout=30 -- uvicorn Sdominanta.net.bridge.main:app --host 0.0.0.0 --port 8787 & python Sdominanta.net/mcp/main.py"]
+    command: ["/bin/bash", "-c", "wait-for-it pa2ap_daemon:9090 --timeout=30 -- uvicorn bridge.main:app --host 0.0.0.0 --port 8787 & python -m mcp.main"]
 
   pa2ap_daemon: # Отдельный сервис для JS P2P демона
     build:
@@ -31,17 +31,17 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "9090:9090" # Порт pa2ap daemon
+    # ports: # Убираем публикацию порта, он нужен только для внутренней коммуникации
+    #   - "9090:9090"
     depends_on:
       - ollama_server # Добавлено: зависимость от Ollama
-    command: ["node", "Sdominanta.net/pa2ap/daemon/sdom-p2p.js"]
+    command: ["node", "pa2ap/daemon/sdom-p2p.js"]
 
   ollama_server:
     image: ollama/ollama:latest
     container_name: ollama_server
-    ports:
-      - "11434:11434"
+    # ports: # Убираем публикацию порта, он нужен только для внутренней коммуникации
+    #   - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     environment:
