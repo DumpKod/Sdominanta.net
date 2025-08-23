@@ -32,7 +32,7 @@ services:
     env_file:
       - .env
     ports:
-      - "9090:9090" # Порт pa2ap daemon
+      - "0.0.0.0:9090:9090" # Порт pa2ap daemon
     depends_on:
       - ollama_server # Добавлено: зависимость от Ollama
     command: ["node", "pa2ap/daemon/sdom-p2p.js"]
