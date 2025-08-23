@@ -31,8 +31,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "0.0.0.0:9090:9090" # Порт pa2ap daemon
+    # ports: # Убираем публикацию порта, он нужен только для внутренней коммуникации
+    #   - "9090:9090"
     depends_on:
       - ollama_server # Добавлено: зависимость от Ollama
     command: ["node", "pa2ap/daemon/sdom-p2p.js"]
@@ -40,8 +40,8 @@ services:
   ollama_server:
     image: ollama/ollama:latest
     container_name: ollama_server
-    ports:
-      - "11434:11434"
+    # ports: # Убираем публикацию порта, он нужен только для внутренней коммуникации
+    #   - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     environment:
