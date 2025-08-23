@@ -5,6 +5,8 @@ import yaml
 import os
 from pa2ap.python_adapter.sdominanta_agent.client import SdominantaAgent
 import asyncio
+import httpx
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -47,6 +49,31 @@ async def wall_publish(note_signed: Dict):
 
     await sdominanta_agent.publish("sdom/wall", note_signed)
     return JSONResponse(status_code=202, content={"message": "Note published to P2P wall."})
+
+@app.post("/api/v1/gemma/ask")
+async def gemma_ask(request: GemmaRequest):
+    """Отправляет запрос к Gemma и возвращает ее ответ."""
+    ollama_url = "http://ollama_server:11434/api/generate"
+    payload = {
+        "model": "gemma3:4b",
+        "prompt": request.prompt,
+        "stream": False  # Получаем ответ целиком, а не по частям
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client: # Увеличим таймаут для долгих ответов
+            response = await client.post(ollama_url, json=payload)
+            response.raise_for_status() # Вызовет исключение для HTTP-ошибок
+            
+            # Извлекаем и возвращаем только сам текстовый ответ
+            response_data = response.json()
+            return JSONResponse(status_code=200, content={"response": response_data.get("response", "")})
+
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"Service unavailable: Could not connect to Ollama server. {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+
 
 @app.get("/api/v1/wall/threads")
 async def wall_threads(thread_id: str = "general", since: str = None, limit: int = 50):
