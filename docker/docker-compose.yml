@@ -21,7 +21,7 @@ services:
       - ollama_server # Добавлено: зависимость от Ollama
     environment:
       - OLLAMA_HOST=http://ollama_server:11434 # Добавлено: хост для Ollama
-    command: ["/bin/bash", "-c", "wait-for-it pa2ap_daemon:9090 --timeout=30 -- uvicorn bridge.main:app --host 0.0.0.0 --port 8787 & python mcp/main.py"]
+    command: ["/bin/bash", "-c", "wait-for-it pa2ap_daemon:9090 --timeout=30 -- uvicorn bridge.main:app --host 0.0.0.0 --port 8787 & python -m mcp.main"]
 
   pa2ap_daemon: # Отдельный сервис для JS P2P демона
     build:
