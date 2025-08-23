@@ -15,7 +15,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock # Для управления Ollama/RunPod (если понадобится)
       - /app/.ssh:/app/.ssh # Если SSH-ключи агентов хранятся в Dockerfile, это не нужно
     ports:
-      - "8787:8787" # Порт FastAPI bridge
+      - "80:8787" # Маскируем наш API под стандартный веб-порт 80
     depends_on:
       - pa2ap_daemon
       - ollama_server # Добавлено: зависимость от Ollama
