@@ -1,41 +1,33 @@
 version: '3.8'
 
-networks:
-  sdominanta_net:
-    driver: bridge
-
 services:
-  app: # Объединенный сервис для FastAPI bridge и Node.js демона
+  sdominanta_mcp:
     build:
       context: ../
       dockerfile: docker/Dockerfile
-    container_name: sdominanta_app
+    container_name: sdominanta_mcp_app
     restart: unless-stopped
     ports:
-      - "8787:8787" # Публикуем порт FastAPI bridge
+      - "8787:8787"
     volumes:
-      - ../wall/threads:/app/wall/threads # Сохраняем состояние стены
-      - ../logs:/var/log/sdominanta # Сохраняем логи
-    networks:
-      - sdominanta_net
-    depends_on:
-      - ollama
-    environment:
-      - OLLAMA_HOST=http://ollama:11434
+      - ../:/app
+    command: >
+      sh -c "wait-for-it ollama_server:11434 -- uvicorn bridge.main:app --host 0.0.0.0 --port 8787"
 
-  ollama:
-    image: ollama/ollama:latest
+  pa2ap_daemon:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    container_name: pa2ap_daemon_app
+    restart: unless-stopped
+    command: ["node", "pa2ap/daemon/sdom-p2p.js"]
+
+  ollama_server:
+    image: ollama/ollama
     container_name: ollama_server
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
-    networks:
-      - sdominanta_net
-    environment:
-      - OLLAMA_HOST=0.0.0.0
-      - OLLAMA_ORIGINS=*
-      - OLLAMA_MAX_LOADED_MODELS=1 # Ограничиваем количество одновременно загруженных моделей
-      - OLLAMA_NUM_PARALLEL=1     # Ограничиваем количество параллельных запросов
 
 volumes:
   ollama_data:
