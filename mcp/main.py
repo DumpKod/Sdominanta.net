@@ -22,8 +22,8 @@ async def main():
 
     # Инициализация Агентов
     chief_architect_agent = ChiefArchitectAgent(ollama_client=ollama_client)
-    security_agent = SecurityAgent(ollama_client=ollama_client, log_path="/var/log/auth.log") # Путь к логам на Contabo
-    research_agent = ResearchAgent(ollama_client=ollama_client, wall_path="Sdominanta.net/wall/threads/research")
+    security_agent = SecurityAgent(ollama_client=ollama_client, log_path="/var/log/sdominanta/auth.log") # Путь к логам в контейнере, соответствующий volume-mount
+    research_agent = ResearchAgent(ollama_client=ollama_client, wall_path="wall/threads/research")
 
     # Запуск фоновых задач для SecurityAgent и ResearchAgent
     print("Starting background agents (Security, Research)...")

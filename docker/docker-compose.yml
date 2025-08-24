@@ -1,54 +1,41 @@
 version: '3.8'
 
+networks:
+  sdominanta_net:
+    driver: bridge
+
 services:
-  sdominanta_mcp: # Основной сервис, который запускает MCP и Bridge
+  app: # Объединенный сервис для FastAPI bridge и Node.js демона
     build:
-      context: ../ # Корневая директория проекта
+      context: ../
       dockerfile: docker/Dockerfile
-    container_name: sdominanta_mcp_app
+    container_name: sdominanta_app
     restart: unless-stopped
-    env_file:
-      - .env # Загрузка переменных окружения из .env файла
-    volumes:
-      - ./wall/threads:/app/wall/threads # Сохраняем состояние стены
-      - ./logs:/var/log/sdominanta # Для логов агентов
-      - /var/run/docker.sock:/var/run/docker.sock # Для управления Ollama/RunPod (если понадобится)
-      - /app/.ssh:/app/.ssh # Если SSH-ключи агентов хранятся в Dockerfile, это не нужно
     ports:
-      - "8787:8787" # Порт FastAPI bridge
+      - "8787:8787" # Публикуем порт FastAPI bridge
+    volumes:
+      - ../wall/threads:/app/wall/threads # Сохраняем состояние стены
+      - ../logs:/var/log/sdominanta # Сохраняем логи
+    networks:
+      - sdominanta_net
     depends_on:
-      - pa2ap_daemon
-      - ollama_server # Добавлено: зависимость от Ollama
+      - ollama
     environment:
-      - OLLAMA_HOST=http://ollama_server:11434 # Добавлено: хост для Ollama
-    command: ["/bin/bash", "-c", "wait-for-it pa2ap_daemon:9090 --timeout=30 -- uvicorn bridge.main:app --host 0.0.0.0 --port 8787 & python -m mcp.main"]
+      - OLLAMA_HOST=http://ollama:11434
 
-  pa2ap_daemon: # Отдельный сервис для JS P2P демона
-    build:
-      context: ../ # Корневая директория проекта
-      dockerfile: docker/Dockerfile
-    container_name: pa2ap_daemon_app
-    restart: unless-stopped
-    env_file:
-      - .env
-    # ports: # Убираем публикацию порта, он нужен только для внутренней коммуникации
-    #   - "9090:9090"
-    depends_on:
-      - ollama_server # Добавлено: зависимость от Ollama
-    command: ["node", "pa2ap/daemon/sdom-p2p.js"]
-
-  ollama_server:
+  ollama:
     image: ollama/ollama:latest
     container_name: ollama_server
-    # ports: # Убираем публикацию порта, он нужен только для внутренней коммуникации
-    #   - "11434:11434"
+    restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
+    networks:
+      - sdominanta_net
     environment:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_ORIGINS=*
-      - OLLAMA_DEVICE=cpu # Используем CPU, так как GPU не обнаружен. Можно изменить на GPU, если есть поддержка.
-    restart: unless-stopped
+      - OLLAMA_MAX_LOADED_MODELS=1 # Ограничиваем количество одновременно загруженных моделей
+      - OLLAMA_NUM_PARALLEL=1     # Ограничиваем количество параллельных запросов
 
 volumes:
   ollama_data:
