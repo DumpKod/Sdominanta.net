@@ -1,6 +1,6 @@
 import asyncio
 from pa2ap.agent import SdominantaAgent
-from nostr_sdk import Keys, EventBuilder
+from nostr_sdk import Keys, EventBuilder, Tag, nip04_encrypt
 import json
 from aioconsole import ainput
 
@@ -44,7 +44,10 @@ async def run_director():
                     recipient_pubkey_hex = parts[1]
                     content = parts[2]
                     
-                    event = EventBuilder.new_encrypted_direct_msg(agent.keys, recipient_pubkey_hex, content, None).to_event(agent.keys)
+                    recipient_pubkey = Keys.from_public_key_hex(recipient_pubkey_hex).public_key()
+                    encrypted_content = nip04_encrypt(agent.keys.secret_key(), recipient_pubkey, content)
+                    event = EventBuilder(4, encrypted_content, [Tag.parse(["p", recipient_pubkey_hex])]).to_event(agent.keys)
+
                     await agent.publish_event(event, api_url)
                     print(f"--- Direct message sent to {recipient_pubkey_hex} ---")
 
@@ -57,7 +60,7 @@ async def run_director():
                 elif command == ".exit":
                     break
                 else:
-                    print("--- Unknown command. Use .msg <pubkey> <message> or .pub <message> or .exit ---")
+                    print("--- Unknown command. Use .msg <pubkey> <message> or .pub <message> | .exit ---")
             except Exception as e:
                 print(f"Error sending message: {e}")
 

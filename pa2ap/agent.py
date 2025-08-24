@@ -8,7 +8,7 @@ import ssl
 class SdominantaAgent:
     def __init__(self, private_key: str = None):
         if private_key:
-            self.keys = Keys.from_sk_hex(private_key)
+            self.keys = Keys.from_secret_key_hex(private_key)
         else:
             self.keys = Keys.generate()
         
