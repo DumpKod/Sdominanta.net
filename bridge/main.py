@@ -53,9 +53,9 @@ async def wall_publish(note_signed: Dict):
 @app.post("/api/v1/gemma/ask")
 async def gemma_ask(request: GemmaRequest):
     """Отправляет запрос к Gemma и возвращает ее ответ."""
-    ollama_url = "http://ollama_server:11434/api/generate"
+    ollama_url = "http://ollama:11434/api/generate"
     payload = {
-        "model": "gemma3:4b",
+        "model": "gemma:2b", # Используем модель gemma:2b для более быстрых ответов
         "prompt": request.prompt,
         "stream": False  # Получаем ответ целиком, а не по частям
     }
@@ -93,6 +93,49 @@ async def peers_list():
     # Пока SdominantaAgent только анонсирует, но не возвращает список через API. 
     # Нужна доработка SdominantaAgent и/или логика в bridge для получения актуального списка.
     return JSONResponse(status_code=200, content=[sdominanta_agent.peer_id if sdominanta_agent else "unknown"])
+
+
+@app.get("/api/v1/fs/list/{directory_path:path}")
+async def list_files(directory_path: str):
+    """
+    Предоставляет листинг файлов и папок по указанному пути внутри контейнера.
+    Путь указывается относительно корня проекта (/app).
+    Пример: /api/v1/fs/list/mcp/agents
+    """
+    # Импортируем Path внутри, чтобы не добавлять в глобальные импорты
+    from pathlib import Path
+
+    # Базовый путь внутри контейнера, к которому разрешен доступ.
+    base_path = Path("/app").resolve()
+    
+    # Создаем полный путь и разрешаем его (убираем .. и т.д.)
+    target_path = (base_path / directory_path).resolve()
+
+    # Проверка безопасности: убеждаемся, что целевой путь находится внутри базового.
+    if base_path not in target_path.parents and target_path != base_path:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Path is outside the allowed project directory."
+        )
+
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail="Path not found")
+
+    if not target_path.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory")
+
+    try:
+        contents = []
+        for item in sorted(target_path.iterdir()):
+            item_type = "directory" if item.is_dir() else "file"
+            contents.append({"name": item.name, "type": item_type})
+        
+        return JSONResponse(status_code=200, content={
+            "directory": str(target_path.relative_to(base_path)),
+            "contents": contents
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read directory: {e}")
 
 
 @app.websocket("/ws")
