@@ -5,15 +5,4 @@ websockets
 PyYAML
 python-dotenv
 httpx
-# Для асинхронного input (asyncio.to_thread)
-# В Python 3.10+ это встроено, но для более старых версий может потребоваться
-# asyncio_priority_queue # Если будет использоваться приоритетная очередь
-
-# Для работы с Git в Python (если агенты будут напрямую делать git-операции)
-# GitPython
-
-# Для криптографии (если будут использоваться в Python-скриптах, например, для create_and_sign_note.py)
-# PyNaCl # Для Ed25519
-
-# nostr # Протокол для децентрализованных соцсетей, используется для подписей
-python-nostr
+nostr-sdk
