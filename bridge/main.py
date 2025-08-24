@@ -10,6 +10,9 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
+class GemmaRequest(BaseModel):
+    prompt: str
+
 # Загрузка конфигурации
 CONFIG = {}
 config_path = os.getenv("BRIDGE_CONFIG_PATH", "Sdominanta.net/bridge/config.yaml")
