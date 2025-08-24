@@ -20,6 +20,8 @@ services:
       dockerfile: docker/Dockerfile
     container_name: pa2ap_daemon_app
     restart: unless-stopped
+    ports:
+      - "9090:9090"
     command: ["node", "pa2ap/daemon/sdom-p2p.js"]
 
   ollama_server:
