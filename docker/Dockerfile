@@ -8,12 +8,15 @@ RUN npm install
 # Этап 2: Основной образ приложения
 FROM python:3.10-slim-bullseye
 
-# Установка системных зависимостей, включая supervisor
+# Установка системных зависимостей, включая supervisor и Node.js
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     openssh-client \
     wait-for-it \
     supervisor \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Создание непривилегированного пользователя
@@ -24,7 +27,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копирование всего кода приложения и собранных Node.js модулей
+# Копирование всего кода приложения и собранных Node.js модулей 
 COPY --chown=sdominanta:sdominanta . .
 COPY --from=builder-node /app/node_modules ./node_modules
 
