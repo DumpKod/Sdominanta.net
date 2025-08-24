@@ -1,111 +1,97 @@
 import asyncio
-import websockets
 import json
-import uuid
+from nostr.key import PrivateKey
+from nostr.event import Event
+import websockets
+import requests
 
 class SdominantaAgent:
-    def __init__(self, daemon_url="ws://127.0.0.1:9090"):
-        self.daemon_url = daemon_url
-        self.websocket = None
-        self.peer_id = str(uuid.uuid4()) # Уникальный ID для этого агента
-        self.message_handlers = {} # Для обработки входящих сообщений по топикам
-
-    async def connect(self):
-        try:
-            self.websocket = await websockets.connect(self.daemon_url)
-            print(f"Connected to Pa2ap Daemon at {self.daemon_url}")
-            # Анонсируем свое присутствие в сети
-            await self.announce_presence({"peerId": self.peer_id, "capabilities": ["wall", "research"]})
-            # Запускаем фоновую задачу для прослушивания сообщений
-            asyncio.create_task(self._listen_for_messages())
-        except Exception as e:
-            print(f"Failed to connect to Pa2ap Daemon: {e}")
-            self.websocket = None
-
-    async def disconnect(self):
-        if self.websocket:
-            await self.websocket.close()
-            print("Disconnected from Pa2ap Daemon")
-            self.websocket = None
-
-    async def _send_message(self, message):
-        if self.websocket:
-            await self.websocket.send(json.dumps(message))
+    def __init__(self, private_key: str = None):
+        if private_key:
+            self.private_key = PrivateKey.from_hex(private_key)
         else:
-            print("WebSocket not connected. Message not sent.")
+            self.private_key = PrivateKey()
 
-    async def _listen_for_messages(self):
-        while self.websocket:
-            try:
-                message = await self.websocket.recv()
-                msg = json.loads(message)
-                #print(f"Received from daemon: {msg}")
-                if msg.get('type') == 'message' and msg.get('topic') in self.message_handlers:
-                    for handler in self.message_handlers[msg['topic']]:
-                        await handler(msg['data'])
-            except websockets.exceptions.ConnectionClosed:
-                print("Pa2ap Daemon connection closed.")
-                self.websocket = None
-                break
-            except Exception as e:
-                print(f"Error listening for messages: {e}")
+        self.public_key = self.private_key.public_key.hex()
+        self.ws = None
 
-    async def publish(self, topic: str, data: dict):
-        """Публикует данные в указанный топик."""
-        await self._send_message({'type': 'publish', 'topic': topic, 'data': data})
-        print(f"Published to topic '{topic}': {data}")
+    async def connect(self, ws_url="ws://localhost:9090"):
+        self.ws = await websockets.connect(ws_url)
+        print(f"Connected to {ws_url}")
 
-    async def subscribe(self, topic: str, handler):
-        """Подписывается на топик и регистрирует обработчик сообщений."""
-        if topic not in self.message_handlers:
-            self.message_handlers[topic] = []
-        self.message_handlers[topic].append(handler)
-        await self._send_message({'type': 'subscribe', 'topic': topic})
+    async def subscribe(self, topic="sdom/wall/general"):
+        if not self.ws:
+            raise ConnectionError("WebSocket is not connected.")
+        
+        subscribe_message = json.dumps({
+            "type": "subscribe",
+            "topic": topic
+        })
+        await self.ws.send(subscribe_message)
         print(f"Subscribed to topic: {topic}")
 
-    async def get_peers(self):
-        """Запрашивает список известных пиров."""
-        await self._send_message({'type': 'get_peers'})
-        # В реальной реализации, ответ будет получен через _listen_for_messages
-        # и передан обратно через Future или callback. Для MVP просто печатаем.
-        print("Requested peer list from daemon.")
+    async def listen(self):
+        if not self.ws:
+            raise ConnectionError("WebSocket is not connected.")
+        
+        while True:
+            try:
+                message = await self.ws.recv()
+                print(f"Received message: {message}")
+            except websockets.ConnectionClosed:
+                print("Connection closed.")
+                break
 
-    async def announce_presence(self, data: dict):
-        """Анонсирует присутствие агента в сети."""
-        await self._send_message({'type': 'announce', 'peerId': self.peer_id, 'data': data})
-        print(f"Announced presence with Peer ID: {self.peer_id}")
+    def publish(self, topic, content, api_url="http://localhost:8787/wall/note"):
+        event = Event(
+            public_key=self.public_key,
+            content=content,
+            tags=[["t", topic]]
+        )
+        self.private_key.sign_event(event)
+        
+        note_signed = event.to_json_object()
 
-# Пример использования (для тестирования)
-async def main_test():
-    agent = SdominantaAgent()
-    await agent.connect()
+        try:
+            response = requests.post(api_url, json=note_signed)
+            response.raise_for_status()
+            print(f"Published message to {topic}: {content}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to publish message: {e}")
+            return None
 
-    if agent.websocket:
-        # Пример обработчика для входящих сообщений
-        async def wall_message_handler(data):
-            print(f"HANDLED WALL MESSAGE: {data}")
+    async def close(self):
+        if self.ws:
+            await self.ws.close()
+            print("WebSocket connection closed.")
 
-        async def announce_message_handler(data):
-            print(f"HANDLED ANNOUNCE MESSAGE: {data}")
+async def main():
+    # Пример использования
+    # Сгенерируем новый приватный ключ для этого примера.
+    # В реальном приложении вы будете хранить его в безопасности.
+    private_key = PrivateKey()
+    agent = SdominantaAgent(private_key.hex())
+    
+    print(f"Agent Public Key: {agent.public_key}")
 
-        await agent.subscribe("sdom/wall", wall_message_handler)
-        await agent.subscribe("sdom/agents/announce", announce_message_handler)
-
-        await agent.publish("sdom/wall", {"hash": "abc", "content": "Hello world from Python!"})
-        await agent.publish("sdom/agents/announce", {"peerId": "another-peer", "data": "I'm here too!"})
-
-        await agent.get_peers()
-
-        await asyncio.sleep(10) # Даем время для обмена сообщениями
-        await agent.disconnect()
-
-if __name__ == '__main__':
-    # Для запуска `sdom-p2p.js` нужно установить 'ws': npm install ws
-    # Запускать так:
-    # 1. node Sdominanta.net/pa2ap/daemon/sdom-p2p.js
-    # 2. python Sdominanta.net/pa2ap/python_adapter/sdominanta_agent/client.py
-    # (или запустить main_test() асинхронно)
     try:
-        asyncio.run(main_test())
-    except KeyboardInterrupt:
-        print("Test interrupted.")
+        await agent.connect()
+        await agent.subscribe()
+
+        # Запускаем прослушивание в фоновом режиме
+        listen_task = asyncio.create_task(agent.listen())
+
+        # Публикуем тестовое сообщение
+        agent.publish("sdom/wall/general", "Hello from SdominantaAgent!")
+
+        # Даем время на получение сообщения
+        await asyncio.sleep(5)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    finally:
+        await agent.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())

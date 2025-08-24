@@ -47,7 +47,11 @@ async def wall_publish(note_signed: Dict):
     # if not verify_signature(note_signed):
     #     raise HTTPException(status_code=400, detail="Invalid signature.")
 
-    await sdominanta_agent.publish("sdom/wall", note_signed)
+    sdominanta_agent.publish(
+        topic="sdom/wall", 
+        content=note_signed['content'],
+        api_url="http://localhost:8787/wall/note" # Отправляем через наш же API
+    )
     return JSONResponse(status_code=202, content={"message": "Note published to P2P wall."})
 
 @app.post("/api/v1/gemma/ask")
