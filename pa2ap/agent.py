@@ -1,6 +1,6 @@
 import asyncio
 import json
-from nostr_sdk import Keys, EventBuilder, Tag, PublicKey, SecretKey, nip04_encrypt
+from nostr_sdk import Keys, EventBuilder, Tag, PublicKey, SecretKey
 import websockets
 import httpx
 import ssl
