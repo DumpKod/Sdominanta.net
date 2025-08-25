@@ -97,7 +97,9 @@ async def run_director():
             encrypted_content = nip04_encrypt(agent.keys.secret_key(), recipient_pubkey, content)
             
             # Затем создаем EventBuilder с этим зашифрованным контентом
-            event = EventBuilder(kind=Kind(4), content=encrypted_content, tags=[Tag.parse(["p", recipient_pubkey_hex])]).to_event(agent.keys)
+            event_builder = EventBuilder(kind=Kind(4), content=encrypted_content)
+            event_builder = event_builder.add_tag(Tag.parse(["p", recipient_pubkey_hex]))
+            event = event_builder.to_event(agent.keys)
 
             await agent.publish_event(event, api_url)
             print(f"Direct message sent to {recipient_pubkey_hex}")
