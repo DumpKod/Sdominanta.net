@@ -101,6 +101,19 @@ async def run_director():
             recipient_pubkey_hex = parts[1]
             content = parts[2]
             
+            # Отладочный вывод для проверки формата pubkey
+            print(f"DEBUG: Original recipient_pubkey_hex: {recipient_pubkey_hex}")
+
+            # Если pubkey в формате bech32 (npub), декодируем его в hex
+            if recipient_pubkey_hex.startswith("npub"): # Проверяем, если ключ начинается с npub
+                try:
+                    from pynostr.utils import bech32_decode
+                    recipient_pubkey_hex = bytes(bech32_decode(recipient_pubkey_hex)).hex()
+                    print(f"DEBUG: Decoded recipient_pubkey_hex: {recipient_pubkey_hex}")
+                except Exception as e:
+                    print(f"Error decoding bech32 public key: {e}")
+                    continue
+
             # Убеждаемся, что recipient_pubkey_hex имеет правильный формат (чистый HEX, 64 символа)
             if len(recipient_pubkey_hex) != 64 or not all(c in "0123456789abcdefABCDEF" for c in recipient_pubkey_hex):
                 print("Error: Recipient public key must be a 64-character hexadecimal string.")
