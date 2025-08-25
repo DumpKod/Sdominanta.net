@@ -58,6 +58,13 @@ class SdominantaAgent:
         await self.ws.send(subscribe_message)
         print(f"Subscribed with ID {sub_id} to {filters}")
 
+    async def publish(self, event: Event):
+        """Отправляет событие напрямую в WebSocket relay."""
+        if not self.ws:
+            raise ConnectionError("WebSocket is not connected.")
+        event_json = event.to_json()
+        await self.ws.send(event_json)
+
     async def publish_event(self, event: Event, api_url: str):
         # Event уже подписан до вызова этой функции
         note_signed = event.to_dict()

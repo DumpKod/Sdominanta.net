@@ -111,7 +111,7 @@ async def run_director():
                     tags=[]
                 )
                 event.sign(agent.private_key.hex())
-                await agent.publish_event(event, api_url)
+                await agent.publish(event)
                 print(f"Public note sent: {content}")
             elif parts[0] == ".msg" and len(parts) == 3:
                 recipient_pubkey_hex = parts[1]
@@ -146,10 +146,10 @@ async def run_director():
                 )
                 dm.encrypt(agent.private_key.hex())
                 event = dm.to_event()
-                event.sign(agent.private_key.hex())
-
-                await agent.publish_event(event, api_url)
-                print(f"Direct message sent to {recipient_pubkey_hex}")
+                
+                event.sign(agent.private_key.hex()) # Подписываем событие нашим приватным ключом
+                print(f"Отправка зашифрованного сообщения Директору: {recipient_pubkey_hex}")
+                await agent.publish(event) # Отправляем DM напрямую в relay, а не через Bridge
             else:
                 print("Unknown command or incorrect format.")
         except asyncio.CancelledError:
