@@ -1,6 +1,6 @@
 import asyncio
 from pa2ap.agent import SdominantaAgent
-from nostr_sdk import Keys, EventBuilder, Tag, nip04_encrypt, PublicKey, SecretKey
+from nostr_sdk import Keys, EventBuilder, Tag, nip04_encrypt, PublicKey, SecretKey, Kind
 import json
 from aioconsole import ainput
 import ssl # Required for SdominantaUnsecureWebsocket
@@ -97,7 +97,7 @@ async def run_director():
             encrypted_content = nip04_encrypt(agent.keys.secret_key(), recipient_pubkey, content)
             
             # Затем создаем EventBuilder с этим зашифрованным контентом
-            event = EventBuilder(kind=4, content=encrypted_content).set_tags([Tag.parse(["p", recipient_pubkey_hex])]).to_event(agent.keys)
+            event = EventBuilder(kind=Kind(4), content=encrypted_content).set_tags([Tag.parse(["p", recipient_pubkey_hex])]).to_event(agent.keys)
 
             await agent.publish_event(event, api_url)
             print(f"Direct message sent to {recipient_pubkey_hex}")
