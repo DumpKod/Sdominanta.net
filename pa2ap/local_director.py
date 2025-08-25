@@ -135,6 +135,10 @@ async def run_director():
                     print("Error: Recipient public key must be a 64-character hexadecimal string.")
                     continue
 
+                # Отладочный вывод перед шифрованием
+                print(f"DEBUG: Final recipient_pubkey_hex before encrypt: {recipient_pubkey_hex}")
+                print(f"DEBUG: Agent private key hex: {agent.private_key.hex()}")
+
                 # Создание, шифрование и подпись Kind 4 события
                 dm = EncryptedDirectMessage(
                     cleartext_content=content,
