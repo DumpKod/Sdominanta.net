@@ -1,10 +1,11 @@
 {
   "name": "sdominanta-mcp",
-  "version": "0.1.8",
-  "description": "MCP stdio wrapper for Sdominanta MCP server (spawns Python CLI without local install)",
-  "type": "commonjs",
-  "files": ["bin/index.js"],
-  "bin": "bin/index.js",
+  "version": "0.2.0",
+  "description": "Sdominanta.net Multi-Agent Control Plane (npm wrapper)",
+  "main": "bin/index.js",
+  "bin": {
+    "index": "bin/index.js"
+  },
   "keywords": ["mcp", "model-context-protocol", "stdio", "cursor", "claude"],
   "author": "Sdominanta.net",
   "license": "MIT",
