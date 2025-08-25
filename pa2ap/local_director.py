@@ -1,6 +1,6 @@
 import asyncio
 from pa2ap.agent import SdominantaAgent
-from nostr_sdk import Keys, EventBuilder, Tag, nip04_encrypt
+from nostr_sdk import Keys, EventBuilder, Tag, nip04_encrypt, PublicKey
 import json
 from aioconsole import ainput
 
@@ -44,7 +44,7 @@ async def run_director():
                     recipient_pubkey_hex = parts[1]
                     content = parts[2]
                     
-                    recipient_pubkey = Keys.from_public_key_hex(recipient_pubkey_hex).public_key()
+                    recipient_pubkey = PublicKey.from_hex(recipient_pubkey_hex)
                     encrypted_content = nip04_encrypt(agent.keys.secret_key(), recipient_pubkey, content)
                     event = EventBuilder(4, encrypted_content, [Tag.parse(["p", recipient_pubkey_hex])]).to_event(agent.keys)
 
