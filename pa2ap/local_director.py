@@ -87,7 +87,7 @@ async def run_director():
             content = parts[2]
             
             # Правильный способ создать зашифрованное сообщение (Kind 4)
-            recipient_pubkey = PublicKey.from_hex(recipient_pubkey_hex)
+            recipient_pubkey = PublicKey.parse(recipient_pubkey_hex)
             encrypted_content = nip04_encrypt(agent.keys.secret_key(), recipient_pubkey, content)
             event = EventBuilder(4, encrypted_content, [Tag.parse(["p", recipient_pubkey_hex])]).to_event(agent.keys)
 
