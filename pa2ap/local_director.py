@@ -1,8 +1,42 @@
 import asyncio
 from pa2ap.agent import SdominantaAgent
-from nostr_sdk import Keys, EventBuilder, Tag, nip04_encrypt, PublicKey
+from nostr_sdk import Keys, EventBuilder, Tag, nip04_encrypt, PublicKey, SecretKey
 import json
 from aioconsole import ainput
+import ssl # Required for SdominantaUnsecureWebsocket
+import websockets # Required for SdominantaUnsecureWebsocket
+
+# Этот класс-заглушка нужен, потому что наш pa2ap_daemon не настоящий nostr-relay
+# и не отвечает на запросы аутентификации, которые шлет nostr-sdk.
+# Мы просто игнорируем эти сообщения.
+class SdominantaUnsecureWebsocket:
+    def __init__(self, uri):
+        self._uri = uri
+        self._ws = None
+
+    async def connect(self):
+        # Отключаем SSL для ws:// URI
+        if self._uri.startswith("wss://"):
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            self._ws = await websockets.connect(self._uri, ssl=ssl_context)
+        else:
+            self._ws = await websockets.connect(self._uri)
+
+    async def send(self, message):
+        if "AUTH" in message:
+            print(f"Ignoring AUTH message: {message}")
+            return
+        await self._ws.send(message)
+
+    async def recv(self):
+        return await self._ws.recv()
+
+    async def close(self):
+        if self._ws:
+            await self._ws.close()
+            print("WebSocket connection closed.")
 
 async def run_director():
     # --- ВАШИ ДАННЫЕ ---
@@ -32,47 +66,42 @@ async def run_director():
     print("--- Waiting for messages... ---")
     print("--- Commands: .msg <pubkey> <message> | .pub <message> | .exit ---")
 
-    async def send_messages():
-        while True:
-            try:
-                command = await ainput(">>> ")
-                if command.strip() == "":
-                    continue
-                
-                parts = command.split(" ", 2)
-                if parts[0] == ".msg" and len(parts) == 3:
-                    recipient_pubkey_hex = parts[1]
-                    content = parts[2]
-                    
-                    recipient_pubkey = PublicKey.from_hex(recipient_pubkey_hex)
-                    encrypted_content = nip04_encrypt(agent.keys.secret_key(), recipient_pubkey, content)
-                    event = EventBuilder(4, encrypted_content, [Tag.parse(["p", recipient_pubkey_hex])]).to_event(agent.keys)
+    async def listen_for_messages():
+        await agent.listen(lambda msg: print(f"\n<<< Received message: {msg}\n>>> ", end=""))
 
-                    await agent.publish_event(event, api_url)
-                    print(f"--- Direct message sent to {recipient_pubkey_hex} ---")
+    listen_task = asyncio.create_task(listen_for_messages())
 
-                elif parts[0] == ".pub" and len(parts) == 2:
-                    content = parts[1]
-                    event = EventBuilder.new_text_note(content, []).to_event(agent.keys)
-                    await agent.publish_event(event, api_url)
-                    print(f"--- Public note sent ---")
-                
-                elif command == ".exit":
-                    break
-                else:
-                    print("--- Unknown command. Use .msg <pubkey> <message> or .pub <message> | .exit ---")
-            except Exception as e:
-                print(f"Error sending message: {e}")
+    while True:
+        user_input = await ainput(">>> ")
+        parts = user_input.split(maxsplit=2)
 
-    listen_task = asyncio.create_task(agent.listen())
-    send_task = asyncio.create_task(send_messages())
+        if parts[0] == ".exit":
+            break
+        elif parts[0] == ".pub" and len(parts) == 2:
+            content = parts[1]
+            event = EventBuilder.text_note(content).to_event(agent.keys)
+            await agent.publish_event(event, api_url)
+            print(f"Public note sent: {content}")
+        elif parts[0] == ".msg" and len(parts) == 3:
+            recipient_pubkey_hex = parts[1]
+            content = parts[2]
+            
+            # Правильный способ создать зашифрованное сообщение (Kind 4)
+            recipient_pubkey = PublicKey.from_hex(recipient_pubkey_hex)
+            encrypted_content = nip04_encrypt(agent.keys.secret_key(), recipient_pubkey, content)
+            event = EventBuilder(4, encrypted_content, [Tag.parse(["p", recipient_pubkey_hex])]).to_event(agent.keys)
 
-    await send_task
+            await agent.publish_event(event, api_url)
+            print(f"Direct message sent to {recipient_pubkey_hex}")
+        else:
+            print("Unknown command or incorrect format.")
+
     listen_task.cancel()
     await agent.close()
+    print("\nExiting...")
 
 if __name__ == "__main__":
     try:
         asyncio.run(run_director())
     except KeyboardInterrupt:
-        print("\nExiting...")
+        print("Exiting gracefully.")
