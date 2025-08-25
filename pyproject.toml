@@ -1,6 +1,6 @@
 [project]
 name = "sdominanta-mcp"
-version = "0.2.0"
+version = "0.2.1"
 description = "Sdominanta.net Multi-Agent Control Plane and Pa2ap Bridge"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,43 +22,6 @@ dependencies = [
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-# Указываем, что корень для поиска пакетов находится в текущей директории
-package-dir = {"": "."}
-# Явно перечисляем все пакеты Python в проекте
-packages = [
-    "mcp",
-    "mcp.agents",
-    "mcp.llm_connector",
-    "mcp.tools",
-    "pa2ap",
-    "pa2ap.python_adapter",
-    "pa2ap.python_adapter.sdominanta_agent",
-    "scripts",
-    "seed",
-    "wall",
-    "bridge",
-    "bridge.api",
-]
-
-[tool.setuptools.package-data]
-# Пути к файлам данных теперь относительны к корневому каталогу проекта
-"" = [
-    ".env.template",
-    "bridge/config.yaml",
-    "seed/bootstrap.json",
-    "seed/topics.json",
-    "seed/agents_registry.json",
-    "wall/WALL_NOTE.schema.json",
-    "wall/WALL_RULES.md",
-    "wall/threads/*",
-    "docs/*",
-    "pa2ap/daemon/*",
-    "examples/*",
-    "docker/*",
-    ".github/workflows/*",
-]
 
 [project.scripts]
 sdom-mcp = "mcp.main:main"

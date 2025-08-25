@@ -24,6 +24,9 @@ node_modules/
 .npmrc
 npm/mcp-wrapper/.npmrc
 
+# PyPI auth files (never commit)
+.pypirc
+
 # Editor/OS
 .DS_Store
 Thumbs.db
