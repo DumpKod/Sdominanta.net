@@ -41,7 +41,8 @@ class SdominantaAgent:
         else:
             self.private_key = PrivateKey() # Генерируем новый приватный ключ
         
-        self.public_key = self.private_key.public_key.hex() # Получаем публичный ключ из приватного
+        # Убеждаемся, что public_key всегда в чистом HEX формате (64 символа)
+        self.public_key = self.private_key.public_key.hex() 
         self.ws = None
 
     async def connect(self, ws_url="ws://localhost:9090"):

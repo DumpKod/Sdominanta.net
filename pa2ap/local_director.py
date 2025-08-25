@@ -101,6 +101,11 @@ async def run_director():
             recipient_pubkey_hex = parts[1]
             content = parts[2]
             
+            # Убеждаемся, что recipient_pubkey_hex имеет правильный формат (чистый HEX, 64 символа)
+            if len(recipient_pubkey_hex) != 64 or not all(c in "0123456789abcdefABCDEF" for c in recipient_pubkey_hex):
+                print("Error: Recipient public key must be a 64-character hexadecimal string.")
+                continue
+
             # Создание, шифрование и подпись Kind 4 события
             dm = EncryptedDirectMessage(
                 cleartext_content=content,
