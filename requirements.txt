@@ -5,5 +5,5 @@ websockets
 PyYAML
 python-dotenv
 httpx
-nostr-sdk
+pynostr
 aioconsole

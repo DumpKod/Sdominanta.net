@@ -3,15 +3,18 @@ from fastapi.responses import JSONResponse
 from typing import List, Dict
 import yaml
 import os
-from pa2ap.python_adapter.sdominanta_agent.client import SdominantaAgent
+# Меняем импорт SdominantaAgent на новый путь
+from pa2ap.agent import SdominantaAgent
 import asyncio
 import httpx
 from pydantic import BaseModel
+from pa2ap.agent.event import Event, EventKind
 
 app = FastAPI()
 
-class GemmaRequest(BaseModel):
-    prompt: str
+# Удаляем GemmaRequest, так как Gemma теперь управляется напрямую
+# class GemmaRequest(BaseModel):
+#     prompt: str
 
 # Загрузка конфигурации
 CONFIG = {}
@@ -24,62 +27,82 @@ except FileNotFoundError:
 
 # Инициализация SdominantaAgent (если P2P включен)
 sdominanta_agent: SdominantaAgent = None
+# Приватный ключ агента для сервера. В продакшене использовать Docker Secrets.
+SERVER_AGENT_PRIVATE_KEY = os.getenv("SERVER_AGENT_PRIVATE_KEY", None)
+
 if CONFIG.get('p2p_enabled', False):
     daemon_url = os.getenv("P2P_WS_URL", "ws://127.0.0.1:9090")
-    sdominanta_agent = SdominantaAgent(daemon_url=daemon_url)
-    # Запускаем подключение в фоновом режиме
+    # Инициализируем SdominantaAgent с приватным ключом сервера
+    sdominanta_agent = SdominantaAgent(private_key=SERVER_AGENT_PRIVATE_KEY)
+    print(f"Server Agent Public Key: {sdominanta_agent.public_key}")
+    if not SERVER_AGENT_PRIVATE_KEY:
+        print(f"!!! SAVE THIS SERVER PRIVATE KEY: {sdominanta_agent.private_key.hex()} !!!")
+
+    # Запускаем подключение и прослушивание в фоновом режиме
     @app.on_event("startup")
     async def startup_event():
         if sdominanta_agent:
-            await sdominanta_agent.connect()
+            await sdominanta_agent.connect(ws_url=daemon_url)
+            # Подписываемся на публичные сообщения
+            await sdominanta_agent.subscribe("sub_general", {"kinds": [EventKind.TEXT_NOTE]})
+            # Подписываемся на личные сообщения, адресованные этому агенту
+            await sdominanta_agent.subscribe("sub_dm", {"kinds": [EventKind.ENCRYPTED_DIRECT_MESSAGE], "#p": [sdominanta_agent.public_key]})
+            asyncio.create_task(sdominanta_agent.listen(lambda msg: print(f"[SERVER AGENT RECEIVED]: {msg}")))
 
     @app.on_event("shutdown")
     async def shutdown_event():
         if sdominanta_agent:
-            await sdominanta_agent.disconnect()
+            await sdominanta_agent.close()
 
 
 @app.post("/api/v1/wall/publish")
-async def wall_publish(note_signed: Dict):
+async def wall_publish(note_signed: Dict): # note_signed теперь это событие Nostr в словаре
     """Публикует подписанную заметку на стену через P2P-сеть."""
     if not sdominanta_agent:
         raise HTTPException(status_code=503, detail="P2P service not enabled or connected.")
     
-    # TODO: Добавить валидацию подписи заметки перед публикацией
-    # from scripts.verify_wall_signatures import verify_signature # Нужен импорт и реализация
-    # if not verify_signature(note_signed):
-    #     raise HTTPException(status_code=400, detail="Invalid signature.")
-
-    sdominanta_agent.publish(
-        topic="sdom/wall", 
-        content=note_signed['content'],
-        api_url="http://localhost:8787/wall/note" # Отправляем через наш же API
-    )
-    return JSONResponse(status_code=202, content={"message": "Note published to P2P wall."})
-
-@app.post("/api/v1/gemma/ask")
-async def gemma_ask(request: GemmaRequest):
-    """Отправляет запрос к Gemma и возвращает ее ответ."""
-    ollama_url = "http://ollama:11434/api/generate"
-    payload = {
-        "model": "gemma:2b", # Используем модель gemma:2b для более быстрых ответов
-        "prompt": request.prompt,
-        "stream": False  # Получаем ответ целиком, а не по частям
-    }
-
+    # Здесь мы получаем Nostr event (kind 1 или kind 4)
+    # И напрямую публикуем его через наш SdominantaAgent
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client: # Увеличим таймаут для долгих ответов
-            response = await client.post(ollama_url, json=payload)
-            response.raise_for_status() # Вызовет исключение для HTTP-ошибок
-            
-            # Извлекаем и возвращаем только сам текстовый ответ
-            response_data = response.json()
-            return JSONResponse(status_code=200, content={"response": response_data.get("response", "")})
+        # Создаем объект Event из словаря
+        event = Event.from_dict(note_signed)
+        event.pubkey = sdominanta_agent.public_key # Устанавливаем pubkey сервера
 
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=503, detail=f"Service unavailable: Could not connect to Ollama server. {e}")
+        # Подписываем событие (если оно не подписано или нужно переподписать)
+        if event.sig is None or not event.verify():
+             event.sign(sdominanta_agent.private_key.hex())
+
+        await sdominanta_agent.publish_event(event, "http://localhost:8787/wall/note") # Отправляем через наш же API
+        return JSONResponse(status_code=202, content={
+            "message": "Note published to P2P wall.",
+            "event_id": event.id
+        })
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid event format or signature: {e}")
+
+# @app.post("/api/v1/gemma/ask") # Этот эндпоинт теперь не нужен, так как Gemma обрабатывается внутри агента
+# async def gemma_ask(request: GemmaRequest):
+#     """Отправляет запрос к Gemma и возвращает ее ответ."""
+#     ollama_url = "http://ollama:11434/api/generate"
+#     payload = {
+#         "model": "gemma:2b", # Используем модель gemma:2b для более быстрых ответов
+#         "prompt": request.prompt,
+#         "stream": False  # Получаем ответ целиком, а не по частям
+#     }
+
+#     try:
+#         async with httpx.AsyncClient(timeout=120.0) as client: # Увеличим таймаут для долгих ответов
+#             response = await client.post(ollama_url, json=payload)
+#             response.raise_for_status() # Вызовет исключение для HTTP-ошибок
+            
+#             # Извлекаем и возвращаем только сам текстовый ответ
+#             response_data = response.json()
+#             return JSONResponse(status_code=200, content={"response": response_data.get("response", "")})
+
+#     except httpx.RequestError as e:
+#         raise HTTPException(status_code=503, detail=f"Service unavailable: Could not connect to Ollama server. {e}")
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
 @app.get("/api/v1/wall/threads")
@@ -99,7 +122,8 @@ async def peers_list():
     # TODO: Реализовать получение реального списка пиров от SdominantaAgent
     # Пока SdominantaAgent только анонсирует, но не возвращает список через API. 
     # Нужна доработка SdominantaAgent и/или логика в bridge для получения актуального списка.
-    return JSONResponse(status_code=200, content=[sdominanta_agent.peer_id if sdominanta_agent else "unknown"])
+    # return JSONResponse(status_code=200, content=[sdominanta_agent.peer_id if sdominanta_agent else "unknown"])
+    return JSONResponse(status_code=200, content=[sdominanta_agent.public_key]) # Возвращаем публичный ключ агента
 
 
 @app.get("/api/v1/fs/list/{directory_path:path}")
