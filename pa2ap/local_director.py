@@ -1,42 +1,46 @@
 import asyncio
-from pa2ap.agent import SdominantaAgent
-from nostr_sdk import Keys, EventBuilder, Tag, nip04_encrypt, PublicKey, SecretKey, Kind
+# Изменяем импорты с nostr_sdk на pynostr
+from pynostr.key import PrivateKey, PublicKey
+from pynostr.event import Event, EventKind
+from pynostr.encrypted_dm import EncryptedDirectMessage
 import json
 from aioconsole import ainput
-import ssl # Required for SdominantaUnsecureWebsocket
-import websockets # Required for SdominantaUnsecureWebsocket
+import websockets # Pynostr использует websockets напрямую
+import httpx
 
-# Этот класс-заглушка нужен, потому что наш pa2ap_daemon не настоящий nostr-relay
-# и не отвечает на запросы аутентификации, которые шлет nostr-sdk.
-# Мы просто игнорируем эти сообщения.
-class SdominantaUnsecureWebsocket:
-    def __init__(self, uri):
-        self._uri = uri
-        self._ws = None
 
-    async def connect(self):
-        # Отключаем SSL для ws:// URI
-        if self._uri.startswith("wss://"):
-            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            self._ws = await websockets.connect(self._uri, ssl=ssl_context)
-        else:
-            self._ws = await websockets.connect(self._uri)
+# Заглушка SdominantaUnsecureWebsocket больше не нужна
+# class SdominantaUnsecureWebsocket:
+#     def __init__(self, uri):
+#         self._uri = uri
+#         self._ws = None
 
-    async def send(self, message):
-        if "AUTH" in message:
-            print(f"Ignoring AUTH message: {message}")
-            return
-        await self._ws.send(message)
+#     async def connect(self):
+#         if self._uri.startswith("wss://"):
+#             ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+#             ssl_context.check_hostname = False
+#             ssl_context.verify_mode = ssl.CERT_NONE
+#             self._ws = await websockets.connect(self._uri, ssl=ssl_context)
+#         else:
+#             self._ws = await websockets.connect(self._uri)
 
-    async def recv(self):
-        return await self._ws.recv()
+#     async def send(self, message):
+#         if "AUTH" in message:
+#             print(f"Ignoring AUTH message: {message}")
+#             return
+#         await self._ws.send(message)
 
-    async def close(self):
-        if self._ws:
-            await self._ws.close()
-            print("WebSocket connection closed.")
+#     async def recv(self):
+#         return await self._ws.recv()
+
+#     async def close(self):
+#         if self._ws:
+#             await self._ws.close()
+#             print("WebSocket connection closed.")
+
+
+# --- Основной код Директора ---
+from pa2ap.agent import SdominantaAgent # Импортируем наш агент
 
 async def run_director():
     # --- ВАШИ ДАННЫЕ ---
@@ -48,7 +52,7 @@ async def run_director():
     agent = SdominantaAgent(private_key=MY_PRIVATE_KEY)
     print(f"Director Public Key: {agent.public_key}")
     if not MY_PRIVATE_KEY:
-        print(f"!!! SAVE THIS PRIVATE KEY: {agent.keys.secret_key().to_hex()} !!!")
+        print(f"!!! SAVE THIS PRIVATE KEY: {agent.private_key.hex()} !!!") # Используем agent.private_key.hex()
 
     ws_url = f"ws://{SERVER_IP}:9090"
     api_url = f"http://{SERVER_IP}:8787/wall/note"
@@ -58,10 +62,10 @@ async def run_director():
     print(f"\n--- Connected to Sdominanta Network at {ws_url} ---")
 
     # Подписка на публичные сообщения
-    await agent.subscribe("sub_general", {"kinds": [1]})
+    await agent.subscribe("sub_general", {"kinds": [EventKind.TEXT_NOTE]})
     
     # Подписка на личные сообщения
-    await agent.subscribe("sub_dm", {"kinds": [4], "#p": [agent.public_key]})
+    await agent.subscribe("sub_dm", {"kinds": [EventKind.ENCRYPTED_DIRECT_MESSAGE], "#p": [agent.public_key]})
 
     print("--- Waiting for messages... ---")
     print("--- Commands: .msg <pubkey> <message> | .pub <message> | .exit ---")
@@ -83,23 +87,28 @@ async def run_director():
             break
         elif parts[0] == ".pub" and len(parts) == 2:
             content = parts[1]
-            event = EventBuilder.text_note(content).to_event(agent.keys)
+            # Создание и подпись Kind 1 события
+            event = Event(
+                content=content,
+                pubkey=agent.public_key,
+                kind=EventKind.TEXT_NOTE,
+                tags=[]
+            )
+            event.sign(agent.private_key.hex())
             await agent.publish_event(event, api_url)
             print(f"Public note sent: {content}")
         elif parts[0] == ".msg" and len(parts) == 3:
             recipient_pubkey_hex = parts[1]
             content = parts[2]
             
-            recipient_pubkey = PublicKey.parse(recipient_pubkey_hex)
-            
-            # Правильный способ создать зашифрованное сообщение (Kind 4)
-            # nip04_encrypt возвращает зашифрованную строку
-            encrypted_content = nip04_encrypt(agent.keys.secret_key(), recipient_pubkey, content)
-            
-            # Затем создаем EventBuilder с этим зашифрованным контентом
-            event_builder = EventBuilder(kind=Kind(4), content=encrypted_content)
-            event_builder = event_builder.add_tag(Tag.parse(["p", recipient_pubkey_hex]))
-            event = event_builder.to_event(agent.keys)
+            # Создание, шифрование и подпись Kind 4 события
+            dm = EncryptedDirectMessage(
+                cleartext_content=content,
+                recipient_pubkey=recipient_pubkey_hex
+            )
+            dm.encrypt(agent.private_key.hex())
+            event = dm.to_event()
+            event.sign(agent.private_key.hex())
 
             await agent.publish_event(event, api_url)
             print(f"Direct message sent to {recipient_pubkey_hex}")
