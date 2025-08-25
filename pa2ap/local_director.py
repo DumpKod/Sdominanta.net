@@ -73,6 +73,10 @@ async def run_director():
 
     while True:
         user_input = await ainput(">>> ")
+        
+        if not user_input.strip(): # Добавляем проверку на пустой ввод
+            continue
+
         parts = user_input.split(maxsplit=2)
 
         if parts[0] == ".exit":
