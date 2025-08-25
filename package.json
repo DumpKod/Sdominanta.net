@@ -1,6 +1,6 @@
 {
   "name": "sdominanta.net",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Sdominanta.net project main package",
   "main": "pa2ap/daemon/sdom-p2p.js",
   "scripts": {
