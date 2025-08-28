@@ -302,6 +302,7 @@ curl "http://localhost:8000/api/v1/wall/threads?thread_id=general"
 ```bash
 # P2P настройки
 P2P_WS_URL=ws://127.0.0.1:9090
+SERVER_AGENT_PUBLIC_KEY=3bf6a9d254e1bd3d561f96e8acb11401dbde09e2b9c6f99fee92a1e3393718a0
 SERVER_AGENT_PRIVATE_KEY=your_private_key_hex
 
 # Производительность

@@ -88,8 +88,9 @@ p2p_background_task = None
 p2p_connection_status = "disconnected"  # disconnected, connecting, connected, error
 p2p_connection_error = None
 
-# Приватный ключ агента для сервера. В продакшене использовать Docker Secrets.
+# Ключи агента для сервера. В продакшене использовать Docker Secrets.
 SERVER_AGENT_PRIVATE_KEY = os.getenv("SERVER_AGENT_PRIVATE_KEY", None)
+SERVER_AGENT_PUBLIC_KEY = os.getenv("SERVER_AGENT_PUBLIC_KEY", "3bf6a9d254e1bd3d561f96e8acb11401dbde09e2b9c6f99fee92a1e3393718a0")
 known_peers: set[str] = set() # Глобальный набор для хранения известных публичных ключей пиров
 
 async def init_p2p_agent():
@@ -106,9 +107,14 @@ async def init_p2p_agent():
 
         print(f"Initializing P2P agent with daemon URL: {daemon_url}")
 
-        # Инициализируем SdominantaAgent с приватным ключом сервера
-        sdominanta_agent = SdominantaAgent(private_key=SERVER_AGENT_PRIVATE_KEY)
-        print(f"Server Agent Public Key: {sdominanta_agent.public_key}")
+        # Инициализируем SdominantaAgent с приватным ключом сервера или публичным ключом
+        if SERVER_AGENT_PRIVATE_KEY:
+            sdominanta_agent = SdominantaAgent(private_key=SERVER_AGENT_PRIVATE_KEY)
+            print(f"Server Agent Public Key: {sdominanta_agent.public_key}")
+        else:
+            # Используем публичный ключ для создания агента (только для чтения)
+            print(f"Using Server Agent Public Key: {SERVER_AGENT_PUBLIC_KEY}")
+            sdominanta_agent = SdominantaAgent(public_key=SERVER_AGENT_PUBLIC_KEY)
 
         if not SERVER_AGENT_PRIVATE_KEY:
             print(f"!!! SAVE THIS SERVER PRIVATE KEY: {sdominanta_agent.private_key.hex()} !!!")
@@ -310,6 +316,9 @@ async def _get_p2p_status_cached():
     agent_key = None
     if sdominanta_agent and hasattr(sdominanta_agent, 'public_key'):
         agent_key = str(sdominanta_agent.public_key)
+    else:
+        # Используем публичный ключ из переменных окружения
+        agent_key = SERVER_AGENT_PUBLIC_KEY
 
     return {
         "enabled": CONFIG.get('p2p_enabled', False),
