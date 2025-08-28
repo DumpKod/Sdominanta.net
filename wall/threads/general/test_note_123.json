@@ -1,0 +1,14 @@
+{
+  "id": "test_note_123",
+  "pubkey": "test_pubkey",
+  "created_at": 1640995200,
+  "kind": 1,
+  "tags": [
+    [
+      "t",
+      "general"
+    ]
+  ],
+  "content": "Тестовое сообщение для P2P",
+  "sig": "test_signature"
+}

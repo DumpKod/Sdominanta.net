@@ -21,9 +21,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Создание непривилегированного пользователя
 RUN useradd --system --create-home sdominanta
 
-# Установка нашего Python-пакета из PyPI
-# Это установит все Python-зависимости и скрипты
-RUN pip install --no-cache-dir sdominanta-mcp
+# Создание виртуального окружения для Python
+RUN python -m venv /opt/venv
+
+# Активация виртуального окружения и установка Python зависимостей
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir sdominanta-mcp
 
 # Установка нашего npm-пакета
 WORKDIR /app

@@ -84,9 +84,13 @@ class TestBridgeAPI:
 
     def test_peers_list_no_agent(self, client):
         """Тест эндпоинта GET /api/v1/peers когда агент недоступен"""
+        # Очищаем кэш перед тестом
+        from bridge.cache_manager import api_cache
+        api_cache.clear()
+
         with patch('bridge.main.sdominanta_agent', None):
             response = client.get("/api/v1/peers")
-            
+
             assert response.status_code == 503
             data = response.json()
             assert "detail" in data
@@ -94,17 +98,50 @@ class TestBridgeAPI:
 
     @pytest.mark.asyncio
     async def test_websocket_connection(self):
-        """Тест WebSocket соединения"""
+        """Тест WebSocket соединения с обработкой сообщений"""
         client = TestClient(app)
-        
+
         with client.websocket_connect("/ws") as websocket:
             assert websocket is not None
-            # Отправляем тестовое сообщение, но не ожидаем ответа в этом тесте
+
+            # Тест 1: Отправляем тестовое сообщение и ожидаем ответ
             websocket.send_text(json.dumps({"type": "test", "data": "test_message"}))
-            # Просто убедимся, что соединение установлено и отправка прошла без ошибок
-            # Сервер может не отправить моментальный ответ в этом сценарии
-            # без запущенного P2P агента.
-            pass
+
+            # Ждем ответ без таймаута (TestClient не поддерживает timeout)
+            try:
+                response = websocket.receive_json()
+                assert response["type"] == "p2p_event"
+                assert response["data"] == "test_message"
+                assert response["received"] == True
+            except Exception as e:
+                pytest.fail(f"Не получен ожидаемый ответ от WebSocket: {e}")
+
+            # Тест 2: Тест ping-pong
+            websocket.send_text(json.dumps({"type": "ping"}))
+            try:
+                pong_response = websocket.receive_json()
+                assert pong_response["type"] == "pong"
+                assert "timestamp" in pong_response
+            except Exception as e:
+                pytest.fail(f"Не получен pong ответ: {e}")
+
+            # Тест 3: Тест обработки неизвестного типа сообщения
+            websocket.send_text(json.dumps({"type": "unknown_type"}))
+            try:
+                error_response = websocket.receive_json()
+                assert error_response["type"] == "error"
+                assert "Unknown message type" in error_response["message"]
+            except Exception as e:
+                pytest.fail(f"Не получен ответ об ошибке: {e}")
+
+            # Тест 4: Тест обработки некорректного JSON
+            websocket.send_text("invalid json")
+            try:
+                json_error_response = websocket.receive_json()
+                assert json_error_response["type"] == "error"
+                assert "Invalid JSON format" in json_error_response["message"]
+            except Exception as e:
+                pytest.fail(f"Не получен ответ об ошибке JSON: {e}")
 
     def test_fs_list_endpoint(self, client, tmp_path):
         """Тест эндпоинта GET /api/v1/fs/list/{directory_path} с реальной временной директорией"""

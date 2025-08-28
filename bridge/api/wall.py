@@ -69,31 +69,54 @@ class WallAPI:
         """
         Получает заметки из указанного треда.
         """
+        print(f"WallAPI: Запрос на получение заметок из треда {thread_id}")
+        print(f"WallAPI: base_wall_path = {self.base_wall_path}")
+
         thread_path = os.path.join(self.base_wall_path, thread_id)
+        print(f"WallAPI: thread_path = {thread_path}")
+        print(f"WallAPI: thread_path существует = {os.path.exists(thread_path)}")
+        print(f"WallAPI: thread_path является директорией = {os.path.isdir(thread_path)}")
+
         notes = []
 
         if not os.path.isdir(thread_path):
             print(f"WallAPI: Тред не найден: {thread_id}")
             return []
 
-        for filename in sorted(os.listdir(thread_path)):
-            if filename.endswith(".json"):
+        try:
+            files = os.listdir(thread_path)
+            print(f"WallAPI: Найдено файлов в директории: {len(files)}")
+            json_files = [f for f in files if f.endswith('.json')]
+            print(f"WallAPI: JSON файлов: {json_files}")
+
+            for filename in sorted(json_files):
                 filepath = os.path.join(thread_path, filename)
+                print(f"WallAPI: Читаю файл: {filepath}")
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
-                        note = json.load(f)
-                        # TODO: Добавить проверку подписи и валидацию по схеме
+                        content = f.read()
+                        print(f"WallAPI: Содержимое файла ({len(content)} символов): {content[:100]}...")
+                        note = json.loads(content)
+                        print(f"WallAPI: Успешно распарсен JSON: ID = {note.get('id', 'N/A')}")
                         notes.append(note)
                 except json.JSONDecodeError as e:
                     print(f"WallAPI: Ошибка парсинга JSON в {filepath}: {e}")
                 except Exception as e:
                     print(f"WallAPI: Ошибка чтения файла {filepath}: {e}")
-        
-        if since:
-            since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
-            notes = [note for note in notes if datetime.fromisoformat(note.get('created_at', '').replace('Z', '+00:00')) >= since_dt]
+        except Exception as e:
+            print(f"WallAPI: Ошибка чтения директории {thread_path}: {e}")
+            return []
 
-        return notes[-limit:]  # Возвращаем последние 'limit' заметок (или все, если их меньше)
+        if since:
+            try:
+                since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+                notes = [note for note in notes if datetime.fromisoformat(note.get('created_at', '').replace('Z', '+00:00')) >= since_dt]
+            except ValueError as e:
+                print(f"WallAPI: Ошибка парсинга даты since: {e}")
+
+        notes = notes[-limit:] if limit > 0 else notes
+        print(f"WallAPI: Возвращено {len(notes)} заметок из треда {thread_id}")
+        return notes
 
     async def create_thread(self, owner_id: str, thread_name: str, is_private: bool = False, associated_git_repo_url: Optional[str] = None) -> Dict[str, Any]:
         """

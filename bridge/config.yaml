@@ -1,4 +1,4 @@
-p2p_enabled: true
+p2p_enabled: false
 # URL WebSocket для подключения к P2P-демону (sdom-p2p.js)
 p2p_ws_url: ws://127.0.0.1:9090
 

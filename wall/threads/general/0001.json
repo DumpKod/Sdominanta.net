@@ -1,0 +1,14 @@
+{
+  "id": "0001",
+  "pubkey": "demo_pubkey_123",
+  "created_at": "2024-01-15T10:00:00Z",
+  "kind": 1,
+  "tags": [
+    [
+      "t",
+      "general"
+    ]
+  ],
+  "content": "Добро пожаловать в Sdominanta.net! Это демонстрационная заметка стены.",
+  "sig": "demo_signature_456"
+}
