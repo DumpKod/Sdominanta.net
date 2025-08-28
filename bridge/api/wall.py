@@ -1,12 +1,20 @@
-from pa2ap.python_adapter.sdominanta_agent.client import SdominantaAgent
 from typing import Dict, Any, List, Optional
+import os
+import json
+from datetime import datetime
+import uuid # Добавляем uuid для генерации уникальных ID заметок
+from fastapi import HTTPException # Добавляем HTTPException для обработки ошибок
+
+from mcp.tools.git_tools import GitTools # Импортируем GitTools
+
 # from ..utils.wall_manager import WallManager # TODO: Нужен модуль для управления стеной
 # from ..utils.git_tools import GitTools # TODO: Нужен модуль для работы с Git
 
 class WallAPI:
-    def __init__(self, wall_manager, git_tools):
+    def __init__(self, wall_manager=None, git_tools=None):
         self.wall_manager = wall_manager   # Инстанс менеджера стены
-        self.git_tools = git_tools         # Инстанс инструментов Git
+        self.git_tools = git_tools if git_tools else GitTools(base_repo_path="wall")         # Инстанс инструментов Git
+        self.base_wall_path = os.getenv("WALL_PATH", "wall/threads")
 
     async def publish_note(self, author_id: str, thread_id: str, content: Dict[str, Any], is_private: bool = False, recipient_user_id: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -25,26 +33,67 @@ class WallAPI:
             print(f"Публикация личного сообщения для {recipient_user_id}.")
             return {"status": "private_note_published", "note_id": "mock_private_note_id"}
         else:
-            # TODO: Реализовать логику записи в общий или скрытый тред
-            # note_id = await self.wall_manager.post_public_note(author_id, thread_id, content, is_private)
-            # await self.git_tools.commit_and_push(thread_id, f"Add note {note_id}") # Пример
-            print(f"Публикация заметки в тред {thread_id}.")
-            return {"status": "note_published", "note_id": "mock_note_id"}
+            # Реализуем логику записи в общий или скрытый тред и коммита в Git
+            thread_dir = os.path.join(self.base_wall_path, thread_id)
+            os.makedirs(thread_dir, exist_ok=True)
 
-    async def get_thread_notes(self, thread_id: str, user_id: str, since: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+            # Генерируем уникальный ID для заметки и имя файла
+            note_id = content.get("id", str(uuid.uuid4()))
+            # Добавляем created_at, если его нет
+            if "created_at" not in content:
+                content["created_at"] = datetime.utcnow().isoformat() + "Z"
+            
+            filename = f"{note_id}.json"
+            filepath = os.path.join(thread_dir, filename)
+
+            try:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(content, f, ensure_ascii=False, indent=2)
+                
+                # Коммит и пуш через GitTools
+                commit_message = f"Add note {note_id} to thread {thread_id} by {author_id}"
+                git_result = await self.git_tools.commit_and_push(repo_name=".", message=commit_message, files_to_add=[os.path.join(thread_id, filename)]) # Передаем относительный путь от base_repo_path (wall)
+
+                if git_result.get("status") == "success":
+                    print(f"WallAPI: Заметка {note_id} опубликована в тред {thread_id} и закоммичена.")
+                    return {"status": "note_published", "note_id": note_id, "git_status": "success"}
+                else:
+                    print(f"WallAPI: Заметка {note_id} опубликована локально, но ошибка Git: {git_result.get("message")}")
+                    raise HTTPException(status_code=500, detail=f"Ошибка Git при публикации: {git_result.get("message")}")
+
+            except Exception as e:
+                print(f"WallAPI: Ошибка публикации заметки {note_id} в тред {thread_id}: {e}")
+                raise HTTPException(status_code=500, detail=f"Ошибка публикации заметки: {e}")
+
+    async def get_thread_notes(self, thread_id: str, since: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         """
         Получает заметки из указанного треда.
-        Учитывает права доступа для скрытых тредов.
         """
-        print(f"WallAPI: Получение заметок из треда {thread_id} для пользователя {user_id}.")
-        # TODO: Реализовать чтение заметок из Git-репозитория/файлов через wall_manager
-        # (Возможно, с использованием git_tools для клонирования/обновления репозитория)
-        # notes = await self.wall_manager.get_notes(thread_id, user_id, since, limit)
-        # return notes
-        return [
-            {"id": "note1", "author": "user:alice", "content": {"text": "Привет, Стена!"}},
-            {"id": "note2", "author": "agent:research_agent", "content": {"text": "Новые данные по AI alignment."}}
-        ] # Заглушка
+        thread_path = os.path.join(self.base_wall_path, thread_id)
+        notes = []
+
+        if not os.path.isdir(thread_path):
+            print(f"WallAPI: Тред не найден: {thread_id}")
+            return []
+
+        for filename in sorted(os.listdir(thread_path)):
+            if filename.endswith(".json"):
+                filepath = os.path.join(thread_path, filename)
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        note = json.load(f)
+                        # TODO: Добавить проверку подписи и валидацию по схеме
+                        notes.append(note)
+                except json.JSONDecodeError as e:
+                    print(f"WallAPI: Ошибка парсинга JSON в {filepath}: {e}")
+                except Exception as e:
+                    print(f"WallAPI: Ошибка чтения файла {filepath}: {e}")
+        
+        if since:
+            since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+            notes = [note for note in notes if datetime.fromisoformat(note.get('created_at', '').replace('Z', '+00:00')) >= since_dt]
+
+        return notes[-limit:]  # Возвращаем последние 'limit' заметок (или все, если их меньше)
 
     async def create_thread(self, owner_id: str, thread_name: str, is_private: bool = False, associated_git_repo_url: Optional[str] = None) -> Dict[str, Any]:
         """

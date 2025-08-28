@@ -8,9 +8,39 @@ from pa2ap.agent import SdominantaAgent
 import asyncio
 import httpx
 from pydantic import BaseModel
-from pa2ap.agent.event import Event, EventKind
+from pynostr.event import Event, EventKind
+from bridge.api.wall import WallAPI # Импортируем WallAPI
+import json
 
 app = FastAPI()
+
+# Инициализация WallAPI
+wall_api = WallAPI()
+
+connected_websockets: set[WebSocket] = set() # Глобальный набор для хранения активных WebSocket-соединений
+
+async def handle_p2p_message(msg: str):
+    global known_peers
+    global connected_websockets
+    print(f"[SERVER AGENT RECEIVED]: {msg}")
+    try:
+        data = json.loads(msg)
+        if data[0] == "EVENT":
+            event_data = data[2]
+            event_pubkey = event_data.get("pubkey")
+            if event_pubkey and event_pubkey not in known_peers:
+                known_peers.add(event_pubkey)
+                print(f"Added new peer to known_peers: {event_pubkey}")
+            
+            # Отправляем P2P событие всем подключенным WebSocket-клиентам
+            for websocket in connected_websockets:
+                await websocket.send_json({"type": "p2p_event", "data": event_data})
+
+    except json.JSONDecodeError:
+        print(f"Could not decode JSON from P2P message: {msg}")
+    except Exception as e:
+        print(f"Error processing P2P message: {e}")
+
 
 # Удаляем GemmaRequest, так как Gemma теперь управляется напрямую
 # class GemmaRequest(BaseModel):
@@ -29,6 +59,7 @@ except FileNotFoundError:
 sdominanta_agent: SdominantaAgent = None
 # Приватный ключ агента для сервера. В продакшене использовать Docker Secrets.
 SERVER_AGENT_PRIVATE_KEY = os.getenv("SERVER_AGENT_PRIVATE_KEY", None)
+known_peers: set[str] = set() # Глобальный набор для хранения известных публичных ключей пиров
 
 if CONFIG.get('p2p_enabled', False):
     daemon_url = os.getenv("P2P_WS_URL", "ws://127.0.0.1:9090")
@@ -37,6 +68,9 @@ if CONFIG.get('p2p_enabled', False):
     print(f"Server Agent Public Key: {sdominanta_agent.public_key}")
     if not SERVER_AGENT_PRIVATE_KEY:
         print(f"!!! SAVE THIS SERVER PRIVATE KEY: {sdominanta_agent.private_key.hex()} !!!")
+    
+    # Добавляем публичный ключ самого агента сервера в список известных пиров
+    known_peers.add(sdominanta_agent.public_key)
 
     # Запускаем подключение и прослушивание в фоновом режиме
     @app.on_event("startup")
@@ -47,7 +81,7 @@ if CONFIG.get('p2p_enabled', False):
             await sdominanta_agent.subscribe("sub_general", {"kinds": [EventKind.TEXT_NOTE]})
             # Подписываемся на личные сообщения, адресованные этому агенту
             await sdominanta_agent.subscribe("sub_dm", {"kinds": [EventKind.ENCRYPTED_DIRECT_MESSAGE], "#p": [sdominanta_agent.public_key]})
-            asyncio.create_task(sdominanta_agent.listen(lambda msg: print(f"[SERVER AGENT RECEIVED]: {msg}")))
+            asyncio.create_task(sdominanta_agent.listen(handle_p2p_message))
 
     @app.on_event("shutdown")
     async def shutdown_event():
@@ -61,24 +95,21 @@ async def wall_publish(note_signed: Dict): # note_signed теперь это с�
     if not sdominanta_agent:
         raise HTTPException(status_code=503, detail="P2P service not enabled or connected.")
     
-    # Здесь мы получаем Nostr event (kind 1 или kind 4)
-    # И напрямую публикуем его через наш SdominantaAgent
-    try:
-        # Создаем объект Event из словаря
-        event = Event.from_dict(note_signed)
-        event.pubkey = sdominanta_agent.public_key # Устанавливаем pubkey сервера
+    # Определяем thread_id из tags, если есть, иначе используем 'general'
+    thread_id = "general"
+    for tag in note_signed.get('tags', []):
+        if tag[0] == 't':
+            thread_id = tag[1]
+            break
 
-        # Подписываем событие (если оно не подписано или нужно переподписать)
-        if event.sig is None or not event.verify():
-             event.sign(sdominanta_agent.private_key.hex())
-
-        await sdominanta_agent.publish_event(event, "http://localhost:8787/wall/note") # Отправляем через наш же API
-        return JSONResponse(status_code=202, content={
-            "message": "Note published to P2P wall.",
-            "event_id": event.id
-        })
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid event format or signature: {e}")
+    # Используем WallAPI для публикации заметки
+    return await wall_api.publish_note(
+        author_id=sdominanta_agent.public_key, # Публичный ключ агента сервера как автор
+        thread_id=thread_id,
+        content=note_signed, # Вся подписанная заметка как контент
+        is_private=False, # Пока не реализована приватность
+        recipient_user_id=None
+    )
 
 # @app.post("/api/v1/gemma/ask") # Этот эндпоинт теперь не нужен, так как Gemma обрабатывается внутри агента
 # async def gemma_ask(request: GemmaRequest):
@@ -108,10 +139,7 @@ async def wall_publish(note_signed: Dict): # note_signed теперь это с�
 @app.get("/api/v1/wall/threads")
 async def wall_threads(thread_id: str = "general", since: str = None, limit: int = 50):
     """Получает заметки из указанного треда стены."""
-    # TODO: Реализовать чтение из локальных wall/threads/*.json файлов
-    # Это потребует отдельного модуля для работы с Git-репозиторием и чтением файлов.
-    # Для MVP просто заглушка:
-    return JSONResponse(status_code=200, content=[])
+    return await wall_api.get_thread_notes(thread_id=thread_id, since=since, limit=limit)
 
 @app.get("/api/v1/peers")
 async def peers_list():
@@ -119,11 +147,8 @@ async def peers_list():
     if not sdominanta_agent:
         raise HTTPException(status_code=503, detail="P2P service not enabled or connected.")
     
-    # TODO: Реализовать получение реального списка пиров от SdominantaAgent
-    # Пока SdominantaAgent только анонсирует, но не возвращает список через API. 
-    # Нужна доработка SdominantaAgent и/или логика в bridge для получения актуального списка.
-    # return JSONResponse(status_code=200, content=[sdominanta_agent.peer_id if sdominanta_agent else "unknown"])
-    return JSONResponse(status_code=200, content=[sdominanta_agent.public_key]) # Возвращаем публичный ключ агента
+    # Возвращаем список известных пиров
+    return JSONResponse(status_code=200, content=list(known_peers))
 
 
 @app.get("/api/v1/fs/list/{directory_path:path}")
@@ -136,8 +161,16 @@ async def list_files(directory_path: str):
     # Импортируем Path внутри, чтобы не добавлять в глобальные импорты
     from pathlib import Path
 
-    # Базовый путь внутри контейнера, к которому разрешен доступ.
-    base_path = Path("/app").resolve()
+    # Базовый путь:
+    # - если определен APP_BASE_PATH, используем его
+    # - иначе, если существует "/app" (контейнер), используем его
+    # - иначе используем текущую рабочую директорию
+    env_base_path = os.getenv("APP_BASE_PATH")
+    if env_base_path:
+        base_path = Path(env_base_path).resolve()
+    else:
+        container_base = Path("/app")
+        base_path = container_base.resolve() if container_base.exists() else Path.cwd().resolve()
     
     # Создаем полный путь и разрешаем его (убираем .. и т.д.)
     target_path = (base_path / directory_path).resolve()
@@ -174,9 +207,9 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket-эндпоинт для подписки на события P2P-сети."""
     await websocket.accept()
     print(f"WebSocket connection established: {websocket.client}")
+    connected_websockets.add(websocket) # Добавляем WebSocket в набор
 
-    # TODO: Реализовать подписку на топики P2P и отправку событий клиенту
-    # Для MVP просто держим соединение открытым
+    # Подписка на топики P2P и отправка событий клиенту
     try:
         while True:
             data = await websocket.receive_text() # Ждем входящих сообщений (если есть)
@@ -186,3 +219,5 @@ async def websocket_endpoint(websocket: WebSocket):
             await asyncio.sleep(1) # Небольшая задержка
     except Exception as e:
         print(f"WebSocket disconnected: {websocket.client} with error: {e}")
+    finally:
+        connected_websockets.remove(websocket) # Удаляем WebSocket из набора при разрыве соединения
