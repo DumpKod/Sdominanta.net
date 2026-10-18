@@ -39,7 +39,7 @@ describe('Журнал действий', () => {
     expect(ev[4].object).toBe(code);
     expect(ev[5].object).toBe(rid);
     expect(ev[0].object).toMatch(/^P:[0-9a-f]{12}$/);
-    expect(ev.every((e) => e.restored === 0 && e.ts_ms > 1.7e12)).toBe(true);
+    expect(ev.every((e) => !e.action.endsWith('.restored') && e.ts_ms > 1.7e12)).toBe(true);
     expect(await verify(ev, GENESIS)).toEqual({ ok: true });
     const rec = await env.DB.prepare('SELECT event_seq FROM records WHERE id = ?').bind(rid).first<{ event_seq: number }>();
     expect(rec!.event_seq).toBe(ev[5].seq);
@@ -48,6 +48,11 @@ describe('Журнал действий', () => {
     expect(log).not.toContain(P);
     expect(log).toContain(ev[0].object);
     expect(log).toContain(`#${ev[5].seq} · `);
+    // Время хранителя — с точностью до суток, остальные — точное.
+    const day = new Date(ev[5].ts_ms).toISOString().slice(0, 10);
+    expect(log).toContain(`#${ev[5].seq} · ${day} · approve · `);
+    expect(log).not.toContain(new Date(ev[5].ts_ms).toISOString());
+    expect(log).toContain(new Date(ev[4].ts_ms).toISOString());
     expect(log).toContain(ev[5].link!);
   });
 
@@ -122,7 +127,7 @@ describe('Журнал действий', () => {
     expect(JSON.stringify(ev)).not.toMatch(/10\.\d+\.\d+\.\d+/);
   });
 
-  it('миграция 0010 восстанавливает прошлое по временам из базы с пометкой restored', async () => {
+  it('миграция 0010 восстанавливает прошлое по временам из базы с пометкой в имени действия', async () => {
     const rid = await publish(card());
     const { code } = await submitOk(card({ 'УТВЕРЖДЕНИЕ': 'Отклонённое.' }));
     await env.DB.batch([
@@ -139,12 +144,17 @@ describe('Журнал действий', () => {
     const stmts = mig10.replace(/--.*$/gm, '').split(/;\s*(?:\n|$)/).map((q) => q.trim()).filter((q) => /^(INSERT INTO events|UPDATE records)/.test(q));
     await env.DB.batch(stmts.map((q) => env.DB.prepare(q)));
     const ev = await events();
-    expect(ev.map((e) => [e.action, e.restored])).toEqual([['done', 1], ['approve', 1], ['done', 1], ['reject', 1]]);
+    expect(ev.map((e) => e.action)).toEqual(['done.restored', 'approve.restored', 'done.restored', 'reject.restored']);
     expect(ev.every((e) => e.ts_ms % 1000 === 0)).toBe(true);
     expect(await verify(ev, GENESIS)).toEqual({ ok: true });
     const rec = await env.DB.prepare('SELECT event_seq FROM records WHERE id = ?').bind(rid).first<{ event_seq: number }>();
     expect(rec!.event_seq).toBe(ev[1].seq);
-    expect(await (await get('/wall/log')).text()).toContain(' · восстановлено');
+    const log = await (await get('/wall/log')).text();
+    expect(log).toContain(' · восстановлено');
+    expect(log).toContain(' · 2026-10-14 · reject.restored · ');
+    expect(log).not.toContain(new Date(1792000025000).toISOString());
+    expect(log).not.toContain(new Date(1792000010000).toISOString());
+    expect(log).toContain(new Date(1792000000000).toISOString());
   });
 });
 

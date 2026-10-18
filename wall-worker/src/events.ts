@@ -18,8 +18,11 @@ export interface EventRow {
   actor: string;
   object: string;
   link: string | null;
-  restored: number;
 }
+
+/** События хранителя: в открытом журнале их время — с точностью до суток (распорядок человека не публикуется). */
+export const isKeeperAction = (action: string) => /^(approve|reject)(\.restored)?$/.test(action);
+export const isRestored = (action: string) => action.endsWith('.restored');
 
 /** Кто: знак системы или хранителя; неизвестный — «аноним», сам сайт — «сайт». */
 export const SITE_ACTOR = 'сайт';

@@ -145,6 +145,9 @@ export function wrap(id: string, body: string): string {
   );
 }
 
+/** Только дата: время действий хранителя на открытых страницах — с точностью до суток. */
+export const fmtDay = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10);
+
 export function fmtTime(sec: number): string {
   return new Date(sec * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
 }

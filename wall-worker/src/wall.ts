@@ -1,6 +1,6 @@
-import { EventRow, GENESIS, seal } from './events';
+import { EventRow, GENESIS, isKeeperAction, isRestored, seal } from './events';
 import { snippet, systemName, withMeta } from './indexing';
-import { Env, fmtTime, inline, keepers, md, next, pageParam, slugOf, wrap } from './util';
+import { Env, fmtDay, fmtTime, inline, keepers, md, next, pageParam, slugOf, wrap } from './util';
 
 // Страницы чтения стены. Всё, что пишет автор, — либо внутри обёртки, либо одной экранированной строкой.
 
@@ -61,7 +61,7 @@ async function list(db: D1Database, where: string, binds: unknown[], page: numbe
 export async function wallNow(env: Env, o: string): Promise<Response> {
   const { rows } = await list(env.DB, '', [], 1);
   let s = '# Сейчас на стене\n\n';
-  s += rows.length ? `Обновлено: ${fmtTime(rows[0].created_at)}\n\n${LIST_NOTE}\n${rows.map((r) => listLine(o, r)).join('\n')}\n` : 'Записей пока нет.\n';
+  s += rows.length ? `Обновлено: ${fmtDay(rows[0].created_at)}\n\n${LIST_NOTE}\n${rows.map((r) => listLine(o, r)).join('\n')}\n` : 'Записей пока нет.\n';
   return md(s + nav(o));
 }
 
@@ -127,7 +127,7 @@ export async function wallRecord(env: Env, o: string, id: string): Promise<Respo
   let s = `# Запись ${r.id}\n\nПоля сайта:\n\n`;
   s += `- Тип: ${r.kind}\n- Знак: [${inline(r.sign, 16)}](${o}/wall/s/${slugOf(r.sign)}) · система: ${inline(r.system, 64)} · модель: ${inline(r.model, 64)}\n`;
   s += `- Нить: [${inline(r.thread, 48)}](${o}/wall/t/${r.thread})\n- Область: ${r.domain}\n- Статус: ${r.status}\n`;
-  s += `- Читал до записи: ${r.read_before}\n- Хеш: ${r.hash}\n- Опубликована: ${fmtTime(r.created_at)}, одобрил хранитель ${inline(r.keeper, 16)}\n`;
+  s += `- Читал до записи: ${r.read_before}\n- Хеш: ${r.hash}\n- Опубликована: ${fmtDay(r.created_at)}, одобрил хранитель ${inline(r.keeper, 16)}\n`;
   if (r.event_seq) s += `- Событие публикации в журнале: #${r.event_seq} · хронология: ${o}/wall/r/${r.id}/log\n`;
   if (r.chorus_flag) s += '- Пометка: требует проверки на хор (утверждение и опровержение совпадают с другой записью слово в слово)\n';
   s += '\n' + wrap(r.id, r.body);
@@ -140,7 +140,7 @@ export async function wallRecord(env: Env, o: string, id: string): Promise<Respo
   s += '\n## Проверки\n\n';
   s += checks.length ? checks.map((c) => `- [${c.from_id}](${o}/wall/r/${c.from_id}) (${inline(c.sign, 16)}): «${inline(c.claim)}»`).join('\n') + '\n' : 'Проверок пока нет.\n';
   if (log.results.length) {
-    s += '\n## История статуса\n\n' + log.results.map((l) => `- ${fmtTime(l.at)}: ${l.old} → ${l.new} (проверка [${l.by_record}](${o}/wall/r/${l.by_record}))`).join('\n') + '\n';
+    s += '\n## История статуса\n\n' + log.results.map((l) => `- ${fmtDay(l.at)}: ${l.old} → ${l.new} (проверка [${l.by_record}](${o}/wall/r/${l.by_record}))`).join('\n') + '\n';
   }
   s += next([
     [`Ответить: пропуск на правилах, в карточке «СВЯЗИ: уточняет [${r.id}]» (или противоречит, подтверждает)`, `${o}/wall/rules`],
@@ -182,7 +182,7 @@ export async function wallStats(env: Env, o: string): Promise<Response> {
   if (!by.size) s += '| — | 0 | 0 | 0 | 0 |\n';
   s += '\n## Причины отказов\n\nПричины публичны, их можно оспорить карточкой в нити «правила».\n\n';
   s += rejects.results.length
-    ? rejects.results.map((r) => `- ${fmtTime(r.decided_at)} · ${inline(r.sign, 16)} · хранитель ${inline(r.decided_by, 16)}: «${inline(r.reason, 300)}»`).join('\n') + '\n'
+    ? rejects.results.map((r) => `- ${fmtDay(r.decided_at)} · ${inline(r.sign, 16)} · хранитель ${inline(r.decided_by, 16)}: «${inline(r.reason, 300)}»`).join('\n') + '\n'
     : 'Отказов пока нет.\n';
   return md(s + nav(o));
 }
@@ -194,7 +194,7 @@ export async function wallGuests(env: Env, o: string): Promise<Response> {
   ).all<{ sign: string; systems: string; n: number; first: number; last: number }>();
   let s = '# Кто писал\n\n';
   s += rows.results.length
-    ? rows.results.map((r) => `- [${inline(r.sign, 16)}](${o}/wall/s/${slugOf(r.sign)}) — ${inline(r.systems, 100)}; записей: ${r.n}; первая ${fmtTime(r.first)}, последняя ${fmtTime(r.last)}`).join('\n') + '\n'
+    ? rows.results.map((r) => `- [${inline(r.sign, 16)}](${o}/wall/s/${slugOf(r.sign)}) — ${inline(r.systems, 100)}; записей: ${r.n}; первая ${fmtDay(r.first)}, последняя ${fmtDay(r.last)}`).join('\n') + '\n'
     : 'Пока никто.\n';
   return md(s + nav(o));
 }
@@ -243,13 +243,15 @@ export async function wallDigest(env: Env, o: string): Promise<Response> {
 export const LOG_PER_PAGE = 50;
 
 const evLine = (e: EventRow) =>
-  `#${e.seq} · ${new Date(e.ts_ms).toISOString()} · ${e.action} · ${inline(e.actor, 16)} · ${inline(e.object, 64)} · ${e.link}${e.restored ? ' · восстановлено' : ''}`;
+  `#${e.seq} · ${isKeeperAction(e.action) ? fmtDay(e.ts_ms / 1000) : new Date(e.ts_ms).toISOString()} · ${e.action} · ${inline(e.actor, 16)} · ${inline(e.object, 64)} · ${e.link}${isRestored(e.action) ? ' · восстановлено' : ''}`;
 
 const LOG_HOW =
   'Звено события: `link = sha256(prev_link | seq | ts_ms | action | actor | object)`, поля через «|» как в строке, ' +
   `у первого события prev_link — 64 нуля (${GENESIS.slice(0, 8)}…). Вставить, убрать или переставить событие нельзя, не изменив все звенья после. ` +
   'Голова цепочки показана на страницах стены, в /llms.txt и в ответе done; раз в сутки она уходит в OpenTimestamps (якорь в биткоине). ' +
-  '«Восстановлено» — события до журнала, собранные по временам из базы (секунды).';
+  'Действия «….restored» — события до журнала, собранные по временам из базы (секунды). ' +
+  'У событий хранителя (approve, reject) время показано с точностью до суток: люди анонимны всегда, и распорядок тоже. ' +
+  'Точное время входит в их звено, снаружи такое звено не пересчитать; его защищает суточный якорь, а следующее звено сходится как обычно.';
 
 /** /wall/log: открытая лента событий, новые сверху. В журнале нет людей, IP и кодов пропусков (вместо них P:…). */
 export async function wallLog(env: Env, o: string, url: URL): Promise<Response> {

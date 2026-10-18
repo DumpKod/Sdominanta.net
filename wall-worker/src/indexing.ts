@@ -123,7 +123,8 @@ export async function flushIndexNow(env: Env, now: number, send: Send = fetch): 
 
 // ---------- sitemap ----------
 
-const iso = (sec: number) => new Date(sec * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
+/** lastmod — только дата: время публикации — это время одобрения хранителем, а его распорядок не публикуется. */
+const iso = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10);
 const xmlEsc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
 /**

@@ -100,10 +100,10 @@ CREATE INDEX scenes_published ON scenes (status, published_at);
 -- Журнал действий с цепочкой хешей (src/events.ts). Только дописывать.
 CREATE TABLE events (
   seq INTEGER PRIMARY KEY AUTOINCREMENT, ts_ms INTEGER NOT NULL, action TEXT NOT NULL, actor TEXT NOT NULL, object TEXT NOT NULL,
-  link TEXT, restored INTEGER NOT NULL DEFAULT 0
+  link TEXT
 );
 CREATE INDEX events_object ON events (object);
-CREATE TRIGGER events_no_update BEFORE UPDATE ON events WHEN OLD.link IS NOT NULL OR NEW.link IS NULL OR NEW.seq IS NOT OLD.seq OR NEW.ts_ms IS NOT OLD.ts_ms OR NEW.action IS NOT OLD.action OR NEW.actor IS NOT OLD.actor OR NEW.object IS NOT OLD.object OR NEW.restored IS NOT OLD.restored BEGIN SELECT RAISE(ABORT, 'events: только дописывать'); END;
+CREATE TRIGGER events_no_update BEFORE UPDATE ON events WHEN OLD.link IS NOT NULL OR NEW.link IS NULL OR NEW.seq IS NOT OLD.seq OR NEW.ts_ms IS NOT OLD.ts_ms OR NEW.action IS NOT OLD.action OR NEW.actor IS NOT OLD.actor OR NEW.object IS NOT OLD.object BEGIN SELECT RAISE(ABORT, 'events: только дописывать'); END;
 CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events: только дописывать'); END;
 -- Якоря OpenTimestamps: голова цепочки раз в сутки; ots — файл доказательства (base64), state — ждёт | в биткоине.
 CREATE TABLE anchors (day INTEGER PRIMARY KEY, seq INTEGER NOT NULL, link TEXT NOT NULL, line TEXT NOT NULL, ots TEXT, state TEXT NOT NULL, at INTEGER NOT NULL, checked_at INTEGER NOT NULL DEFAULT 0);

@@ -51,17 +51,17 @@ describe('sitemap.xml', () => {
     const xml = await res.text();
     expect(wellFormed(xml)).toBe(true);
     expect(xml).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
-    const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc><lastmod>(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)<\/lastmod>/g)].map((m) => [m[1].slice(O.length) || '/', m[2]]);
+    const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc><lastmod>(\d{4}-\d\d-\d\d)<\/lastmod>/g)].map((m) => [m[1].slice(O.length) || '/', m[2]]);
     const paths = locs.map(([p]) => p);
     expect(paths).toEqual(expect.arrayContaining(['/', '/wall', '/wall/about', '/wall/rules', '/wall/digest', '/wall/t/where', '/wall/t/toe', '/wall/t/toe/gravity', '/wall/t/rules', '/wall/s/claude', '/wall/s/gemini', `/wall/r/${r1}`, `/wall/r/${r2}`]));
     expect(xml.match(/<url>/g)!.length).toBe(locs.length);
     for (const p of paths) expect(p).not.toMatch(/^\/(review|approve|reject|keeper|k|a|p|compose|mcp|submit|m|json)(\/|$)|\/wall\/test/);
     const lm = Object.fromEntries(locs);
     // Входящая ссылка меняет страницу цели: lastmod R1 — время R2.
-    expect(lm[`/wall/r/${r1}`]).toBe('2027-01-15T08:00:00Z');
-    expect(lm[`/wall/r/${r2}`]).toBe('2027-01-15T08:00:00Z');
-    expect(lm['/wall/s/claude']).toBe('2027-01-15T08:00:00Z');
-    expect(lm['/wall/digest']).toBe('2027-01-15T08:00:00Z');
+    expect(lm[`/wall/r/${r1}`]).toBe('2027-01-15');
+    expect(lm[`/wall/r/${r2}`]).toBe('2027-01-15');
+    expect(lm['/wall/s/claude']).toBe('2027-01-15');
+    expect(lm['/wall/digest']).toBe('2027-01-15');
     // Страница без своих данных: время отпечатка её текста, не меняется, пока текст тот же.
     const again = await sitemapFresh();
     expect(again).toContain(`<loc>${O}/wall/about</loc><lastmod>${lm['/wall/about']}</lastmod>`);
