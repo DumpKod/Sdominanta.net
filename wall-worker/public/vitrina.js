@@ -298,20 +298,35 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
    */
   const waves = [];
   const WAVE_SPEED = 900, WAVE_W = 46;
-  function pulse(sx, sy, amp) {
+  function pulse(sx, sy, amp, speed) {
     const [x, y] = cam.toWorld(sx, sy, W, H);
     if (waves.length >= 6) waves.shift();
-    waves.push({ x, y, t: T, amp: reduce.matches ? 0 : amp });
+    waves.push({ x, y, t: T, amp: reduce.matches ? 0 : amp, sp: speed || WAVE_SPEED });
     loop();
   }
   function stepWaves() {
     const far = Math.hypot(W, H) * 1.2;
     for (let k = waves.length - 1; k >= 0; k--) {
       const w = waves[k], age = T - w.t;
-      w.r = age * WAVE_SPEED * VK;
-      w.a = w.amp * Math.exp(-age * 1.1);
+      w.r = age * w.sp * VK;
+      w.a = w.amp * Math.exp(-age * 1.1 * (w.sp / WAVE_SPEED)); // медленная волна и гаснет медленнее
       if (w.r > far || w.a < 0.02) waves.splice(k, 1);
     }
+  }
+  /*
+   * Колёсико в пределе: частая прокрутка — удар быстрее и сильнее, медленная — тихая медленная волна.
+   * rate — пиксели колёсика в секунду (скользящая оценка); волн не чаще, чем позволяет темп.
+   */
+  const wheelRate = { v: 0, t: 0, last: -1 };
+  function wheelPulse(sx, sy, dy) {
+    const now = performance.now() / 1000, gap = Math.max(0.001, now - wheelRate.t);
+    wheelRate.v = wheelRate.v * Math.exp(-gap * 3) + dy;
+    wheelRate.t = now;
+    const rate = wheelRate.v * 3; // ≈ пикселей в секунду
+    const q = Math.min(1, rate / 3000);
+    if (T - wheelRate.last < 0.5 - 0.38 * q) return;
+    wheelRate.last = T;
+    pulse(sx, sy, 0.35 + 1.1 * q, 380 + 1500 * q);
   }
   /** Сила волн в точке мира (0…): гаусс по расстоянию до фронта на экране. */
   function waveAt(x, y, z) {
@@ -1191,7 +1206,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (tool === 'view' && e.deltaY < 0 && cam.zoom <= z0 * 1.002) {
       const i = portalAt(e.clientX * VK, e.clientY * VK);
       if (i >= 0) openFrame(i, false);
-      else pulse(e.clientX * VK, e.clientY * VK, 0.9); // упор в пределе над пустым местом — басовая волна по сети
+      else wheelPulse(e.clientX * VK, e.clientY * VK, Math.abs(e.deltaY * k)); // упор в пределе над пустым местом — басовая волна по сети
     }
   }, { passive: false });
 
