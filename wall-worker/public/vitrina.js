@@ -35,7 +35,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   let hl = -1; // индекс подсвеченного объекта
   let userMoved = false; // камеру двигал человек: при смене размера окна не возвращать к общему виду
   let tween = null; // плавный перелёт камеры { from, to, t }
-  const S = { drift: 1.4, density: 0.85, glow: 0.8, haze: 0.45, sound: 1 }; // пространство всей сцены
+  const S = { drift: 1.4, density: 0.85, glow: 0.8, haze: 0.45, sound: 1, reach: 0.45 }; // пространство всей сцены
   // Слух: music.js отдаёт раз в кадр полосы частот, басы/середину/верх, громкость и удар (0..1). Без музыки — нули.
   const SILENT = { bands: new Float32Array(1), low: 0, mid: 0, high: 0, level: 0, beat: 0, on: false };
   let hearFn = null, snd = SILENT;
@@ -100,6 +100,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   }
 
   function buildVeins() {
+    soundKey = null; // сцена правилась: пересчитать, кто какую полосу играет и где стоит
     veins = [];
     chunks = [];
     if (!built) return;
@@ -229,35 +230,128 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     regions = [];
     veins.forEach((v, vi) => {
       const r = find(vi);
-      if (!idx.has(r)) { idx.set(r, regions.length); regions.push({ len: 0, ph: (r * 2.399) % 6.283, tact: v.st.tact }); }
+      if (!idx.has(r)) { idx.set(r, regions.length); regions.push({ len: 0, ph: (r * 2.399) % 6.283, tact: v.st.tact, obj: v.obj }); }
       v.region = idx.get(r);
       regions[v.region].len += v.len;
     });
     for (const r of regions) r.f = Math.max(0.12, Math.min(2.6, 220 / Math.max(1, r.len)));
   }
 
+  /*
+   * Музыка в пространстве. Источник — объект-плеер (slot player) или сам виджет плеера на экране.
+   * Каждый объект слышит её по расстоянию до источника (space.reach — радиус, доля размера сцены) и в своей полосе:
+   * толстые моды играют басы, чем тоньше (плотнее) мода — тем выше её частоты. Энергия o.$e ускоряет такт,
+   * раскачивает резонанс и светит плазму объекта. Басы (удар) пускают волну от плеера сквозь всё.
+   */
+  const music = { on: false, x: 0, y: 0, r2: 0, k: 0 };
+  let soundKey = null, lastBeat = 0;
+  function soundMap() {
+    const objs = scene.objects;
+    const order = objs.map((o, i) => [o.strokes.length ? o.tubeR() : 0, i]).sort((a, b) => b[0] - a[0]);
+    order.forEach(([, i], r) => { objs[i].$q = order.length > 1 ? r / (order.length - 1) : 0.5; });
+    for (const o of objs) {
+      const b = o.bounds();
+      o.$cx = (b.x0 + b.x1) / 2; o.$cy = (b.y0 + b.y1) / 2; o.$ext = isEmpty(b) ? 0 : Math.hypot(b.x1 - b.x0, b.y1 - b.y0) / 2;
+    }
+    soundKey = scene;
+  }
+  function hear(dt) {
+    const objs = scene.objects;
+    if (soundKey !== scene) soundMap();
+    const on = snd.on || snd.level > 0.01;
+    if (on) {
+      const po = objs.find((o) => o.slot === 'player');
+      if (po) { music.x = po.$cx; music.y = po.$cy; }
+      else {
+        const el = document.querySelector('[data-slot="player"]'), rc = el && el.getBoundingClientRect();
+        if (rc && rc.width) [music.x, music.y] = cam.toWorld((rc.left + rc.width / 2) * VK, (rc.top + rc.height / 2) * VK, W, H);
+        else [music.x, music.y] = [cam.x, cam.y];
+      }
+      const sb = scene.bounds(), R = Math.max(1, Math.hypot(sb.x1 - sb.x0, sb.y1 - sb.y0) * S.reach);
+      music.r2 = 1 / (R * R);
+      music.k = S.sound * snd.level * 1.5;
+      if (snd.beat > 0.9 && lastBeat <= 0.9) {
+        const [sx, sy] = cam.toScreen(music.x, music.y, W, H);
+        pulse(sx, sy, Math.min(1.2, 0.5 + snd.low) * S.sound);
+      }
+    }
+    lastBeat = snd.beat;
+    music.on = on;
+    const nb = snd.bands.length, s = 1 - Math.exp(-(dt || 0) * 10);
+    for (const o of objs) {
+      let e = 0;
+      if (on && o.$ext !== undefined) {
+        const d = Math.max(0, Math.hypot(o.$cx - music.x, o.$cy - music.y) - o.$ext), g = Math.exp(-d * d * music.r2);
+        const c = Math.round(o.$q * (nb - 1));
+        let sum = 0, n = 0;
+        for (let k = Math.max(0, c - 2); k <= Math.min(nb - 1, c + 2); k++) { sum += snd.bands[k]; n++; }
+        e = o.get('sound') * S.sound * g * (n ? sum / n : 0) * 1.6;
+      }
+      o.$e = (o.$e || 0) + (e - (o.$e || 0)) * s;
+    }
+  }
+
+  /*
+   * Басовая волна: кольцо, бегущее от точки по сети (мир → экран). Её пускают упор в пределе над пустым местом
+   * (вместо дрожи экрана) и удары басов музыки (от плеера, сквозь всё). Узлы на фронте толкаются наружу и вспыхивают,
+   * жилы на фронте набухают.
+   */
+  const waves = [];
+  const WAVE_SPEED = 900, WAVE_W = 46;
+  function pulse(sx, sy, amp) {
+    const [x, y] = cam.toWorld(sx, sy, W, H);
+    if (waves.length >= 6) waves.shift();
+    waves.push({ x, y, t: T, amp: reduce.matches ? 0 : amp });
+    loop();
+  }
+  function stepWaves() {
+    const far = Math.hypot(W, H) * 1.2;
+    for (let k = waves.length - 1; k >= 0; k--) {
+      const w = waves[k], age = T - w.t;
+      w.r = age * WAVE_SPEED * VK;
+      w.a = w.amp * Math.exp(-age * 1.1);
+      if (w.r > far || w.a < 0.02) waves.splice(k, 1);
+    }
+  }
+  /** Сила волн в точке мира (0…): гаусс по расстоянию до фронта на экране. */
+  function waveAt(x, y, z) {
+    let f = 0;
+    for (const w of waves) {
+      const d = Math.hypot(x - w.x, y - w.y) * z - w.r, q = d / (WAVE_W * VK);
+      if (q > -3 && q < 3) f += w.a * Math.exp(-q * q);
+    }
+    return f;
+  }
+
   // Возбуждение моды под курсором — малым пятном (EXC_PX пикселей экрана): набухание, свет плазмы и узлов у стенки.
   const EXC_PX = 60, exc = { x: 0, y: 0, r2: 0, on: false };
   const excAt = (lo, x, y) => (lo < 0.01 ? 0 : exc.on ? lo * Math.exp(-((x - exc.x) ** 2 + (y - exc.y) ** 2) * exc.r2) : lo * 0.4);
-  function updateRadii() {
-    const t = T;
+  function updateRadii(dt) {
+    const objs = scene.objects;
     const [lwx, lwy] = cam.toWorld(mouse.x, mouse.y, W, H), lR = (EXC_PX * VK) / cam.zoom, lR2 = 1 / (lR * lR);
     exc.x = lwx; exc.y = lwy; exc.r2 = lR2; exc.on = mouse.in;
+    // Часы объекта: такт и мода идут своим ходом; музыка рядом (o.$e) ускоряет их в такт и раскачивает резонанс.
+    for (const o of objs) {
+      const e = o.$e || 0, tact = o.get('tact');
+      o.$ra = (o.$ra || 0) + (dt || 0) * 6.283 * (0.4 + tact) * (1 + 1.2 * e);
+      o.$tp = (o.$tp || 0) + (dt || 0) * 2.4 * tact * (1 + 1.5 * e);
+    }
+    const z = cam.zoom;
     for (const r of regions) {
-      const ang = t * 6.283 * r.f * (0.4 + r.tact);
+      const ang = (objs[r.obj].$ra || 0) * r.f;
       r.S1 = Math.sin(ang + r.ph); r.C1 = Math.cos(ang + r.ph); r.S2 = Math.sin(2 * ang + r.ph * 1.7);
     }
     for (const v of veins) {
       if (!v.vis) continue;
-      const r = regions[v.region], st = v.st;
+      const r = regions[v.region], st = v.st, ob = objs[v.obj], tp = ob.$tp || 0, res = st.resonance * (1 + 0.8 * (ob.$e || 0));
       const modeA = v.closed ? r.S1 : r.S1 * 0.7, modeB = v.closed ? r.C1 : r.S2 * 0.45;
       // возбуждение моды под курсором: вся мода светлеет и чуть набухает, сильнее — только у самого курсора
-      const lo = scene.objects[v.obj].$lift || 0;
+      const lo = ob.$lift || 0;
       let lam = v.R * 10;
       if (v.closed) lam = v.len / Math.max(1, Math.round(v.len / lam));
       for (let i = 0; i < v.n; i++) {
         const s = i * v.step;
-        const beat = 0.5 + 0.5 * Math.sin((s / lam) * 6.283 - t * 2.4 * st.tact + v.ph[3]);
+        const beat = 0.5 + 0.5 * Math.sin((s / lam) * 6.283 - tp + v.ph[3]);
         const pulse = beat * beat * beat * beat;
         const mode = v.m1[i] * modeA + v.m2[i] * modeB;
         let lift = 1;
@@ -265,7 +359,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
           if (mouse.in) { const dx = v.x[i] - lwx, dy = v.y[i] - lwy; lift = 1 + 0.25 * lo * Math.exp(-(dx * dx + dy * dy) * lR2); }
           else lift = 1 + 0.12 * lo;
         }
-        v.rad[i] = v.rb[i] * st.thick * lift * (1 + 0.16 * st.wobble * v.wob[i] + st.resonance * (0.45 * pulse + 0.3 * mode));
+        if (waves.length) lift *= 1 + 0.4 * waveAt(v.x[i], v.y[i], z);
+        v.rad[i] = v.rb[i] * st.thick * lift * (1 + 0.16 * st.wobble * v.wob[i] + res * (0.45 * pulse + 0.3 * mode));
       }
     }
   }
@@ -583,14 +678,16 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   function step() {
     cull();
-    const t = T, z = cam.zoom, iz = 1 / z, drift = S.drift * fieldSp * 0.55 * (1 + S.sound * (0.8 * snd.low + 0.4 * snd.beat));
+    // басы раскачивают весь континуум; рядом с плеером поле живее (src.k — громкость × реакция пространства)
+    const t = T, z = cam.zoom, iz = 1 / z, drift = S.drift * fieldSp * 0.55 * (1 + S.sound * (0.6 * snd.low + 0.3 * snd.beat));
+    const src = music.on ? music : null;
     const objs = scene.objects;
     const nb = snd.bands.length;
     // Курсор расталкивает малую область: глубже по масштабу — меньше; у раскрытого окна и в алеф-нуле — ещё меньше;
     // на самой моде (ниже) — ещё уже и слабее.
     const crPx = Math.max(14, Math.min(28, Math.min(W, H) * 0.03)) * Math.max(0.4, Math.min(1, Math.pow(homeZ / z, 0.22))) * (rama || SPACE !== 'main' ? 0.6 : 1);
     const cr = crPx * iz, cr2 = cr * cr;
-    const cursorOn = mouse.in && tool === 'view' && !gesture;
+    const cursorOn = mouse.in && tool === 'view' && (!gesture || (gesture.kind === 'tap' && touchy.matches));
     const [mwx, mwy] = cam.toWorld(mouse.x, mouse.y, W, H);
     for (let i = 0; i < objs.length; i++) objs[i].$lift = (objs[i].$lift || 0) + ((i === hl ? 1 : 0) - (objs[i].$lift || 0)) * (reduce.matches ? 1 : 0.12);
     if (win) win.k += (1 - win.k) * (reduce.matches ? 1 : 0.1);
@@ -625,8 +722,10 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
         if (fph[i] * 0.15915 * (fsc[i] < bandSc ? 0.55 : 1) > qLow + qSpan * (t > 0 ? t : 0)) { fon[i] = 0; continue; }
       }
       fon[i] = 1;
-      const hx = fhx[i] + drift * (Math.sin(fhy[i] * 0.009 * lv + t * 0.35 + fph[i] * 0.3) + 0.5 * Math.sin(fhx[i] * 0.017 * lv - t * 0.27));
-      const hy = fhy[i] + drift * (Math.cos(fhx[i] * 0.008 * lv - t * 0.31) + 0.5 * Math.sin(fhy[i] * 0.021 * lv + t * 0.4 + fph[i] * 0.3));
+      let dr = drift;
+      if (src) { const dx = fhx[i] - src.x, dy = fhy[i] - src.y; dr *= 1 + src.k * Math.exp(-(dx * dx + dy * dy) * src.r2); }
+      const hx = fhx[i] + dr * (Math.sin(fhy[i] * 0.009 * lv + t * 0.35 + fph[i] * 0.3) + 0.5 * Math.sin(fhx[i] * 0.017 * lv - t * 0.27));
+      const hy = fhy[i] + dr * (Math.cos(fhx[i] * 0.008 * lv - t * 0.31) + 0.5 * Math.sin(fhy[i] * 0.021 * lv + t * 0.4 + fph[i] * 0.3));
       let ax = (hx - fx[i]) * 0.035, ay = (hy - fy[i]) * 0.035;
       if (vV[i] === -2 || (i + vTick) % VOID_EVERY === 0) {
         queryVoid(fx[i], fy[i]);
@@ -657,6 +756,15 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
           if (d < rr) { const q = 1 - d / rr, p = q * q * (onMode ? 0.45 : 1.6) * iz; ax += (dx / d) * p; ay += (dy / d) * p; b = Math.max(b, q * 0.5); }
         }
       }
+      if (waves.length && !cap) {
+        for (const w of waves) {
+          const dx = fx[i] - w.x, dy = fy[i] - w.y, dw = Math.sqrt(dx * dx + dy * dy) || 1e-6, q = (dw * z - w.r) / (WAVE_W * VK);
+          if (q <= -3 || q >= 3) continue;
+          const f = w.a * Math.exp(-q * q);
+          ax += (dx / dw) * f * 3 * iz; ay += (dy / dw) * f * 3 * iz;
+          b = Math.max(b, Math.min(1, 0.9 * f));
+        }
+      }
       if (far > 0 && !cap) b *= 1 - 0.6 * far;
       if (hole && !(cap && kk > 0)) {
         const p = voidPush(hole, (fx[i] - cam.x) * z + W / 2, (fy[i] - cam.y) * z + H / 2);
@@ -677,13 +785,13 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       const f = ms[i] / v.step, j = Math.min(v.n - 2, Math.max(0, f | 0)), w = Math.min(1, f - j), j1 = Math.min(v.n - 1, j + 1);
       const R = v.rad[j] + (v.rad[j1] - v.rad[j]) * w;
       const cx = v.x[j] + (v.x[j1] - v.x[j]) * w, cy = v.y[j] + (v.y[j1] - v.y[j]) * w;
-      const band = v.st.sound * snd.bands[mv[i] % nb];
+      const band = objs[v.obj].$e || 0;
       const off = mu[i] * R * Math.min(0.97, 0.86 + 0.06 * Math.sin(t * 1.7 + mph[i]) + 0.1 * band);
       const jit = v.R * 0.12;
       mx[i] = cx + v.nx[j] * off + Math.sin(t * 1.3 + mph[i] * 3) * jit;
       my[i] = cy + v.ny[j] * off + Math.cos(t * 1.1 + mph[i] * 2) * jit;
       const tactB = 0.5 + 0.5 * Math.sin((ms[i] / (v.R * 10)) * 6.283 - t * 2.4 * v.st.tact + v.ph[3]);
-      mb[i] = (0.45 + 0.4 * mu[i] * mu[i] + 0.25 * tactB * tactB) * (1 + 0.8 * excAt(objs[v.obj].$lift || 0, mx[i], my[i])) * (v.st.fill / 0.6) * (1 + 0.9 * v.st.sound * snd.mid + 0.8 * band);
+      mb[i] = (0.45 + 0.4 * mu[i] * mu[i] + 0.25 * tactB * tactB) * (1 + 0.8 * excAt(objs[v.obj].$lift || 0, mx[i], my[i])) * (v.st.fill / 0.6) * (1 + 1.6 * band);
     }
   }
 
@@ -871,7 +979,10 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     stepFade(dt);
     if (tween) stepTween(dt);
     if (rama) stepFrame(dt);
-    updateRadii();
+    touchFocus();
+    hear(dt);
+    stepWaves();
+    updateRadii(dt);
     step();
     draw();
     govern(performance.now() - w0, gap, dt);
@@ -888,7 +999,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   /** Неподвижный кадр: поле успокаивается за n шагов без времени, затем один рисунок. */
   function still(n) {
     cull();
-    updateRadii();
+    updateRadii(0);
     for (let i = 0; i < n; i++) step();
     draw();
   }
@@ -956,6 +1067,17 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   let spaceDown = false;
   const typing = (e) => e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
 
+  let lastPinchPulse = -1;
+  // Телефон (без наведения): курсор — центр экрана; палец, который держат на месте, расталкивает под собой.
+  const touchy = window.matchMedia('(hover: none)');
+  let touchTick = 0;
+  function touchFocus() {
+    if (!touchy.matches || tool !== 'view') return;
+    const held = gesture && gesture.kind === 'tap' && pointers.size === 1;
+    if (held) { mouse.x = gesture.x; mouse.y = gesture.y; mouse.in = true; return; }
+    mouse.x = W / 2; mouse.y = H / 2; mouse.in = !rama && !going;
+    if (++touchTick % 6 === 0 && !win && !rama) highlight(hit(W / 2, H / 2));
+  }
   function pinchState() {
     const [a, b] = [...pointers.values()];
     return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
@@ -984,8 +1106,17 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     const p = pointers.get(e.pointerId);
     if (p) { p.x = e.clientX * VK; p.y = e.clientY * VK; }
     if (gesture && gesture.kind === 'pinch' && pointers.size >= 2) {
-      const s = pinchState();
-      cam.zoomAt(s.cx, s.cy, W, H, s.d / gesture.d, 0, ZOOM_MAX);
+      const s = pinchState(), z0 = cam.zoom, grow = s.d / gesture.d;
+      cam.zoomAt(s.cx, s.cy, W, H, grow, 0, ZOOM_MAX);
+      if (tool === 'view' && !rama && grow > 1.01) {
+        clampCam();
+        // щипок в пределе — как колёсико в пределе: центр экрана (курсор телефона) над областью — окно, иначе волна
+        if (cam.zoom <= z0 * 1.002) {
+          const i = portalAt(W / 2, H / 2);
+          if (i >= 0) openFrame(i, true);
+          else if (T - lastPinchPulse > 0.6) { lastPinchPulse = T; pulse(W / 2, H / 2, 0.9); }
+        }
+      }
       cam.panBy(s.cx - gesture.cx, s.cy - gesture.cy);
       gesture = { kind: 'pinch', ...s };
       userMoved = true;
@@ -1060,7 +1191,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (tool === 'view' && e.deltaY < 0 && cam.zoom <= z0 * 1.002) {
       const i = portalAt(e.clientX * VK, e.clientY * VK);
       if (i >= 0) openFrame(i, false);
-      else { shake = Math.min(1.2, shake + 0.35); loop(); }
+      else pulse(e.clientX * VK, e.clientY * VK, 0.9); // упор в пределе над пустым местом — басовая волна по сети
     }
   }, { passive: false });
 
@@ -1175,7 +1306,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   let SPACE = cv.dataset.space || 'main';
   let parentSpace = cv.dataset.parent || (SPACE === 'main' ? null : 'main');
   let fromId = cv.dataset.from || null;
-  let rim = null, going = null, pull = 0, shake = 0;
+  let rim = null, going = null, pull = 0;
   const fade = { veil: 0, veilTo: 0, rim: 1 };
   const sceneUrl = (sp) => (sp === 'main' ? '/vitrina/scene.json' : `/vitrina/scene/${sp}.json`);
   const spaceUrl = (sp) => (sp === 'main' ? '/' : `/in/${sp}`);
@@ -1188,11 +1319,6 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   function stepFade(dt) {
     fade.veil += (fade.veilTo - fade.veil) * Math.min(1, dt * 9);
-    if (shake > 0.001) {
-      shake *= Math.exp(-dt * 7);
-      const a = shake * 7 / VK;
-      cv.style.transform = `translate(${(Math.sin(T * 71) * a).toFixed(1)}px, ${(Math.cos(T * 53) * a).toFixed(1)}px)`;
-    } else if (cv.style.transform) cv.style.transform = '';
   }
 
   /** Камера, при которой прямоугольник мира заполняет экран с запасом over (больше 1 — раздут за края). */
@@ -1312,7 +1438,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     const finish = (j) => {
       // пространство не открылось (нет сцены): назад к прежнему виду, пространство вздрагивает
       if (!j) {
-        fade.veilTo = 0; shake = 1;
+        fade.veilTo = 0; pulse(W / 2, H / 2, 1);
         if (quick) going = null;
         else tween = { from: cam.clone(), to: before, t: 0, dur: 0.4, free: true, done: () => { going = null; } };
         loop();
@@ -1813,6 +1939,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     goIn, goOut,
     /** Редактор: области, чьи узлы светятся (многоугольники мира). */
     set marks(list) { marks = list || []; },
+    /** Басовая волна из точки экрана (пиксели CSS): упор в пределе, удары музыки, виджеты. */
+    pulse(sx, sy, amp) { pulse(sx * VK, sy * VK, amp == null ? 1 : amp); },
     /** Редактор: долететь к области объекта и раскрыть его окно. */
     openFrameOf(id) {
       const i = scene.objects.findIndex((o) => o.id === id), o = scene.objects[i];

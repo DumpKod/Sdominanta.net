@@ -136,7 +136,7 @@
       if (!what) return 'Область есть, содержимого нет: текст, адрес или алеф-нуль.';
       return `Готово: в конце приближения над областью раскроется ${what}.`;
     }
-    const SPACE_NAMES = { drift: 'Дрейф поля', density: 'Плотность', glow: 'Свечение', haze: 'Дымка (мягкий слой под линиями)', sound: 'Реакция поля на звук (0 — нет)' };
+    const SPACE_NAMES = { drift: 'Дрейф поля', density: 'Плотность', glow: 'Свечение', haze: 'Дымка (мягкий слой под линиями)', sound: 'Реакция поля на звук (0 — нет)', reach: 'Радиус музыки вокруг плеера (доля сцены)' };
     const spaceBox = section('Пространство сцены');
     const spaceSliders = {};
     for (const [k, [lo, hi]] of Object.entries(M.SPACE)) spaceSliders[k] = slider(spaceBox, k, SPACE_NAMES[k], lo, hi, 'space');

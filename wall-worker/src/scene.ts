@@ -56,7 +56,7 @@ export const STYLE_RANGE: Record<string, [number, number]> = {
 export const FRAME_RANGE: Record<string, [number, number]> = {
   width: [240, 1400], aspect: [0, 2], round: [0, 1], ring: [4, 160], far: [0, 1],
 };
-export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], density: [0.5, 1.6], glow: [0, 1.5], haze: [0, 1.5], sound: [0, 2] };
+export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], density: [0.5, 1.6], glow: [0, 1.5], haze: [0, 1.5], sound: [0, 2], reach: [0.05, 2] };
 
 /** Имя пространства: main — главная витрина, остальные — алеф-нули. */
 export const SPACE_RE = /^[a-z0-9-]{1,32}$/;

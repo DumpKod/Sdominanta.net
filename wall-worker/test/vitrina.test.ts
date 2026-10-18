@@ -477,7 +477,7 @@ describe('Алеф-нули: пространства внутри объект�
   });
 
   it('движок: вход колёсиком вглубь, дрожь в упор, выход наружу, адрес через history; редактор помнит пространство', () => {
-    for (const s of ['function goIn(', 'function goOut(', 'function depthWheel(', 'history.pushState', "addEventListener('popstate'", 'vitrina:space', 'shake', 'rim'])
+    for (const s of ['function goIn(', 'function goOut(', 'function depthWheel(', 'history.pushState', "addEventListener('popstate'", 'vitrina:space', 'pulse(', 'rim'])
       expect(vitrinaJs, s).toContain(s);
     for (const s of ["space: E.space || 'main'", "addEventListener('vitrina:space'", 'fInner'])
       expect(editorJs, s).toContain(s);
