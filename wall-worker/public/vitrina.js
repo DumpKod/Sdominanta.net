@@ -539,6 +539,13 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#010306';
     ctx.fillRect(0, 0, W, H);
+    // оболочка алеф-нуля, из которого вошли: снимок раздутого объекта, ещё крупнее и тусклее — края видны, фокус внутри
+    if (rim) {
+      const k = 1.22 + 0.02 * Math.sin(T * 0.7);
+      ctx.globalAlpha = 0.22 * fade.rim;
+      ctx.drawImage(rim, W / 2 - (W * k) / 2, H / 2 - (H * k) / 2, W * k, H * k);
+      ctx.globalAlpha = 1;
+    }
     const vg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.7);
     vg.addColorStop(0, 'rgba(0, 40, 48, 0.35)');
     vg.addColorStop(1, 'rgba(0, 0, 0, 0)');
@@ -608,6 +615,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
     if (overlay) { ctx.setTransform(DPR * VK, 0, 0, DPR * VK, 0, 0); overlay(ctx); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
+    if (fade.veil > 0.001) { ctx.fillStyle = `rgba(1, 3, 6, ${Math.min(1, fade.veil).toFixed(3)})`; ctx.fillRect(0, 0, W, H); }
   }
 
   /* ---------------------------------------------------------------------
@@ -621,6 +629,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     lastTs = ts;
     T += dt;
     snd = hearFn ? hearFn(dt) || SILENT : SILENT;
+    stepFade(dt);
     if (tween) stepTween(dt);
     updateRadii();
     step();
@@ -682,17 +691,19 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     loop();
   }
   function stepTween(dt) {
-    tween.t = Math.min(1, tween.t + dt / 0.45);
+    tween.t = Math.min(1, tween.t + dt / (tween.dur || 0.45));
     const e = tween.t < 0.5 ? 2 * tween.t * tween.t : 1 - (-2 * tween.t + 2) ** 2 / 2;
     const a = tween.from, b = tween.to;
     const za = Math.log(a.zoom), zb = Math.log(b.zoom);
     cam.zoom = Math.exp(za + (zb - za) * e);
     cam.x = a.x + (b.x - a.x) * e;
     cam.y = a.y + (b.y - a.y) * e;
+    const done = tween.t >= 1 ? tween.done : null;
+    if (!tween.free) clampCam();
     if (tween.t >= 1) tween = null;
-    clampCam();
     ensureView(false);
     for (const f of listeners) f(cam);
+    if (done) done();
   }
   function fitAll() { userMoved = false; flyTo(scene.bounds()); }
 
@@ -710,6 +721,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   }
 
   cv.addEventListener('pointerdown', (e) => {
+    if (going) return;
     tween = null;
     try { cv.setPointerCapture(e.pointerId); } catch { /* указатель уже ушёл */ }
     pointers.set(e.pointerId, { x: e.clientX * VK, y: e.clientY * VK });
@@ -789,9 +801,11 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   cv.addEventListener('wheel', (e) => {
     e.preventDefault();
+    if (going) return; // переход между пространствами не прерывается
     tween = null;
     const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1;
     // гостю колёсико — масштаб; в инструментах правки — сдвиг, а масштаб — с Ctrl/⌘ (щипок трекпада приходит с Ctrl)
+    if (tool === 'view' && depthWheel(e.clientX * VK, e.clientY * VK, e.deltaY * k)) return;
     if (tool === 'view' || e.ctrlKey || e.metaKey) {
       cam.zoomAt(e.clientX * VK, e.clientY * VK, W, H, Math.exp(-e.deltaY * k * (e.ctrlKey ? 0.01 : 0.0015)), 0, ZOOM_MAX);
     } else {
@@ -809,6 +823,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   window.addEventListener('keydown', (e) => {
     if (typing(e)) return;
     if (e.key === 'Escape' && win) closeWindow();
+    else if (e.key === 'Escape' && tool === 'view' && SPACE !== 'main') goOut();
     if (e.code === 'Space' && !spaceDown) { spaceDown = true; cv.classList.add('grab-ready'); if (tool !== 'view') e.preventDefault(); }
     if ((e.code === 'Digit1' && e.shiftKey) || e.key === 'Home') { e.preventDefault(); fitAll(); }
   });
@@ -854,7 +869,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   function activate(i) {
     const o = scene.objects[i];
     if (!o) return;
-    if (o.window) openWindow(o);
+    if (o.inner) goIn(i);
+    else if (o.window) openWindow(o);
     else if (o.href) location.href = new URL(o.href, location.origin).href;
   }
   function tap(x, y) {
@@ -892,10 +908,229 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       a.addEventListener('blur', () => highlight(-1));
       a.addEventListener('click', (e) => {
         const o = scene.objects[idx()];
-        if (o && o.window) { e.preventDefault(); openWindow(o); }
+        if (o && o.inner) { e.preventDefault(); goIn(idx()); }
+        else if (o && o.window) { e.preventDefault(); openWindow(o); }
       });
     }
   }
+
+  /* ---------------------------------------------------------------------
+     АЛЕФ-НУЛИ: объект с полем inner — вход в своё пространство (/in/{inner}, своя сцена). Колёсико к объекту
+     раздувает его до экрана и переводит внутрь; внутри видна оболочка (снимок раздутого объекта). Колёсико наружу
+     у края пространства, Esc и «назад» браузера возвращают к объекту. Туда, где входа нет, колёсико упирается —
+     пространство вздрагивает. Адрес меняется через history: ссылку на пространство можно отправить.
+     --------------------------------------------------------------------- */
+  let SPACE = cv.dataset.space || 'main';
+  let parentSpace = cv.dataset.parent || (SPACE === 'main' ? null : 'main');
+  let fromId = cv.dataset.from || null;
+  let rim = null, going = null, pull = 0, shake = 0;
+  const fade = { veil: 0, veilTo: 0, rim: 1 };
+  const sceneUrl = (sp) => (sp === 'main' ? '/vitrina/scene.json' : `/vitrina/scene/${sp}.json`);
+  const spaceUrl = (sp) => (sp === 'main' ? '/' : `/in/${sp}`);
+  // Пространства без опубликованной сцены нет (404): гость упирается, хранитель входит в пустое, чтобы нарисовать.
+  const loadScene = (sp) => fetch(sceneUrl(sp), { credentials: 'same-origin' }).then((r) => {
+    if (r.status === 404 && keeper) return { v: 2, objects: [] };
+    if (!r.ok) throw new Error('scene ' + r.status);
+    return r.json();
+  });
+
+  function stepFade(dt) {
+    fade.veil += (fade.veilTo - fade.veil) * Math.min(1, dt * 9);
+    if (shake > 0.001) {
+      shake *= Math.exp(-dt * 7);
+      const a = shake * 7 / VK;
+      cv.style.transform = `translate(${(Math.sin(T * 71) * a).toFixed(1)}px, ${(Math.cos(T * 53) * a).toFixed(1)}px)`;
+    } else if (cv.style.transform) cv.style.transform = '';
+  }
+
+  /** Камера, при которой прямоугольник мира заполняет экран с запасом over (больше 1 — раздут за края). */
+  function inflated(rect, over) {
+    const c = cam.clone().fit(rect, W, H, 0, 0, Infinity);
+    c.zoom *= over;
+    return c;
+  }
+  /** Объект-вход под точкой экрана: по жилам и областям, иначе — самый маленький вход, в чьей рамке точка. */
+  function portalAt(sx, sy) {
+    const i = hit(sx, sy);
+    if (i >= 0 && scene.objects[i].inner) return i;
+    const [wx, wy] = cam.toWorld(sx, sy, W, H);
+    let best = -1, area = Infinity;
+    scene.objects.forEach((o, j) => {
+      if (!o.inner) return;
+      const b = o.bounds(), a = (b.x1 - b.x0) * (b.y1 - b.y0);
+      if (wx >= b.x0 && wx <= b.x1 && wy >= b.y0 && wy <= b.y1 && a < area) { best = j; area = a; }
+    });
+    return best;
+  }
+
+  /** Колёсико гостя: вглубь — во вход, если он под курсором и уже крупный; в упор — дрожь; наружу у края — выход. */
+  function depthWheel(sx, sy, dy) {
+    if (going) return true;
+    if (dy < 0) {
+      pull = 0;
+      const i = portalAt(sx, sy);
+      if (i >= 0) {
+        const b = scene.objects[i].bounds();
+        const sw = (b.x1 - b.x0) * cam.zoom, sh = (b.y1 - b.y0) * cam.zoom;
+        if (Math.max(sw / W, sh / H) > 0.55 || cam.zoom >= ZOOM_MAX * 0.98) { goIn(i); return true; }
+        return false;
+      }
+      if (cam.zoom >= ZOOM_MAX * 0.98) { shake = Math.min(1.2, shake + 0.35); loop(); return true; }
+      return false;
+    }
+    if (dy > 0 && SPACE !== 'main') {
+      const fitZ = cam.clone().fit(scene.bounds(), W, H, 0.05, 0, ZOOM_MAX).zoom;
+      if (isEmpty(scene.bounds()) || cam.zoom <= fitZ * 1.02) {
+        pull += dy;
+        if (pull > 240) { pull = 0; goOut(); }
+        return true;
+      }
+    }
+    pull = 0;
+    return false;
+  }
+
+  /** Списки ссылок <nav> — по сцене пространства (на странице после перехода без перезагрузки). */
+  function rebuildNav() {
+    const ul = document.querySelector('nav.objects ul');
+    if (!ul) return;
+    ul.textContent = '';
+    const el = (tag, text) => { const e = document.createElement(tag); if (text) e.textContent = text; return e; };
+    if (SPACE !== 'main') {
+      const li = el('li'), a = el('a', 'Наружу');
+      a.href = spaceUrl(parentSpace || 'main');
+      a.dataset.back = '1';
+      li.append(a);
+      ul.append(li);
+    }
+    // та же разметка, что у сервера (sceneNav): ссылка объекта и текст его окна
+    for (const o of scene.objects) {
+      const li = el('li'), a = el('a', o.label);
+      li.id = 'w-' + o.id;
+      a.dataset.id = o.id;
+      a.href = o.inner ? spaceUrl(o.inner) : o.href || '#w-' + o.id;
+      li.append(a);
+      const w = o.window;
+      if (w) {
+        if (w.title) li.append(el('h2', w.title));
+        if (w.text) li.append(el('p', w.text));
+        if (w.links && w.links.length) {
+          const sub = el('ul');
+          for (const l of w.links) { const x = el('a', l.label); x.href = l.href; const i = el('li'); i.append(x); sub.append(i); }
+          li.append(sub);
+        }
+      }
+      ul.append(li);
+    }
+    bindBack();
+  }
+
+  function bindBack() {
+    const a = document.querySelector('nav.objects a[data-back]');
+    if (a && !a.dataset.bound) {
+      a.dataset.bound = '1';
+      a.addEventListener('click', (e) => { e.preventDefault(); goOut(); });
+    }
+  }
+
+  /** Сменить сцену пространства на месте: камера, поле, ссылки, редактор (событие vitrina:space). */
+  function swapScene(json, sp, parent, from) {
+    scene = Scene.from(json);
+    SPACE = sp; parentSpace = parent; fromId = from;
+    cv.dataset.space = sp;
+    hl = -1; win = null;
+    readSpace();
+    rebuildNav();
+    bindNav();
+    userMoved = false;
+    fx = null;
+    document.dispatchEvent(new CustomEvent('vitrina:space', { detail: { space: sp, parent } }));
+  }
+
+  function snapshot() {
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(W)); c.height = Math.max(1, Math.round(H));
+    c.getContext('2d').drawImage(cv, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  /** Войти в алеф-нуль объекта i: раздуть объект до экрана, затемнить, сменить сцену, проявить её изнутри. */
+  function goIn(i, fromHistory) {
+    const o = scene.objects[i];
+    if (!o || !o.inner || going) return;
+    const target = o.inner, from = SPACE, id = o.id;
+    if (win) closeWindow();
+    highlight(-1);
+    const json = loadScene(target).catch(() => null);
+    going = { dir: 'in' };
+    const quick = reduce.matches, before = cam.clone();
+    let next = null;
+    const finish = (j) => {
+      // пространство не открылось (нет сцены): назад к прежнему виду, пространство вздрагивает
+      if (!j) {
+        fade.veilTo = 0; shake = 1;
+        if (quick) going = null;
+        else tween = { from: cam.clone(), to: before, t: 0, dur: 0.4, free: true, done: () => { going = null; } };
+        loop();
+        return;
+      }
+      if (!fromHistory) history.pushState({ space: target }, '', spaceUrl(target));
+      swapScene(j, target, from, id);
+      rim = next;
+      fade.rim = 1;
+      resize();
+      const to = cam.clone();
+      const start = to.clone(); start.zoom *= 0.55;
+      cam.x = start.x; cam.y = start.y; cam.zoom = start.zoom;
+      fade.veil = 1; fade.veilTo = 0;
+      if (quick) { cam.zoom = to.zoom; going = null; still(60); return; }
+      tween = { from: start, to, t: 0, dur: 0.6, free: true, done: () => { going = null; } };
+      loop();
+    };
+    if (quick) { json.then(finish); return; }
+    tween = {
+      from: cam.clone(), to: inflated(o.bounds(), 1.5), t: 0, dur: 0.55, free: true,
+      done: () => { next = snapshot(); fade.veilTo = 1; setTimeout(() => json.then(finish), 160); },
+    };
+    loop();
+  }
+
+  /** Наружу: сцена родителя, камера — внутри объекта-входа, затем отлёт к общему виду. */
+  function goOut(fromHistory, toSpace) {
+    if (going || SPACE === 'main') return;
+    const target = toSpace || parentSpace || 'main', was = SPACE;
+    if (win) closeWindow();
+    going = { dir: 'out' };
+    fade.veilTo = 1;
+    const quick = reduce.matches;
+    if (!quick) { tween = { from: cam.clone(), to: Object.assign(cam.clone(), { zoom: cam.zoom * 0.6 }), t: 0, dur: 0.35, free: true }; loop(); }
+    loadScene(target).catch(() => null).then((j) => {
+      if (!j) { going = null; fade.veilTo = 0; return; }
+      if (!fromHistory) history.pushState({ space: target }, '', spaceUrl(target));
+      const back = Scene.from(j).objects.find((o) => o.inner === was);
+      // родитель родителя неизвестен без сервера: страница пространства отдаёт его в data-parent при прямом заходе
+      swapScene(j, target, target === 'main' ? null : 'main', null);
+      rim = null;
+      resize();
+      const all = cam.clone();
+      if (back && !quick) {
+        const start = inflated(back.bounds(), 1.5);
+        cam.x = start.x; cam.y = start.y; cam.zoom = start.zoom;
+        fade.veil = 1; fade.veilTo = 0;
+        tween = { from: start, to: all, t: 0, dur: 0.7, free: true, done: () => { going = null; clampCam(); } };
+        loop();
+      } else { fade.veil = 0; fade.veilTo = 0; going = null; refresh(30); }
+    });
+  }
+
+  window.addEventListener('popstate', () => {
+    const m = /^\/in\/([a-z0-9-]{1,32})\/?$/.exec(location.pathname);
+    const target = m ? m[1] : 'main';
+    if (target === SPACE) return;
+    const i = scene.objects.findIndex((o) => o.inner === target);
+    if (i >= 0) goIn(i, true);
+    else goOut(true, target);
+  });
 
   /* ---------------------------------------------------------------------
      ОКНО ИЗ ПУСТОТЫ: узлы поля расходятся из прямоугольника экрана, внутри — текст электрошрифтом (жилы символов,
@@ -1071,6 +1306,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     get panning() { return !!gesture && gesture.kind !== 'editor'; },
     setTool(t) { tool = t; cv.classList.toggle('edit', t !== 'view'); if (t !== 'view') { highlight(-1); if (win) closeWindow(); } cameraChanged(2); },
     setOverlay(f) { overlay = f; refresh(2); },
+    get space() { return SPACE; },
+    goIn, goOut,
     /** Слух холста: f(dt) → { bands, low, mid, high, level, beat } (music.js). null — тишина. */
     setSound(f) { hearFn = f; loop(); },
     setInput(h) { editorInput = h; },
@@ -1097,6 +1334,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     scene = Scene.from(json);
     readSpace();
     bindNav();
+    bindBack();
+    history.replaceState({ space: SPACE }, '');
     resize();
     loop();
     window.vitrinaEngine = api;

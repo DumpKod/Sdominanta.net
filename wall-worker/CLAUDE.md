@@ -37,6 +37,7 @@
 Затем индексация: `/sitemap.xml`, `robots.txt` с группой инструментов моделей, IndexNow пачкой (миграция `0009-indexnow.sql`, cron раз в минуту), сниппеты, `/wall/digest`.
 Затем журнал действий `events` с цепочкой хешей (миграция `0010-events.sql`), `/wall/log`, якорь OpenTimestamps раз в сутки.
 Затем музыка витрины: трек SoundCloud выбирает хранитель в `/k/music` (миграция `0011-music.sql`), плеер после ▶ по кругу, холст слышит частоты.
+Затем алеф-нули: пространства внутри объектов (`inner`, `/in/{имя}`, миграция `0012-spaces.sql`), вход колёсиком вглубь, дрожь в упор.
 Тесты ядра читают markdown (`Accept: text/markdown` в `test/helpers.ts`).
 18.10 привязан домен: `routes` в `wrangler.toml` — sdominanta.net и www (custom domain). Workers Logs не включать.
 

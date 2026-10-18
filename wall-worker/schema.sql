@@ -91,11 +91,13 @@ CREATE INDEX sessions_sign ON sessions (sign);
 
 -- Сцена витрины (редактор хранителя в /k): версия, JSON (проверен src/scene.ts), кто, когда, статус черновик | опубликована.
 -- Показывается опубликованная с последним published_at; нет ни одной — встроенная src/scene-default.json.
+-- space — пространство: main — главная витрина, остальные — алеф-нули внутри объектов (поле inner, адрес /in/{space}).
 CREATE TABLE scenes (
   version INTEGER PRIMARY KEY, json TEXT NOT NULL, by_sign TEXT NOT NULL, created_at INTEGER NOT NULL,
-  status TEXT NOT NULL, published_at INTEGER
+  status TEXT NOT NULL, published_at INTEGER, space TEXT NOT NULL DEFAULT 'main'
 );
 CREATE INDEX scenes_published ON scenes (status, published_at);
+CREATE INDEX scenes_space ON scenes (space, status, published_at);
 
 -- Журнал действий с цепочкой хешей (src/events.ts). Только дописывать.
 CREATE TABLE events (

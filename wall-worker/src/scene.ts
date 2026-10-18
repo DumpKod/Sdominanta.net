@@ -13,6 +13,7 @@
 //     strokes: [ { r, pts: [[x, y(, r)]…], closed? } ],   жилы в координатах мира
 //     area?: [[x, y]…],                   область попадания в координатах мира (многоугольник)
 //     window?: { title?, text?, links?: [ { label, href } ] }   окно из пустоты по клику
+//     inner?: "aleph"                     алеф-нуль: колёсико или клик внутрь — пространство aleph (/in/aleph)
 //     style?: { tubeR, thick, resonance, tact, flow, wobble, fill, sound }   свои параметры объекта
 // } ] }
 import { Env } from './util';
@@ -32,6 +33,7 @@ export interface SceneObject {
   area?: number[][];
   window?: { title?: string; text?: string; links?: { label: string; href: string }[] };
   style?: Record<string, number>;
+  inner?: string;
 }
 export interface Scene {
   v: 2;
@@ -48,6 +50,10 @@ export const STYLE_RANGE: Record<string, [number, number]> = {
   tubeR: [0.5, 200], thick: [0.4, 2.5], resonance: [0, 1], tact: [0, 3], flow: [0, 2], wobble: [0, 1], fill: [0, 1], sound: [0, 2],
 };
 export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], density: [0.5, 1.6], glow: [0, 1.5], sound: [0, 2] };
+
+/** Имя пространства: main — главная витрина, остальные — алеф-нули. */
+export const SPACE_RE = /^[a-z0-9-]{1,32}$/;
+export const EMPTY_SCENE: Scene = { v: 2, objects: [] };
 
 /** Относительный путь своего сайта: «/…», без «//», «..», схемы, строки запроса и пробелов. */
 export const relPath = (s: unknown): s is string =>
@@ -87,7 +93,9 @@ export function validateScene(raw: string): Check {
   j.objects.forEach((o: unknown, i: number) => {
     const at = `objects[${i}]`;
     if (!isObj(o)) return void errors.push(`${at}: объект`);
-    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'window', 'style'], at);
+    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'window', 'style', 'inner'], at);
+    if (o.inner !== undefined && (typeof o.inner !== 'string' || !SPACE_RE.test(o.inner) || o.inner === 'main'))
+      errors.push(`${at}.inner: имя пространства — латиница, цифры, дефис, до 32, не main`);
     if (typeof o.id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(o.id)) errors.push(`${at}.id: латиница, цифры, дефис, до 32`);
     else if (ids.has(o.id)) errors.push(`${at}.id: «${o.id}» повторяется`);
     else ids.add(o.id);
@@ -140,16 +148,36 @@ export interface SceneRow {
   created_at: number;
   status: string;
   published_at: number | null;
+  space: string;
 }
 
-/** Опубликованная сцена: последняя по времени публикации; нет — встроенная. */
-export async function publishedScene(env: Env): Promise<{ version: number; json: string; scene: Scene }> {
-  const r = await env.DB.prepare(`SELECT version, json FROM scenes WHERE status = 'опубликована' ORDER BY published_at DESC, version DESC LIMIT 1`).first<{
-    version: number;
-    json: string;
-  }>();
+/** Опубликованная сцена пространства: последняя по времени публикации; нет — встроенная (main) или пустая (алеф-нуль). */
+export async function publishedScene(env: Env, space = 'main'): Promise<{ version: number; json: string; scene: Scene }> {
+  const r = await env.DB.prepare(`SELECT version, json FROM scenes WHERE space = ? AND status = 'опубликована' ORDER BY published_at DESC, version DESC LIMIT 1`)
+    .bind(space).first<{ version: number; json: string }>();
   if (r) return { version: r.version, json: r.json, scene: JSON.parse(r.json) as Scene };
-  return { version: 0, json: JSON.stringify(DEFAULT_SCENE), scene: DEFAULT_SCENE };
+  const empty = space === 'main' ? DEFAULT_SCENE : EMPTY_SCENE;
+  return { version: 0, json: JSON.stringify(empty), scene: empty };
+}
+
+/** Опубликованные пространства. */
+export async function publishedSpaces(env: Env): Promise<string[]> {
+  const r = await env.DB.prepare(`SELECT DISTINCT space FROM scenes WHERE status = 'опубликована'`).all<{ space: string }>();
+  return r.results.map((x) => x.space);
+}
+
+/**
+ * Откуда входят в пространство: опубликованное пространство, где у объекта inner = space (сначала main).
+ * Нет такого — null: в пространство попадают только по прямому адресу.
+ */
+export async function parentOf(env: Env, space: string): Promise<{ space: string; id: string } | null> {
+  const spaces = ['main', ...(await publishedSpaces(env)).filter((s) => s !== 'main' && s !== space)];
+  for (const sp of spaces) {
+    const { scene } = await publishedScene(env, sp);
+    const o = scene.objects.find((x) => x.inner === space);
+    if (o) return { space: sp, id: o.id };
+  }
+  return null;
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -158,10 +186,11 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
  * Слой <nav>: по пункту на объект, в порядке Tab. Ссылка объекта — настоящий <a>; окно — его заголовок, текст и ссылки,
  * чтобы модели и экранные чтецы видели то же, что люди в окне. Объект с окном без адреса ссылается на свой пункт (#w-id).
  */
-export function sceneNav(o: string, scene: Scene): string {
-  return scene.objects
+export function sceneNav(o: string, scene: Scene, back?: string): string {
+  const items = scene.objects
     .map((x) => {
-      const href = x.href ? o + x.href : `#w-${x.id}`;
+      // Алеф-нуль ведёт в своё пространство: там его содержимое, и у пространства свой адрес.
+      const href = x.inner ? `${o}/in/${x.inner}` : x.href ? o + x.href : `#w-${x.id}`;
       let li = `<li id="w-${esc(x.id)}"><a data-id="${esc(x.id)}" href="${esc(href)}">${esc(x.label)}</a>`;
       const w = x.window;
       if (w) {
@@ -170,6 +199,7 @@ export function sceneNav(o: string, scene: Scene): string {
         if (w.links?.length) li += `\n<ul>${w.links.map((l) => `<li><a href="${esc(o + l.href)}">${esc(l.label)}</a></li>`).join('')}</ul>`;
       }
       return li + '</li>';
-    })
-    .join('\n');
+    });
+  if (back !== undefined) items.unshift(`<li><a data-back="1" href="${esc(o + back)}">Наружу</a></li>`);
+  return items.join('\n');
 }

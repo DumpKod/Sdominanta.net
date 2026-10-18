@@ -66,7 +66,7 @@
     const objRow = el('div', 'kp-row');
 
     const props = section('Объект', true);
-    const fId = input(), fLabel = input(), fHref = input(), fZ = input(), fTitle = input(), fText = input('textarea'), fLinks = input('textarea');
+    const fId = input(), fLabel = input(), fHref = input(), fInner = input(), fZ = input(), fTitle = input(), fText = input('textarea'), fLinks = input('textarea');
     fZ.type = 'number'; fZ.step = '1'; fZ.min = '-100'; fZ.max = '100';
     fText.rows = 4;
     fLinks.rows = 3;
@@ -74,6 +74,7 @@
       wrap(fId, 'id: латиница, цифры, дефис'),
       wrap(fLabel, 'Подпись (видят модели в <nav>)'),
       wrap(fHref, 'Адрес: относительный путь, например /wall'),
+      wrap(fInner, 'Алеф-нуль: имя пространства внутри (латиница, цифры, дефис), пусто — не вход'),
       wrap(fZ, 'Слой: выше — поверх и первым ловит клик'),
     );
     const STYLE_NAMES = { tubeR: 'Радиус трубки (tubeR)', thick: 'Толщина ×', resonance: 'Резонанс', tact: 'Такты', flow: 'Течение', wobble: 'Волнистость', fill: 'Заливка жилы', sound: 'Реакция на звук (0 — нет)' };
@@ -146,6 +147,14 @@
     const hist = new M.History();
     const snap = () => JSON.stringify(E.exportScene());
     hist.reset(snap());
+    // Переход в другое пространство (алеф-нуль): своя сцена — своя история, выделение сбрасывается.
+    document.addEventListener('vitrina:space', () => {
+      selIds = [];
+      hist.reset(snap());
+      fillPick();
+      showFields();
+      note.textContent = `Пространство: ${E.space}.`;
+    });
     const byId = (id) => E.objects.find((o) => o.id === id) || null;
     const selected = () => selIds.map(byId).filter(Boolean);
     const first = () => selected()[0] || null;
@@ -196,11 +205,12 @@
     }
     function showFields() {
       const o = first();
-      for (const f of [fId, fLabel, fHref, fZ, fTitle, fText, fLinks]) f.disabled = !o;
+      for (const f of [fId, fLabel, fHref, fInner, fZ, fTitle, fText, fLinks]) f.disabled = !o;
       for (const s of Object.values(sliders)) s.r.disabled = !o;
       fId.value = o ? o.id : '';
       fLabel.value = o ? o.label : '';
       fHref.value = (o && o.href) || '';
+      fInner.value = (o && o.inner) || '';
       fZ.value = o ? String(o.z || 0) : '';
       fTitle.value = (o && o.window && o.window.title) || '';
       fText.value = (o && o.window && o.window.text) || '';
@@ -226,6 +236,7 @@
       if (!o) return;
       o.label = fLabel.value.trim() || o.id;
       o.href = fHref.value.trim() || null;
+      o.inner = fInner.value.trim().toLowerCase() || null;
       o.z = Math.max(-100, Math.min(100, Math.round(+fZ.value || 0)));
       const links = fLinks.value
         .split('\n')
@@ -292,7 +303,7 @@
     const line = (text, k) => (new RegExp(`^${k}: (.+)$`, 'm').exec(text) || [])[1];
     async function save() {
       readFields();
-      const r = await post('/k/vitrina/save', { json: snap() });
+      const r = await post('/k/vitrina/save', { json: snap(), space: E.space || 'main' });
       note.textContent = r.ok ? `Черновик сохранён: версия ${line(r.text, 'VERSION')}.` : r.text;
       return r.ok ? line(r.text, 'VERSION') : null;
     }
@@ -304,7 +315,7 @@
       note.textContent = r.ok ? `Опубликована версия ${v}.` : r.text;
     });
     button(sceneRow, 'Откатить', async () => {
-      const r = await post('/k/vitrina/rollback', {});
+      const r = await post('/k/vitrina/rollback', { space: E.space || 'main' });
       note.textContent = r.ok ? `Откат: на витрине ${line(r.text, 'TO')}.` : r.text;
     });
     button(sceneRow, 'Версии', () => { location.href = '/k/vitrina'; });

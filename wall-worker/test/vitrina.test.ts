@@ -43,7 +43,7 @@ describe('Витрина: страница', () => {
     expect(res.headers.get('Content-Security-Policy')).toBe(CSP);
     const page = await res.text();
     expect(page).toContain('<script type="module" src="/vitrina.js"></script>');
-    expect(page).toContain('<canvas id="scene" aria-hidden="true" data-scene="/vitrina/scene.json"></canvas>');
+    expect(page).toContain('<canvas id="scene" aria-hidden="true" data-scene="/vitrina/scene.json" data-space="main"></canvas>');
     expect(page).not.toMatch(/<script>(?!<)/); // встроенных скриптов нет
     expect(page).toContain('<pre class="entry">'); // текстовый вход для моделей остаётся
   });
@@ -99,7 +99,9 @@ describe('Витрина: файлы', () => {
       expect(text, name).not.toMatch(/\burl\(/); // CSS url(…): ни картинок, ни шрифтов извне
       expect(text, name).not.toMatch(/XMLHttpRequest|WebSocket|EventSource|sendBeacon|import\(/);
       // fetch — только своих путей: сцена, шрифт из жил, действия редактора
-      for (const m of text.matchAll(/fetch\(([^,)]+)/g)) expect(m[1], name).toMatch(/^(?:'\/vitrina\/font\.json'|cv\.dataset\.scene \|\| '\/vitrina\/scene\.json'|path)$/);
+      for (const m of text.matchAll(/fetch\(([^,)]+)/g)) expect(m[1], name).toMatch(/^(?:'\/vitrina\/font\.json'|cv\.dataset\.scene \|\| '\/vitrina\/scene\.json'|sceneUrl\(sp|path)$/);
+      // сцена пространства (алеф-нуля) — тоже только свой путь
+      if (text.includes('sceneUrl = ')) expect(text).toContain("const sceneUrl = (sp) => (sp === 'main' ? '/vitrina/scene.json' : `/vitrina/scene/${sp}.json`);");
     }
   });
 
@@ -237,7 +239,7 @@ describe('Редактор и версии сцены', () => {
     await post('/k/vitrina/publish', { csrf, version: '2' }, cookie, ed);
     const id = async () => JSON.parse(await (await get('/vitrina/scene.json')).text()).objects[0].id;
     expect(await id()).toBe('second');
-    expect(await (await post('/k/vitrina/rollback', { csrf }, cookie, ed)).text()).toMatch(/^OK ROLLBACK\nFROM: 2\nTO: 1/);
+    expect(await (await post('/k/vitrina/rollback', { csrf }, cookie, ed)).text()).toMatch(/^OK ROLLBACK\nSPACE: main\nFROM: 2\nTO: 1/);
     expect(await id()).toBe('first');
     await post('/k/vitrina/rollback', { csrf }, cookie, ed);
     expect(await id()).toBe(DEFAULT_SCENE.objects[0].id);
@@ -250,14 +252,14 @@ describe('Редактор и версии сцены', () => {
     const { cookie } = await login();
     await save(cookie, tiny({ id: 'draft-one' }));
     const list = await (await get('/k/vitrina', { Cookie: cookie })).text();
-    expect(list).toContain('Сейчас на витрине: встроенная сцена');
+    expect(list).toContain('<td><a href="/">main</a></td><td>встроенная сцена</td>');
     expect(list).toContain('href="/k/vitrina/v/1"');
     expect(list).toContain('<form method="post" action="/k/vitrina/publish">');
     expect(list).toContain('<form method="post" action="/k/vitrina/rollback">');
 
     const pv = await get('/k/vitrina/v/1', { ...HTML, Cookie: cookie });
     const page = await pv.text();
-    expect(page).toContain('data-scene="/k/vitrina/scene/1.json" data-version="1"');
+    expect(page).toContain('data-scene="/k/vitrina/scene/1.json" data-space="main" data-version="1"');
     expect(navLinks(page)).toEqual([['draft-one', O + '/wall', 'Один']]);
     expect(pv.headers.get('Cache-Control')).toContain('no-store');
     const sj = await get('/k/vitrina/scene/1.json', { Cookie: cookie });
@@ -414,5 +416,72 @@ describe('Бесконечный холст: модель (public/vitrina/model.
       expect(editorJs, s).toContain(s);
     for (const s of ["e.code === 'Space'", 'e.button === 1', "e.code === 'Digit1' && e.shiftKey", 'clampTo', 'pinch', 'cull()'])
       expect(vitrinaJs, s).toContain(s);
+  });
+});
+
+describe('Алеф-нули: пространства внутри объектов', () => {
+  const ed = { 'X-Editor': '1' };
+  async function publishIn(cookie: string, json: string, space?: string): Promise<string> {
+    const csrf = csrfOf(await (await get('/k/vitrina', { Cookie: cookie })).text());
+    const s = await post('/k/vitrina/save', space ? { csrf, json, space } : { csrf, json }, cookie, ed);
+    const text = await s.text();
+    expect(s.status, text).toBe(200);
+    const v = /VERSION: (\d+)/.exec(text)![1];
+    expect((await post('/k/vitrina/publish', { csrf, version: v }, cookie, ed)).status).toBe(200);
+    return v;
+  }
+
+  it('объект с inner ведёт в /in/{inner}; у пространства своя сцена, своя страница и ссылка наружу', async () => {
+    const { cookie } = await login();
+    await publishIn(cookie, tiny({ id: 'door', label: 'Дверь', href: undefined, inner: 'theory' }));
+    // до публикации сцены внутри гость упирается: сцены нет
+    expect((await get('/vitrina/scene/theory.json')).status).toBe(404);
+    expect(navLinks(await (await get('/', HTML)).text())).toEqual([['door', `${O}/in/theory`, 'Дверь']]);
+    await publishIn(cookie, JSON.stringify({ v: 2, objects: [{ id: 'aleph', label: 'Алеф', strokes: [], window: { title: 'ℵ₀', text: 'Счётная бесконечность' } }] }), 'theory');
+    const j = await get('/vitrina/scene/theory.json');
+    expect(j.status).toBe(200);
+    expect(((await j.json()) as { objects: { id: string }[] }).objects.map((o) => o.id)).toEqual(['aleph']);
+    // главная не изменилась
+    expect(((await (await get('/vitrina/scene.json')).json()) as { objects: { id: string }[] }).objects.map((o) => o.id)).toEqual(['door']);
+    const page = await (await get('/in/theory', HTML)).text();
+    expect(page).toContain('data-scene="/vitrina/scene/theory.json" data-space="theory" data-parent="main" data-from="door"');
+    expect(page).toContain(`<li><a data-back="1" href="${O}/">Наружу</a></li>`);
+    expect(page).toContain('<h2>ℵ₀</h2>');
+    // модели читают то же текстом
+    const md = await (await get('/in/theory')).text();
+    expect(md).toContain('# Пространство theory');
+    expect(md).toContain('Счётная бесконечность');
+    expect(md).toContain(`(${O}/)`);
+  });
+
+  it('пространство без сцены и без входа — 404; inner = main и неверные имена не принимаются', async () => {
+    expect((await get('/in/nowhere', HTML)).status).toBe(404);
+    expect((await get('/vitrina/scene/nowhere.json')).status).toBe(404);
+    expect(validateScene(tiny({ inner: 'main' })).ok).toBe(false);
+    expect(validateScene(tiny({ inner: 'Bad Name' })).ok).toBe(false);
+    expect(validateScene(tiny({ inner: 'ok-1' })).ok).toBe(true);
+    const { cookie } = await login();
+    const csrf = csrfOf(await (await get('/k/vitrina', { Cookie: cookie })).text());
+    expect((await post('/k/vitrina/save', { csrf, json: tiny(), space: 'Bad Name' }, cookie, ed)).status).toBe(400);
+  });
+
+  it('откат — в своём пространстве: главная не трогается', async () => {
+    const { cookie } = await login();
+    await publishIn(cookie, tiny({ id: 'door', inner: 'x' }));
+    await publishIn(cookie, tiny({ id: 'first' }), 'x');
+    await publishIn(cookie, tiny({ id: 'second' }), 'x');
+    const csrf = csrfOf(await (await get('/k/vitrina', { Cookie: cookie })).text());
+    expect((await post('/k/vitrina/rollback', { csrf, space: 'x' }, cookie, ed)).status).toBe(200);
+    expect(((await (await get('/vitrina/scene/x.json')).json()) as { objects: { id: string }[] }).objects[0].id).toBe('first');
+    expect(((await (await get('/vitrina/scene.json')).json()) as { objects: { id: string }[] }).objects[0].id).toBe('door');
+  });
+
+  it('движок: вход колёсиком вглубь, дрожь в упор, выход наружу, адрес через history; редактор помнит пространство', () => {
+    for (const s of ['function goIn(', 'function goOut(', 'function depthWheel(', 'history.pushState', "addEventListener('popstate'", 'vitrina:space', 'shake', 'rim'])
+      expect(vitrinaJs, s).toContain(s);
+    for (const s of ["space: E.space || 'main'", "addEventListener('vitrina:space'", 'fInner'])
+      expect(editorJs, s).toContain(s);
+    const o = new M.SceneObject({ id: 'a', label: 'A', inner: 'deep', strokes: [] });
+    expect(o.toJSON()).toMatchObject({ inner: 'deep' });
   });
 });

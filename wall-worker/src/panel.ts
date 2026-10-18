@@ -2,9 +2,9 @@ import { checkKeeper, keeperFromCookie, lockInfo, COOKIE } from './keeper';
 import { declineDraft, DRAFT_TTL, draftView, publishDraft, tooMany, waitingDrafts } from './post';
 import { formatErrors } from './card';
 import { hit } from './rate';
-import { DEFAULT_SCENE, SCENE_MAX, publishedScene, SceneRow, validateScene, Scene } from './scene';
+import { DEFAULT_SCENE, SCENE_MAX, SPACE_RE, publishedScene, SceneRow, validateScene, Scene } from './scene';
 import { bumpVersion } from './post';
-import { jsonResponse, vitrinaPage } from './vitrina';
+import { jsonResponse, spaceUrl, vitrinaPage } from './vitrina';
 import { b64url, clientIp, enc, Env, fmtTime, hmacSha256, html, nowSec, plain, randomBytes, sha256hex, timingSafeEqual } from './util';
 import editorJs from './pages/editor.js.txt';
 import { currentTrack, hasKey, normTrackUrl, resolveTrack, Track } from './music';
@@ -223,7 +223,7 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   if (pv) {
     const row = await sceneRow(env, +pv[1]);
     if (!row) return page('Не найдено', top + '<h1>Версии нет</h1>', { status: 404 });
-    return vitrinaPage(req, env, o, { scene: JSON.parse(row.json) as Scene, sceneUrl: `/k/vitrina/scene/${row.version}.json`, version: row.version });
+    return vitrinaPage(req, env, o, { scene: JSON.parse(row.json) as Scene, sceneUrl: `/k/vitrina/scene/${row.version}.json`, version: row.version, space: row.space });
   }
   const sj = /^\/vitrina\/scene\/(0|[1-9]\d{0,8})\.json$/.exec(path);
   if (sj) {
@@ -264,20 +264,28 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
 const sceneRow = (env: Env, v: number) => env.DB.prepare('SELECT * FROM scenes WHERE version = ?').bind(v).first<SceneRow>();
 
 async function scenesPage(env: Env, top: string, csrf: string): Promise<Response> {
-  const cur = await publishedScene(env);
-  const rows = (await env.DB.prepare('SELECT version, by_sign, created_at, status, published_at, length(json) AS size FROM scenes ORDER BY version DESC LIMIT 100').all<SceneRow & { size: number }>()).results;
+  const rows = (await env.DB.prepare('SELECT version, by_sign, created_at, status, published_at, space, length(json) AS size FROM scenes ORDER BY version DESC LIMIT 200').all<SceneRow & { size: number }>()).results;
+  const spaces = [...new Set(['main', ...rows.map((r) => r.space)])];
+  const cur = new Map<string, number>();
+  for (const sp of spaces) cur.set(sp, (await publishedScene(env, sp)).version);
   const hidden = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
   let b = top + '<h1>Витрина</h1>\n';
-  b += `<p>Сейчас на витрине: ${cur.version ? `версия ${cur.version}` : 'встроенная сцена'}. <a href="/">Открыть витрину с редактором</a></p>\n`;
-  b += `<form method="post" action="/k/vitrina/rollback">${hidden}<button type="submit">Откатить</button> <span class="muted">— снять текущую публикацию: витрина вернётся к предыдущей опубликованной версии</span></form>\n`;
+  b += '<p class="muted">Пространства: main — главная витрина, остальные — алеф-нули внутри объектов (поле inner, адрес /in/имя). Редактор сохраняет в то пространство, где вы находитесь.</p>\n';
+  b += '<table><tr><th>Пространство</th><th>Сейчас</th><th></th></tr>\n';
+  for (const sp of spaces) {
+    const v = cur.get(sp)!;
+    b += `<tr><td><a href="${spaceUrl(sp)}">${esc(sp)}</a></td><td>${v ? `версия ${v}` : sp === 'main' ? 'встроенная сцена' : 'пусто'}</td>`;
+    b += `<td><form method="post" action="/k/vitrina/rollback">${hidden}<input type="hidden" name="space" value="${esc(sp)}"><button type="submit">Откатить</button></form></td></tr>\n`;
+  }
+  b += '</table><p class="muted">«Откатить» снимает текущую публикацию пространства: оно вернётся к предыдущей опубликованной версии.</p>\n';
   if (!rows.length) b += '<p>Версий ещё нет: сохраните черновик из редактора на витрине.</p>';
   else {
-    b += '<table><tr><th>Версия</th><th>Статус</th><th>Кто</th><th>Когда</th><th>Размер</th><th></th></tr>\n';
+    b += '<table><tr><th>Версия</th><th>Пространство</th><th>Статус</th><th>Кто</th><th>Когда</th><th>Размер</th><th></th></tr>\n';
     for (const r of rows) {
-      const state = r.version === cur.version ? 'на витрине' : r.status === 'опубликована' ? 'опубликована раньше' : r.published_at ? 'снята' : 'черновик';
-      b += `<tr><td>${r.version}</td><td>${state}</td><td>${esc(r.by_sign)}</td><td>${esc(fmtTime(r.created_at))}</td><td>${Math.ceil(r.size / 1024)} КБ</td>`;
+      const state = r.version === cur.get(r.space) ? 'на витрине' : r.status === 'опубликована' ? 'опубликована раньше' : r.published_at ? 'снята' : 'черновик';
+      b += `<tr><td>${r.version}</td><td>${esc(r.space)}</td><td>${state}</td><td>${esc(r.by_sign)}</td><td>${esc(fmtTime(r.created_at))}</td><td>${Math.ceil(r.size / 1024)} КБ</td>`;
       b += `<td class="row"><a href="/k/vitrina/v/${r.version}">Предпросмотр</a>`;
-      if (r.version !== cur.version) b += `<form method="post" action="/k/vitrina/publish">${hidden}<input type="hidden" name="version" value="${r.version}"><button type="submit">Опубликовать</button></form>`;
+      if (r.version !== cur.get(r.space)) b += `<form method="post" action="/k/vitrina/publish">${hidden}<input type="hidden" name="version" value="${r.version}"><button type="submit">Опубликовать</button></form>`;
       b += '</td></tr>\n';
     }
     b += '</table>';
@@ -299,11 +307,13 @@ async function sceneAction(env: Env, o: string, req: Request, path: string, f: R
     const raw = f.json ?? '';
     const v = validateScene(raw);
     if (!v.ok) return reply(false, ['ERR SCENE', ...v.errors.map((e) => '- ' + e)], 400);
+    const space = f.space || 'main';
+    if (!SPACE_RE.test(space)) return reply(false, ['ERR SPACE', '- имя пространства: латиница, цифры, дефис, до 32'], 400);
     const json = JSON.stringify(v.scene);
     const r = await env.DB.prepare(
-      `INSERT INTO scenes (version, json, by_sign, created_at, status) VALUES ((SELECT COALESCE(MAX(version), 0) + 1 FROM scenes), ?, ?, ?, 'черновик') RETURNING version`,
-    ).bind(json, me, now).first<{ version: number }>();
-    return reply(true, ['OK SAVED', `VERSION: ${r!.version}`, `PREVIEW: ${o}/k/vitrina/v/${r!.version}`]);
+      `INSERT INTO scenes (version, json, by_sign, created_at, status, space) VALUES ((SELECT COALESCE(MAX(version), 0) + 1 FROM scenes), ?, ?, ?, 'черновик', ?) RETURNING version`,
+    ).bind(json, me, now, space).first<{ version: number }>();
+    return reply(true, ['OK SAVED', `VERSION: ${r!.version}`, `SPACE: ${space}`, `PREVIEW: ${o}/k/vitrina/v/${r!.version}`]);
   }
   if (path === '/vitrina/publish') {
     const n = Number(f.version);
@@ -313,14 +323,16 @@ async function sceneAction(env: Env, o: string, req: Request, path: string, f: R
       env.DB.prepare(`UPDATE scenes SET status = 'опубликована', published_at = ? WHERE version = ?`).bind(now, n),
       bumpVersion(env.DB),
     ]);
-    return reply(true, ['OK PUBLISHED', `VERSION: ${n}`]);
+    return reply(true, ['OK PUBLISHED', `VERSION: ${n}`, `SPACE: ${row.space}`]);
   }
   if (path === '/vitrina/rollback') {
-    const cur = await publishedScene(env);
-    if (!cur.version) return reply(false, ['ERR ROLLBACK', '- на витрине встроенная сцена, откатывать некуда'], 409);
+    const space = f.space || 'main';
+    if (!SPACE_RE.test(space)) return reply(false, ['ERR SPACE'], 400);
+    const cur = await publishedScene(env, space);
+    if (!cur.version) return reply(false, ['ERR ROLLBACK', `- в пространстве ${space} нет опубликованной версии, откатывать некуда`], 409);
     await env.DB.batch([env.DB.prepare(`UPDATE scenes SET status = 'черновик' WHERE version = ?`).bind(cur.version), bumpVersion(env.DB)]);
-    const now2 = await publishedScene(env);
-    return reply(true, ['OK ROLLBACK', `FROM: ${cur.version}`, `TO: ${now2.version || 'встроенная'}`]);
+    const now2 = await publishedScene(env, space);
+    return reply(true, ['OK ROLLBACK', `SPACE: ${space}`, `FROM: ${cur.version}`, `TO: ${now2.version || (space === 'main' ? 'встроенная' : 'пусто')}`]);
   }
   return reply(false, ['ERR ACTION'], 404);
 }

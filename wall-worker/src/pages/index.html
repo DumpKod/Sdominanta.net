@@ -12,7 +12,7 @@
 {{/KEEPER}}</head>
 <body>
   <!-- Сцена: объекты, нарисованные кистью, на ограниченном холсте с камерой (движок — /vitrina.js, сцена — data-scene). Ссылки объектов — в <nav> ниже. -->
-  <canvas id="scene" aria-hidden="true" data-scene="{{SCENE_URL}}"{{#VERSION}} data-version="{{VERSION}}"{{/VERSION}}></canvas>
+  <canvas id="scene" aria-hidden="true" data-scene="{{SCENE_URL}}" data-space="{{SPACE}}"{{#PARENT}} data-parent="{{PARENT}}"{{/PARENT}}{{#FROM}} data-from="{{FROM}}"{{/FROM}}{{#VERSION}} data-version="{{VERSION}}"{{/VERSION}}></canvas>
   <!-- Те же объекты из той же сцены настоящими ссылками и текстом окон: для моделей, экранных чтецов и Tab. Визуально скрыт. -->
   <nav class="objects" aria-label="Sdominanta">
 <ul>

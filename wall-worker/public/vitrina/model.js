@@ -134,6 +134,8 @@ export class SceneObject {
     this.id = src.id;
     this.label = src.label;
     this.href = src.href || null;
+    /** Алеф-нуль: имя пространства (сцены) внутри объекта, вход — колёсиком вглубь или нажатием. */
+    this.inner = src.inner || null;
     this.z = typeof src.z === 'number' ? src.z : 0;
     this.strokes = clone(src.strokes || []);
     this.area = src.area ? clone(src.area) : null;
@@ -205,6 +207,7 @@ export class SceneObject {
   toJSON() {
     const o = { id: this.id, label: this.label };
     if (this.href) o.href = this.href;
+    if (this.inner) o.inner = this.inner;
     if (this.z) o.z = this.z;
     o.strokes = this.strokes;
     if (this.area && this.area.length >= 3) o.area = this.area;

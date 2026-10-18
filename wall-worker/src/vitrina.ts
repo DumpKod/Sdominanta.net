@@ -1,8 +1,8 @@
 import { htmlText } from './format';
 import { keeperSession } from './panel';
-import { publishedScene, Scene, sceneNav } from './scene';
+import { parentOf, publishedScene, Scene, sceneNav } from './scene';
 import { currentTrack, hasKey } from './music';
-import { Env, html, nowSec, render } from './util';
+import { Env, html, inline, md, next, nowSec, render } from './util';
 import showcase from './pages/index.html';
 import llmsText from './pages/llms.txt';
 
@@ -18,20 +18,31 @@ export interface VitrinaOpts {
   scene?: Scene; // для предпросмотра версии; нет — опубликованная
   sceneUrl?: string;
   version?: number;
+  space?: string; // пространство: main — главная витрина, иначе алеф-нуль /in/{space}
 }
+
+/** Адрес сцены пространства для движка. */
+export const sceneUrlOf = (space: string) => (space === 'main' ? '/vitrina/scene.json' : `/vitrina/scene/${space}.json`);
+/** Адрес страницы пространства. */
+export const spaceUrl = (space: string) => (space === 'main' ? '/' : `/in/${space}`);
 
 export async function vitrinaPage(req: Request, env: Env, o: string, opts: VitrinaOpts = {}): Promise<Response> {
   const s = await keeperSession(env, req, nowSec());
-  const scene = opts.scene ?? (await publishedScene(env)).scene;
+  const space = opts.space ?? 'main';
+  const scene = opts.scene ?? (await publishedScene(env, space)).scene;
+  const parent = space === 'main' ? null : await parentOf(env, space);
   const ENTRY = htmlText(render(llmsText, { BASE: o }));
   const t = await currentTrack(env);
   const body = render(showcase, {
     KEEPER: !!s,
     CSRF: s?.csrf ?? '',
-    SCENE_URL: opts.sceneUrl ?? '/vitrina/scene.json',
+    SCENE_URL: opts.sceneUrl ?? sceneUrlOf(space),
+    SPACE: space,
+    PARENT: space === 'main' ? '' : parent ? parent.space : 'main',
+    FROM: parent ? parent.id : '',
     VERSION: opts.version !== undefined ? String(opts.version) : '',
     ENTRY,
-    NAV: sceneNav(o, scene),
+    NAV: sceneNav(o, scene, space === 'main' ? undefined : spaceUrl(parent ? parent.space : 'main')),
     MUSIC: !!t,
     TRACK_ID: t ? String(t.id) : '',
     KEY: hasKey(env) ? '1' : '0',
@@ -49,8 +60,10 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
 }
 
 /** Опубликованная сцена JSON-ом; кэш короткий, ключ кэша страниц сбрасывает публикация (версия стены в meta). */
-export async function sceneJson(env: Env): Promise<Response> {
-  const { json, version } = await publishedScene(env);
+export async function sceneJson(env: Env, space = 'main'): Promise<Response> {
+  const { json, version } = await publishedScene(env, space);
+  // Неопубликованное пространство — 404: гость упирается (холст вздрагивает), хранитель входит в пустое и рисует.
+  if (space !== 'main' && !version) return new Response(JSON.stringify({ error: 'NO_SPACE' }), { status: 404, headers: jsonResponse('', { noStore: true }).headers });
   return jsonResponse(json, { maxAge: 30, version });
 }
 
@@ -64,4 +77,28 @@ export function jsonResponse(json: string, o: { maxAge?: number; version?: numbe
   });
   if (o.version !== undefined) h.set('X-Scene-Version', String(o.version));
   return new Response(json, { headers: h });
+}
+
+/**
+ * /in/{space} — алеф-нуль. Людям — витрина этого пространства (движок входит туда же изнутри объекта, без перезагрузки),
+ * моделям (markdown, JSON) — подписи и ссылки его объектов текстом. Пространство есть, если оно опубликовано
+ * или на него указывает объект опубликованной сцены; хранитель в сессии открывает и пустое — чтобы нарисовать.
+ */
+export async function spacePage(req: Request, env: Env, o: string, space: string, fmt: string): Promise<Response | null> {
+  const pub = await publishedScene(env, space);
+  const parent = await parentOf(env, space);
+  if (!pub.version && !parent && !(await keeperSession(env, req, nowSec()))) return null;
+  if (fmt === 'html') return vitrinaPage(req, env, o, { space });
+  const back = spaceUrl(parent ? parent.space : 'main');
+  const lines = pub.scene.objects.map((x) => {
+    const href = x.inner ? `/in/${x.inner}` : x.href;
+    const w = x.window;
+    let s = href ? `- [${inline(x.label)}](${o}${href})` : `- ${inline(x.label)}`;
+    if (w?.title) s += `\n  ${inline(w.title)}`;
+    if (w?.text) s += `\n  ${inline(w.text, 4000)}`;
+    for (const l of w?.links ?? []) s += `\n  - [${inline(l.label)}](${o}${l.href})`;
+    return s;
+  });
+  const title = `Пространство ${space}`;
+  return md(`# ${title}\n\n${lines.join('\n') || 'Пока пусто.'}\n` + next([['Наружу', o + back], ['Вход для моделей', `${o}/llms.txt`]]), { maxAge: 60 });
 }

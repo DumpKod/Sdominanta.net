@@ -36,7 +36,7 @@ describe('1. Страницы', () => {
     // Сцена — холст с объектами кистью, ссылки объектов — слоем <nav>; картинок нет.
     const page = await human.text();
     expect(page).not.toMatch(/<img/i);
-    expect(page).toContain('<canvas id="scene" aria-hidden="true" data-scene="/vitrina/scene.json"></canvas>');
+    expect(page).toContain('<canvas id="scene" aria-hidden="true" data-scene="/vitrina/scene.json" data-space="main"></canvas>');
     const model = await get('/', { Accept: 'text/markdown' });
     expect(model.headers.get('Content-Type')).toContain('text/markdown');
     expect(await model.text()).toBe(await (await get('/llms.txt')).text());
