@@ -13,6 +13,7 @@
 //     strokes: [ { r, pts: [[x, y(, r)]…], closed? } ],   жилы в координатах мира
 //     area?: [[x, y]…],                   область попадания в координатах мира (многоугольник)
 //     window?: { title?, text?, links?: [ { label, href } ] }   окно из пустоты по клику
+//     slot?: "player"                     место для живого HTML: player — плеер, keeper — вход хранителя
 //     inner?: "aleph"                     алеф-нуль: колёсико или клик внутрь — пространство aleph (/in/aleph)
 //     style?: { tubeR, thick, resonance, tact, flow, wobble, fill, sound }   свои параметры объекта
 // } ] }
@@ -34,6 +35,7 @@ export interface SceneObject {
   window?: { title?: string; text?: string; links?: { label: string; href: string }[] };
   style?: Record<string, number>;
   inner?: string;
+  slot?: (typeof SLOTS)[number];
 }
 export interface Scene {
   v: 2;
@@ -53,6 +55,8 @@ export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], de
 
 /** Имя пространства: main — главная витрина, остальные — алеф-нули. */
 export const SPACE_RE = /^[a-z0-9-]{1,32}$/;
+/** Места для живого HTML в сцене: плеер и вход хранителя. */
+export const SLOTS = ['player', 'keeper'] as const;
 export const EMPTY_SCENE: Scene = { v: 2, objects: [] };
 
 /** Относительный путь своего сайта: «/…», без «//», «..», схемы, строки запроса и пробелов. */
@@ -93,7 +97,8 @@ export function validateScene(raw: string): Check {
   j.objects.forEach((o: unknown, i: number) => {
     const at = `objects[${i}]`;
     if (!isObj(o)) return void errors.push(`${at}: объект`);
-    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'window', 'style', 'inner'], at);
+    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'window', 'style', 'inner', 'slot'], at);
+    if (o.slot !== undefined && !(SLOTS as readonly unknown[]).includes(o.slot)) errors.push(`${at}.slot: место — ${SLOTS.join(' или ')}`);
     if (o.inner !== undefined && (typeof o.inner !== 'string' || !SPACE_RE.test(o.inner) || o.inner === 'main'))
       errors.push(`${at}.inner: имя пространства — латиница, цифры, дефис, до 32, не main`);
     if (typeof o.id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(o.id)) errors.push(`${at}.id: латиница, цифры, дефис, до 32`);

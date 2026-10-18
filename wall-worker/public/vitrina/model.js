@@ -136,6 +136,8 @@ export class SceneObject {
     this.href = src.href || null;
     /** Алеф-нуль: имя пространства (сцены) внутри объекта, вход — колёсиком вглубь или нажатием. */
     this.inner = src.inner || null;
+    /** Место для живого HTML (плеер, вход хранителя): элемент [data-slot] встаёт в рамку объекта. */
+    this.slot = src.slot || null;
     this.z = typeof src.z === 'number' ? src.z : 0;
     this.strokes = clone(src.strokes || []);
     this.area = src.area ? clone(src.area) : null;
@@ -208,6 +210,7 @@ export class SceneObject {
     const o = { id: this.id, label: this.label };
     if (this.href) o.href = this.href;
     if (this.inner) o.inner = this.inner;
+    if (this.slot) o.slot = this.slot;
     if (this.z) o.z = this.z;
     o.strokes = this.strokes;
     if (this.area && this.area.length >= 3) o.area = this.area;

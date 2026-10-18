@@ -66,7 +66,8 @@
     const objRow = el('div', 'kp-row');
 
     const props = section('Объект', true);
-    const fId = input(), fLabel = input(), fHref = input(), fInner = input(), fZ = input(), fTitle = input(), fText = input('textarea'), fLinks = input('textarea');
+    const fId = input(), fLabel = input(), fHref = input(), fInner = input(), fSlot = input('select'), fZ = input(), fTitle = input(), fText = input('textarea'), fLinks = input('textarea');
+    for (const [v, t] of [['', '— нет —'], ['player', 'плеер'], ['keeper', 'вход хранителя']]) fSlot.append(new Option(t, v));
     fZ.type = 'number'; fZ.step = '1'; fZ.min = '-100'; fZ.max = '100';
     fText.rows = 4;
     fLinks.rows = 3;
@@ -74,6 +75,7 @@
       wrap(fId, 'id: латиница, цифры, дефис'),
       wrap(fLabel, 'Подпись (видят модели в <nav>)'),
       wrap(fHref, 'Адрес: относительный путь, например /wall'),
+      wrap(fSlot, 'Место: плеер или вход хранителя встанут в рамку объекта'),
       wrap(fInner, 'Алеф-нуль: имя пространства внутри (латиница, цифры, дефис), пусто — не вход'),
       wrap(fZ, 'Слой: выше — поверх и первым ловит клик'),
     );
@@ -205,12 +207,13 @@
     }
     function showFields() {
       const o = first();
-      for (const f of [fId, fLabel, fHref, fInner, fZ, fTitle, fText, fLinks]) f.disabled = !o;
+      for (const f of [fId, fLabel, fHref, fInner, fSlot, fZ, fTitle, fText, fLinks]) f.disabled = !o;
       for (const s of Object.values(sliders)) s.r.disabled = !o;
       fId.value = o ? o.id : '';
       fLabel.value = o ? o.label : '';
       fHref.value = (o && o.href) || '';
       fInner.value = (o && o.inner) || '';
+      fSlot.value = (o && o.slot) || '';
       fZ.value = o ? String(o.z || 0) : '';
       fTitle.value = (o && o.window && o.window.title) || '';
       fText.value = (o && o.window && o.window.text) || '';
@@ -237,6 +240,7 @@
       o.label = fLabel.value.trim() || o.id;
       o.href = fHref.value.trim() || null;
       o.inner = fInner.value.trim().toLowerCase() || null;
+      o.slot = fSlot.value || null;
       o.z = Math.max(-100, Math.min(100, Math.round(+fZ.value || 0)));
       const links = fLinks.value
         .split('\n')
@@ -252,7 +256,7 @@
       if (opt) opt.textContent = `${o.id} — ${o.label}`;
     }
     pick.addEventListener('change', () => select(pick.value ? [pick.value] : []));
-    for (const f of [fLabel, fHref, fZ, fTitle, fText, fLinks]) {
+    for (const f of [fLabel, fHref, fInner, fSlot, fZ, fTitle, fText, fLinks]) {
       f.addEventListener('input', readFields);
       f.addEventListener('change', () => changed(f === fZ));
     }

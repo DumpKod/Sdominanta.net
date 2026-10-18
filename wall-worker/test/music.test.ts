@@ -62,7 +62,7 @@ describe('Музыка: админка и витрина', () => {
     await addAndChoose();
     const res = await get('/', HTML);
     const page = await res.text();
-    expect(page).toContain('<aside class="music" data-stream="/music/stream/');
+    expect(page).toContain('<aside class="music" data-slot="player" data-stream="/music/stream/');
     expect(page).toContain(`«<a href="${TRACK}" rel="noopener noreferrer">Континуум</a>» — <a href="https://soundcloud.com/sdominanta" rel="noopener noreferrer">Sdominanta</a>`);
     expect(page).toContain('<script type="module" src="/vitrina/music.js"></script>');
     expect(page).toContain('data-key="0"');

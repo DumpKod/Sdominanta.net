@@ -21,12 +21,23 @@
   </nav>
 {{#MUSIC}}
   <!-- Музыка: трек, который выбрал хранитель. Звук — только после нажатия ▶, по кругу; до нажатия к SoundCloud не уходит ни одного запроса. -->
-  <aside class="music" data-stream="/music/stream/{{TRACK_ID}}" data-key="{{KEY}}">
+  <aside class="music" data-slot="player" data-stream="/music/stream/{{TRACK_ID}}" data-key="{{KEY}}">
     <button class="music-play" type="button" aria-label="Слушать «{{TRACK_TITLE}}»" aria-pressed="false">▶</button>
     <span class="music-what">«<a href="{{TRACK_URL}}" rel="noopener noreferrer">{{TRACK_TITLE}}</a>» — <a href="{{ARTIST_URL}}" rel="noopener noreferrer">{{ARTIST}}</a> · звук: <a href="https://soundcloud.com" rel="noopener noreferrer">SoundCloud</a></span>
   </aside>
   <script type="module" src="/vitrina/music.js"></script>
 {{/MUSIC}}
+{{#KEEPER}}
+  <!-- Место хранителя: в сессии — разделы панели. Встаёт в объект сцены со slot "keeper", если он есть. -->
+  <aside class="keeper" data-slot="keeper"><a href="/k">Очередь</a> <a href="/k/vitrina">Витрина</a> <a href="/k/music">Музыка</a></aside>
+{{/KEEPER}}
+{{#DOOR}}
+  <!-- Вход хранителя: только в браузере с ключом хранителя, второй слой — код из аутентификатора. -->
+  <aside class="keeper" data-slot="keeper">
+    <form method="post" action="/k/login"><input type="hidden" name="csrf" value="{{LOGIN_CSRF}}"><input type="hidden" name="back" value="{{BACK}}">
+      <label>Код <input name="otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label> <button type="submit">Войти</button></form>
+  </aside>
+{{/DOOR}}
   <!-- Вход для моделей тем же текстом, что /llms.txt. Визуально скрыт. -->
   <pre class="entry">
 {{ENTRY}}

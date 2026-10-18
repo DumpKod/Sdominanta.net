@@ -616,6 +616,40 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     ctx.globalCompositeOperation = 'source-over';
     if (overlay) { ctx.setTransform(DPR * VK, 0, 0, DPR * VK, 0, 0); overlay(ctx); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
     if (fade.veil > 0.001) { ctx.fillStyle = `rgba(1, 3, 6, ${Math.min(1, fade.veil).toFixed(3)})`; ctx.fillRect(0, 0, W, H); }
+    placeSlots();
+  }
+
+  /* ---------------------------------------------------------------------
+     МЕСТА: объект сцены с полем slot (player, keeper) — место для живого HTML: плеера и входа хранителя.
+     Элемент [data-slot] встаёт в рамку объекта на экране и движется с камерой; объект вне вида или мельче
+     SLOT_MIN — элемент прячется. Места в сцене нет — элемент остаётся на своём месте из CSS.
+     Пишем в DOM только когда рамка изменилась.
+     --------------------------------------------------------------------- */
+  const SLOT_MIN = 48;
+  let slotKey = '';
+  function placeSlots() {
+    let key = going ? 'go' : '';
+    const seen = {};
+    for (const o of scene.objects) {
+      if (!o.slot || seen[o.slot]) continue;
+      const b = o.bounds();
+      if (isEmpty(b)) continue;
+      const [x0, y0] = cam.toScreen(b.x0, b.y0, W, H), [x1, y1] = cam.toScreen(b.x1, b.y1, W, H);
+      seen[o.slot] = [x0 / VK, y0 / VK, (x1 - x0) / VK, (y1 - y0) / VK].map(Math.round);
+      key += o.slot + seen[o.slot].join(',') + ';';
+    }
+    if (key === slotKey) return;
+    slotKey = key;
+    for (const el of document.querySelectorAll('[data-slot]')) {
+      const r = seen[el.dataset.slot];
+      if (!r) { el.classList.remove('slotted'); el.hidden = false; for (const k of ['left', 'top', 'width', 'height']) el.style[k] = ''; continue; }
+      const [x, y, w, h] = r;
+      const off = going || w < SLOT_MIN || x + w < 0 || y + h < 0 || x > innerWidth || y > innerHeight;
+      el.classList.add('slotted');
+      el.hidden = off;
+      if (off) continue;
+      el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.width = w + 'px'; el.style.height = h + 'px';
+    }
   }
 
   /* ---------------------------------------------------------------------

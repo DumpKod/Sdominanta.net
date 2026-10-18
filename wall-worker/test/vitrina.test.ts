@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SCENE, validateScene } from '../src/scene';
 import * as M from '../public/vitrina/model.js';
-import { csrfOf, get, keeperCookie, login, O, post } from './helpers';
+import { csrfOf, get, keeperCookie, login, O, otp, post } from './helpers';
 
 // Витрина: движок кисти — статический /vitrina.js, сцена — /vitrina/scene.json из базы (пусто — встроенная),
 // <nav> — из той же сцены. Редактор — /k/editor.js, только в сессии хранителя; версии сцены — в /k/vitrina.
@@ -483,5 +483,45 @@ describe('Алеф-нули: пространства внутри объект�
       expect(editorJs, s).toContain(s);
     const o = new M.SceneObject({ id: 'a', label: 'A', inner: 'deep', strokes: [] });
     expect(o.toJSON()).toMatchObject({ inner: 'deep' });
+  });
+});
+
+describe('Места в сцене: плеер и вход хранителя', () => {
+  it('гостю — ни поля кода, ни разделов; браузеру с ключом — поле кода; в сессии — разделы панели', async () => {
+    const guest = await (await get('/', HTML)).text();
+    expect(guest).not.toContain('data-slot="keeper"');
+    const key = await keeperCookie();
+    const res = await get('/', { ...HTML, Cookie: key });
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    const door = await res.text();
+    expect(door).toContain('<aside class="keeper" data-slot="keeper">');
+    expect(door).toContain('<input type="hidden" name="back" value="/">');
+    expect(door).toContain('autocomplete="one-time-code"');
+    expect(door).not.toContain('href="/k/vitrina"');
+    // вход с витрины возвращает на витрину (а чужой адрес — нет: тогда в /k)
+    const csrf = csrfOf(door);
+    const back = await post('/k/login', { csrf, otp: await otp(), back: '/in/theory' }, key);
+    expect(back.status).toBe(303);
+    expect(back.headers.get('Location')).toBe(`${O}/in/theory`);
+    // код одноразовый: сессия — из этого же входа
+    const cookie = `${key}; ${/^(__Host-session=[^;]+)/.exec(back.headers.get('Set-Cookie')!)![1]}`;
+    const inSession = await (await get('/', { ...HTML, Cookie: cookie })).text();
+    expect(inSession).toContain('<aside class="keeper" data-slot="keeper"><a href="/k">Очередь</a>');
+    expect(inSession).not.toContain('name="otp"');
+  });
+
+  it('вход с витрины на чужой адрес не уводит: после кода — в /k', async () => {
+    const key = await keeperCookie();
+    const csrf = csrfOf(await (await get('/', { ...HTML, Cookie: key })).text());
+    const r = await post('/k/login', { csrf, otp: await otp(), back: 'https://evil.example/' }, key);
+    expect(r.headers.get('Location')).toBe(`${O}/k`);
+  });
+
+  it('slot — только player или keeper; движок ставит элемент [data-slot] в рамку объекта', () => {
+    expect(validateScene(tiny({ slot: 'player' })).ok).toBe(true);
+    expect(validateScene(tiny({ slot: 'keeper' })).ok).toBe(true);
+    expect(validateScene(tiny({ slot: 'banner' })).ok).toBe(false);
+    expect(new M.SceneObject({ id: 'a', label: 'A', slot: 'player', strokes: [] }).toJSON()).toMatchObject({ slot: 'player' });
+    for (const s of ['function placeSlots(', "querySelectorAll('[data-slot]')", 'SLOT_MIN']) expect(vitrinaJs, s).toContain(s);
   });
 });

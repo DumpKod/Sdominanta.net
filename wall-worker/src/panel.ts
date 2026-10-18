@@ -65,6 +65,17 @@ function page(title: string, body: string, o: { status?: number; headers?: Recor
   return html(doc, { status: o.status ?? 200, noStore: true, csp: CSP, headers: { 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'same-origin', ...o.headers } });
 }
 
+/**
+ * Вход хранителя на витрине (место keeper в сцене): браузер с cookie ключа, но без сессии, видит поле кода;
+ * без cookie ключа — ничего (оба слоя: ключ, потом код). Форма — тот же POST /k/login, после входа — назад на витрину.
+ */
+export async function keeperDoor(env: Env, req: Request, now: number): Promise<{ csrf: string } | null> {
+  if (!(await keeperFromCookie(env, req, now))) return null;
+  return { csrf: await csrfFor(env, 'login', cookieValue(req, COOKIE) ?? '') };
+}
+/** Куда вернуться после входа с витрины: главная или пространство. */
+const BACK_RE = /^\/(in\/[a-z0-9-]{1,32})?$/;
+
 /** Сессия хранителя для витрины: cookie ключа + действующая сессия того же хранителя; csrf — токен её форм. */
 export async function keeperSession(env: Env, req: Request, now: number): Promise<{ sign: string; id: string; csrf: string } | null> {
   const me = await keeperFromCookie(env, req, now);
@@ -160,7 +171,7 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
     ]);
     return new Response(null, {
       status: 303,
-      headers: { Location: `${o}/k`, 'Set-Cookie': sessionCookie(token, SESSION_TTL), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' },
+      headers: { Location: o + (BACK_RE.test(f.back ?? '') ? f.back : '/k'), 'Set-Cookie': sessionCookie(token, SESSION_TTL), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' },
     });
   }
 

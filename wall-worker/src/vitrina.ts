@@ -1,5 +1,5 @@
 import { htmlText } from './format';
-import { keeperSession } from './panel';
+import { keeperDoor, keeperSession } from './panel';
 import { parentOf, publishedScene, Scene, sceneNav } from './scene';
 import { currentTrack, hasKey } from './music';
 import { Env, html, inline, md, next, nowSec, render } from './util';
@@ -28,6 +28,7 @@ export const spaceUrl = (space: string) => (space === 'main' ? '/' : `/in/${spac
 
 export async function vitrinaPage(req: Request, env: Env, o: string, opts: VitrinaOpts = {}): Promise<Response> {
   const s = await keeperSession(env, req, nowSec());
+  const door = s ? null : await keeperDoor(env, req, nowSec());
   const space = opts.space ?? 'main';
   const scene = opts.scene ?? (await publishedScene(env, space)).scene;
   const parent = space === 'main' ? null : await parentOf(env, space);
@@ -36,6 +37,9 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
   const body = render(showcase, {
     KEEPER: !!s,
     CSRF: s?.csrf ?? '',
+    DOOR: !!door,
+    LOGIN_CSRF: door?.csrf ?? '',
+    BACK: spaceUrl(space),
     SCENE_URL: opts.sceneUrl ?? sceneUrlOf(space),
     SPACE: space,
     PARENT: space === 'main' ? '' : parent ? parent.space : 'main',
@@ -52,7 +56,7 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
     ARTIST: t ? attr(t.artist) : '',
   });
   return html(body, {
-    noStore: !!s || opts.scene !== undefined,
+    noStore: !!s || !!door || opts.scene !== undefined,
     // редактор шлёт POST с этой страницы: при no-referrer браузер поставил бы «Origin: null»
     headers: { Vary: 'Accept, Cookie', 'Referrer-Policy': 'same-origin' },
     csp: t ? CSP_MUSIC : CSP,
