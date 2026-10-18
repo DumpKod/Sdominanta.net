@@ -2,6 +2,8 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { issueKeeperCookie, lockDuration } from '../src/keeper';
 import { b64url, hmacSha256 } from '../src/util';
+
+const TAG = () => JSON.parse(env.KEEPERS)['🜄'].key_sha256.slice(0, 8) as string;
 import { card, get, kget, otp, submitOk } from './helpers';
 
 // Два слоя защиты хранителя: ключ → cookie; TOTP с нарастающей блокировкой.
@@ -21,7 +23,7 @@ describe('Слой 1: ключ хранителя и cookie', () => {
     expect(res.headers.get('Location')).toBe('https://sdominanta.net/wall');
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     const c = res.headers.get('Set-Cookie')!;
-    expect(c).toMatch(/^__Host-keeper=[\w-]+\.[\w-]+; Secure; HttpOnly; SameSite=Strict; Path=\/; Max-Age=2592000$/);
+    expect(c).toMatch(/^__Host-keeper=[\w-]+\.[\w-]+; Secure; HttpOnly; SameSite=Lax; Path=\/; Max-Age=2592000$/);
     expect(c).not.toContain(env.TEST_KEEPER_KEY);
   });
 
@@ -57,11 +59,13 @@ describe('Слой 1: ключ хранителя и cookie', () => {
     const forge = async (payload: string, key = env.TOKEN_KEY) =>
       `__Host-keeper=${b64url(new TextEncoder().encode(payload))}.${b64url(await hmacSha256(key, 'keeper|' + payload))}`;
     const cookies = [
-      await forge(`🜄|${now() + 3600}`, 'чужой ключ'), // подпись не тем ключом
+      await forge(`🜄|${now() + 3600}|${TAG()}`, 'чужой ключ'), // подпись не тем ключом
       '__Host-keeper=' + (await issueKeeperCookie(env, '🜄', now() - 31 * 24 * 3600)), // истекла
-      await forge(`🜁|${now() + 3600}`), // не хранитель
-      await forge(`🜄|${now() + 3600}|x`), // лишнее поле
-      (await forge(`🜄|${now() + 3600}`)).slice(0, -2), // испорчена подпись
+      await forge(`🜁|${now() + 3600}|${TAG()}`), // не хранитель
+      await forge(`🜄|${now() + 3600}|${TAG()}|x`), // лишнее поле
+      await forge(`🜄|${now() + 3600}`), // без отпечатка ключа
+      await forge(`🜄|${now() + 3600}|00000000`), // ключ хранителя сменился: старая cookie отозвана
+      (await forge(`🜄|${now() + 3600}|${TAG()}`)).slice(0, -2), // испорчена подпись
     ];
     for (const c of cookies) {
       expect((await get(`/review?code=${code}`, { Cookie: c })).status, c).toBe(403);
@@ -69,7 +73,7 @@ describe('Слой 1: ключ хранителя и cookie', () => {
     }
     expect(await counters()).toEqual({ lock: 0, otp: 0 });
     // Контроль: настоящая cookie той же формы открывает /review.
-    expect((await get(`/review?code=${code}`, { Cookie: await forge(`🜄|${now() + 3600}`) })).status).toBe(200);
+    expect((await get(`/review?code=${code}`, { Cookie: await forge(`🜄|${now() + 3600}|${TAG()}`) })).status).toBe(200);
   });
 });
 

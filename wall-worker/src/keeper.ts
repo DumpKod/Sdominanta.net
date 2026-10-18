@@ -28,16 +28,20 @@ export async function keeperByKey(env: Env, key: string): Promise<string | null>
 
 const cookieSig = async (env: Env, payload: string) => b64url(await hmacSha256(env.TOKEN_KEY, 'keeper|' + payload));
 
+/** Первые 8 знаков отпечатка ключа: смена ключа хранителя отзывает только его cookie. */
+const keyTag = (env: Env, sign: string) => keepers(env)[sign]?.key_sha256.slice(0, 8) ?? '';
+
+/** Нагрузка cookie: знак|exp|первые 8 знаков отпечатка ключа, подпись TOKEN_KEY. */
 export async function issueKeeperCookie(env: Env, sign: string, now: number): Promise<string> {
-  const payload = `${sign}|${now + COOKIE_TTL}`;
+  const payload = `${sign}|${now + COOKIE_TTL}|${keyTag(env, sign)}`;
   return b64url(enc.encode(payload)) + '.' + (await cookieSig(env, payload));
 }
 
 export function cookieHeader(value: string): string {
-  return `${COOKIE}=${value}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=${COOKIE_TTL}`;
+  return `${COOKIE}=${value}; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=${COOKIE_TTL}`;
 }
 
-/** Знак хранителя из валидной cookie: подпись верна, срок не истёк, хранитель всё ещё действующий. */
+/** Знак хранителя из валидной cookie: подпись верна, срок не истёк, хранитель действующий, ключ не менялся. */
 export async function keeperFromCookie(env: Env, req: Request, now: number): Promise<string | null> {
   const raw = (req.headers.get('Cookie') ?? '').split(/;\s*/).find((c) => c.startsWith(COOKIE + '='));
   if (!raw) return null;
@@ -47,10 +51,11 @@ export async function keeperFromCookie(env: Env, req: Request, now: number): Pro
   if (!pb) return null;
   const payload = new TextDecoder().decode(pb);
   if (!timingSafeEqual(enc.encode(await cookieSig(env, payload)), enc.encode(s))) return null;
-  const [sign, expS, more] = payload.split('|');
+  const [sign, expS, tag, more] = payload.split('|');
   const exp = Number(expS);
   if (more !== undefined || !Number.isInteger(exp) || exp <= now) return null;
-  return keepers(env)[sign] ? sign : null;
+  const current = keyTag(env, sign);
+  return current && tag === current ? sign : null;
 }
 
 // ---------- слой 2: TOTP и нарастающая блокировка ----------
