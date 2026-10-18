@@ -34,7 +34,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   let hl = -1; // индекс подсвеченного объекта
   let userMoved = false; // камеру двигал человек: при смене размера окна не возвращать к общему виду
   let tween = null; // плавный перелёт камеры { from, to, t }
-  const S = { drift: 1.4, density: 0.85, glow: 0.8 }; // пространство всей сцены
+  const S = { drift: 1.4, density: 0.85, glow: 0.8, sound: 1 }; // пространство всей сцены
   // Слух: music.js отдаёт раз в кадр полосы частот, басы/середину/верх, громкость и удар (0..1). Без музыки — нули.
   const SILENT = { bands: new Float32Array(1), low: 0, mid: 0, high: 0, level: 0, beat: 0, on: false };
   let hearFn = null, snd = SILENT;
@@ -95,7 +95,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   /** Параметры объекта для жилы: свои у объекта или по умолчанию. */
   function styleOf(o) {
-    return { thick: o.get('thick'), resonance: o.get('resonance'), tact: o.get('tact'), flow: o.get('flow'), wobble: o.get('wobble'), fill: o.get('fill') };
+    return { thick: o.get('thick'), resonance: o.get('resonance'), tact: o.get('tact'), flow: o.get('flow'), wobble: o.get('wobble'), fill: o.get('fill'), sound: o.get('sound') };
   }
 
   function buildVeins() {
@@ -461,7 +461,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   function step() {
     cull();
-    const t = T, z = cam.zoom, iz = 1 / z, drift = S.drift * fieldSp * 0.55 * (1 + 0.8 * snd.low + 0.4 * snd.beat);
+    const t = T, z = cam.zoom, iz = 1 / z, drift = S.drift * fieldSp * 0.55 * (1 + S.sound * (0.8 * snd.low + 0.4 * snd.beat));
     const objs = scene.objects;
     const nb = snd.bands.length;
     const crPx = Math.max(22, Math.min(44, Math.min(W, H) * 0.045)), cr = crPx * iz, cr2 = cr * cr;
@@ -485,7 +485,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
         if (qSd < 0) { const p = -qSd * 0.32; ax += qNx * p; ay += qNy * p; b = 1; }
         else { const q = qSd / (fsc[i] * 1.6); b = Math.exp(-q * q); }
         const fl = v.st.flow * b * 0.5 * iz; ax += qTx * fl; ay += qTy * fl; // стенки скользят вдоль линии
-        b *= (1 + 0.5 * (objs[v.obj].$lift || 0)) * (1 + 0.9 * snd.bands[qV % nb]); // у каждой жилы своя полоса частот
+        b *= (1 + 0.5 * (objs[v.obj].$lift || 0)) * (1 + 0.9 * v.st.sound * snd.bands[qV % nb]); // у каждой жилы своя полоса частот
       }
       if (cursorOn) {
         const dx = fx[i] - mwx, dy = fy[i] - mwy, d2 = dx * dx + dy * dy;
@@ -510,13 +510,13 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       const f = ms[i] / v.step, j = Math.min(v.n - 2, Math.max(0, f | 0)), w = Math.min(1, f - j), j1 = Math.min(v.n - 1, j + 1);
       const R = v.rad[j] + (v.rad[j1] - v.rad[j]) * w;
       const cx = v.x[j] + (v.x[j1] - v.x[j]) * w, cy = v.y[j] + (v.y[j1] - v.y[j]) * w;
-      const band = snd.bands[mv[i] % nb];
+      const band = v.st.sound * snd.bands[mv[i] % nb];
       const off = mu[i] * R * Math.min(0.97, 0.86 + 0.06 * Math.sin(t * 1.7 + mph[i]) + 0.1 * band);
       const jit = v.R * 0.12;
       mx[i] = cx + v.nx[j] * off + Math.sin(t * 1.3 + mph[i] * 3) * jit;
       my[i] = cy + v.ny[j] * off + Math.cos(t * 1.1 + mph[i] * 2) * jit;
       const tactB = 0.5 + 0.5 * Math.sin((ms[i] / (v.R * 10)) * 6.283 - t * 2.4 * v.st.tact + v.ph[3]);
-      mb[i] = (0.45 + 0.4 * mu[i] * mu[i] + 0.25 * tactB * tactB) * (1 + 0.6 * (objs[v.obj].$lift || 0)) * (v.st.fill / 0.6) * (1 + 0.9 * snd.mid + 0.8 * band);
+      mb[i] = (0.45 + 0.4 * mu[i] * mu[i] + 0.25 * tactB * tactB) * (1 + 0.6 * (objs[v.obj].$lift || 0)) * (v.st.fill / 0.6) * (1 + 0.9 * v.st.sound * snd.mid + 0.8 * band);
     }
   }
 
@@ -578,7 +578,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     ctx.beginPath();
     for (let i = 0; i < NF; i++) {
       const b = fb[i];
-      if (b < 0.35 - 0.2 * snd.high) continue;
+      if (b < 0.35 - 0.2 * S.sound * snd.high) continue;
       const x = sfx[i], y = sfy[i];
       if (x < -4 || y < -4 || x > W + 4 || y > H + 4) continue;
       const s = 0.6 + b * 1.3 * (0.75 + 0.25 * Math.sin(T * 3 + fph[i] * 5));
@@ -602,7 +602,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     gctx.drawImage(cv, 0, 0, glowCv.width, glowCv.height);
     gctx.filter = 'none';
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = Math.min(1, S.glow * 0.9 * (1 + 0.5 * snd.beat + 0.3 * snd.level));
+    ctx.globalAlpha = Math.min(1, S.glow * 0.9 * (1 + S.sound * (0.5 * snd.beat + 0.3 * snd.level)));
     ctx.drawImage(glowCv, 0, 0, cv.width, cv.height);
     ctx.globalAlpha = 1;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);

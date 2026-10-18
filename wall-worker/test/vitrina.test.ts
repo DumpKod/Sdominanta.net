@@ -372,6 +372,21 @@ describe('Бесконечный холст: модель (public/vitrina/model.
     expect(validateScene(JSON.stringify(j)).ok).toBe(true);
   });
 
+  it('объект-слой: растяжение от опоры (радиусы — в √|sx·sy|), поворот вокруг центра, реакция на звук в параметрах', () => {
+    const o = new M.SceneObject({ id: 'a', label: 'A', strokes: [{ r: 4, pts: [[0, 0], [10, 0, 2]] }], area: [[0, 0], [10, 0], [10, 10]] });
+    o.stretch(2, 0.5, 0, 0);
+    expect(o.strokes[0]).toEqual({ r: 4, pts: [[0, 0], [20, 0, 2]] });
+    expect(o.area).toEqual([[0, 0], [20, 0], [20, 5]]);
+    o.stretch(2, 2, 10, 0);
+    expect(o.strokes[0]).toEqual({ r: 8, pts: [[-10, 0], [30, 0, 4]] });
+    o.rotate(Math.PI / 2, 10, 0);
+    expect(o.strokes[0].pts).toEqual([[10, -20], [10, 20, 4]]);
+    expect(M.STYLE.sound).toEqual([0, 2, 1]);
+    expect(M.SPACE.sound).toEqual([0, 2, 1]);
+    expect(validateScene(JSON.stringify({ v: 2, space: { sound: 0 }, objects: [{ id: 'a', label: 'A', strokes: [], style: { sound: 0 } }] })).ok).toBe(true);
+    expect(validateScene(JSON.stringify({ v: 2, objects: [{ id: 'a', label: 'A', strokes: [], style: { sound: 3 } }] })).ok).toBe(false);
+  });
+
   it('отмена и повтор: назад, вперёд, новая правка обрезает повтор, предел истории', () => {
     const h = new M.History(3);
     h.reset('s0');
@@ -395,7 +410,7 @@ describe('Бесконечный холст: модель (public/vitrina/model.
   });
 
   it('редактор: отмена/повтор, Shift+1/Shift+2, пробел и средняя кнопка, мини-карта, точки, слой и параметры', () => {
-    for (const s of ['new M.History()', 'hist.undo()', 'hist.redo()', "e.code === 'Digit2' && e.shiftKey", 'drawMini', 'nearSegment', 'deletePoint', 'rectFrom', 'fZ', 'M.STYLE'])
+    for (const s of ['new M.History()', 'hist.undo()', 'hist.redo()', "e.code === 'Digit2' && e.shiftKey", 'drawMini', 'nearSegment', 'deletePoint', 'rectFrom', 'fZ', 'M.STYLE', 'startHandle', 'applyHandle', '.stretch(', '.rotate('])
       expect(editorJs, s).toContain(s);
     for (const s of ["e.code === 'Space'", 'e.button === 1', "e.code === 'Digit1' && e.shiftKey", 'clampTo', 'pinch', 'cull()'])
       expect(vitrinaJs, s).toContain(s);

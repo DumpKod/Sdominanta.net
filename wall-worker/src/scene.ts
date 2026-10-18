@@ -5,7 +5,7 @@
 // Модель для браузера (камера, отсечение, история) — public/vitrina/model.js.
 //
 // Формат v2 (всё остальное отвергается при сохранении):
-// { v: 2, space?: { drift, density, glow }, objects: [ {
+// { v: 2, space?: { drift, density, glow, sound }, objects: [ {
 //     id: "wall",                         латиница, цифры, дефис; до 32
 //     label: "Стена: нити, записи, системы",   подпись для <nav> и моделей; до 200
 //     href?: "/wall",                     относительный путь стены
@@ -13,7 +13,7 @@
 //     strokes: [ { r, pts: [[x, y(, r)]…], closed? } ],   жилы в координатах мира
 //     area?: [[x, y]…],                   область попадания в координатах мира (многоугольник)
 //     window?: { title?, text?, links?: [ { label, href } ] }   окно из пустоты по клику
-//     style?: { tubeR, thick, resonance, tact, flow, wobble, fill }   свои параметры объекта
+//     style?: { tubeR, thick, resonance, tact, flow, wobble, fill, sound }   свои параметры объекта
 // } ] }
 import { Env } from './util';
 import defaultScene from './scene-default.json';
@@ -45,9 +45,9 @@ export const SCENE_MAX = 256 * 1024;
 const LIMITS = { objects: 200, strokes: 400, pts: 2000, area: 200, links: 20, label: 200, title: 200, text: 4000, coord: 1e6 };
 /** Пределы параметров — те же, что у ползунков редактора (STYLE и SPACE в public/vitrina/model.js). */
 export const STYLE_RANGE: Record<string, [number, number]> = {
-  tubeR: [0.5, 200], thick: [0.4, 2.5], resonance: [0, 1], tact: [0, 3], flow: [0, 2], wobble: [0, 1], fill: [0, 1],
+  tubeR: [0.5, 200], thick: [0.4, 2.5], resonance: [0, 1], tact: [0, 3], flow: [0, 2], wobble: [0, 1], fill: [0, 1], sound: [0, 2],
 };
-export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], density: [0.5, 1.6], glow: [0, 1.5] };
+export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], density: [0.5, 1.6], glow: [0, 1.5], sound: [0, 2] };
 
 /** Относительный путь своего сайта: «/…», без «//», «..», схемы, строки запроса и пробелов. */
 export const relPath = (s: unknown): s is string =>

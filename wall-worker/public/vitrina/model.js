@@ -8,7 +8,7 @@
 //     strokes: [ { r, pts: [[x, y(, r)]…], closed? } ],   жилы в координатах мира
 //     area?: [[x, y]…],                        область попадания в координатах мира
 //     window?: { title?, text?, links?: [ { label, href } ] },
-//     style?: { tubeR, thick, resonance, tact, flow, wobble, fill }   свои параметры объекта, как в движке хранителя
+//     style?: { tubeR, thick, resonance, tact, flow, wobble, fill, sound }   свои параметры объекта, как в движке хранителя
 // } ] }
 
 export const ZOOM_MIN = 0.1;
@@ -26,12 +26,14 @@ export const STYLE = {
   flow: [0, 2, 1],
   wobble: [0, 1, 0.25],
   fill: [0, 1, 0.6],
+  sound: [0, 2, 1], // реакция жил объекта на музыку: 0 — нет, 1 — обычная
 };
 /** Параметры пространства всей сцены. */
 export const SPACE = {
   drift: [0, 2, 1.4],
   density: [0.5, 1.6, 0.85],
   glow: [0, 1.5, 0.8],
+  sound: [0, 2, 1], // реакция поля всей сцены на музыку (дрейф, свечение, удары)
 };
 const defaults = (spec) => Object.fromEntries(Object.entries(spec).map(([k, v]) => [k, v[2]]));
 export const STYLE_DEFAULTS = defaults(STYLE);
@@ -174,6 +176,30 @@ export class SceneObject {
       }
     }
     if (this.area) for (const p of this.area) { p[0] = r1(cx + (p[0] - cx) * k); p[1] = r1(cy + (p[1] - cy) * k); }
+    return this;
+  }
+  /**
+   * Растяжение вокруг точки мира: по x в sx раз, по y в sy раз (минус — отражение). Радиусы жил — в √|sx·sy| раз.
+   * Как и scale, правит точки на месте: объект хранит то, что видно.
+   */
+  stretch(sx, sy, cx, cy) {
+    const k = Math.sqrt(Math.abs(sx * sy));
+    for (const s of this.strokes) {
+      s.r = r2(Math.min(5000, Math.max(0.1, s.r * k)));
+      for (const p of s.pts) {
+        p[0] = r1(cx + (p[0] - cx) * sx); p[1] = r1(cy + (p[1] - cy) * sy);
+        if (p.length > 2) p[2] = r2(Math.min(5000, Math.max(0.1, p[2] * k)));
+      }
+    }
+    if (this.area) for (const p of this.area) { p[0] = r1(cx + (p[0] - cx) * sx); p[1] = r1(cy + (p[1] - cy) * sy); }
+    return this;
+  }
+  /** Поворот вокруг точки мира на a радиан (по часовой на экране: ось y вниз). */
+  rotate(a, cx, cy) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const turn = (p) => { const x = p[0] - cx, y = p[1] - cy; p[0] = r1(cx + x * c - y * s); p[1] = r1(cy + x * s + y * c); };
+    for (const st of this.strokes) for (const p of st.pts) turn(p);
+    if (this.area) for (const p of this.area) turn(p);
     return this;
   }
   toJSON() {
