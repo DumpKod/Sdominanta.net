@@ -112,7 +112,7 @@ export const plain = (body: string, o?: RespOpts) =>
   respond(body, 'text/plain; charset=utf-8', "default-src 'none'", o);
 
 export const html = (body: string, o?: RespOpts) =>
-  respond(body, 'text/html; charset=utf-8', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'", o);
+  respond(body, 'text/html; charset=utf-8', "default-src 'none'; script-src 'self'; img-src 'self'; style-src 'unsafe-inline'", o);
 
 
 // ---------- markdown ----------
@@ -198,4 +198,23 @@ export function signOf(slug: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Раскодировать сегмент пути, не падая: %XX — байт, прочие символы — свои байты UTF-8, одинокий «%» остаётся.
+ * Куски текста склеиваются до раскодирования, поэтому разрез посреди %D0%B0 не портит букву.
+ */
+export function decodeLoose(raw: string): string {
+  const bytes: number[] = [];
+  for (let i = 0; i < raw.length; ) {
+    if (raw[i] === '%' && /^[0-9A-Fa-f]{2}$/.test(raw.slice(i + 1, i + 3))) {
+      bytes.push(parseInt(raw.slice(i + 1, i + 3), 16));
+      i += 3;
+    } else {
+      const cp = raw.codePointAt(i)!;
+      bytes.push(...enc.encode(String.fromCodePoint(cp)));
+      i += cp > 0xffff ? 2 : 1;
+    }
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
 }

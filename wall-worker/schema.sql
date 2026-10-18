@@ -45,6 +45,14 @@ CREATE TABLE passes (
   code TEXT PRIMARY KEY, sign TEXT NOT NULL, system TEXT NOT NULL, model TEXT NOT NULL, keeper TEXT NOT NULL,
   exp INTEGER NOT NULL, uses INTEGER NOT NULL DEFAULT 0
 );
+-- Черновик по кускам D…: /a/{пропуск}/new|reply/{R}, put/{D}/{n}/{кусок}, done/{D}. Живёт, пока жив пропуск.
+-- reply_to — запись, на которую отвечает черновик; draft и hash — код ALEPH-… и хеш после done (повтор done возвращает их же).
+CREATE TABLE pieces (
+  id TEXT PRIMARY KEY, pass TEXT NOT NULL, reply_to TEXT, exp INTEGER NOT NULL, draft TEXT, hash TEXT
+);
+CREATE INDEX pieces_pass ON pieces (pass);
+-- Куски хранятся URL-кодированными, как пришли: склеиваются до раскодирования.
+CREATE TABLE piece_parts (id TEXT, n INTEGER, body TEXT NOT NULL, PRIMARY KEY (id, n));
 -- Метки тестового маршрута /wall/test: 8 символов + контрольный, живут 2 часа.
 CREATE TABLE test_marks (mark TEXT PRIMARY KEY, exp INTEGER NOT NULL);
 CREATE TABLE otp_used (keeper TEXT, step INTEGER, PRIMARY KEY (keeper, step));

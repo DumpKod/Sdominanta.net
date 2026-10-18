@@ -1,8 +1,8 @@
-import { Card, cardHash, checkRefs, formatErrors, parseCard, sameWords } from './card';
+import { Card, cardHash, checkRefs, formatErrors, ParseError, parseCard, sameWords } from './card';
 import { checkKeeper, cookieHeader, issueKeeperCookie, keeperByKey, keeperFromCookie, lockInfo } from './keeper';
 import { hit } from './rate';
 import { DAMAGED, makeCode, readCode } from './code';
-import { checkDecl, findPass, issuePass, PASS_USES } from './pass';
+import { checkDecl, findPass, issuePass, Pass, PASS_USES } from './pass';
 import { clientIp, Env, fmtTime, inline, keepers, md, next, nowSec, render, wrap } from './util';
 import rulesText from './pages/rules.md';
 
@@ -80,32 +80,15 @@ export async function submit(env: Env, o: string, req: Request, url: URL): Promi
   const found = await findPass(env.DB, url.searchParams.get('t'), now);
   if (!found.ok) return fail('Пропуск не принят', `Причина: ${found.reason}. Новый пропуск выдаётся на ${o}/wall/rules.`, 403);
   const pass = found.pass;
-  if (pass.uses >= PASS_USES) return exhausted();
-
-  const text = url.searchParams.get('text') ?? '';
-  const parsed = await checkRefs(env.DB, await parseCard(text, { tokenSign: pass.sign, keepers: Object.keys(keepers(env)) }));
-  if (!parsed.card) return fail('Карточка не принята', 'Черновик не создан. Ошибки разбора:\n\n' + formatErrors(parsed.errors));
-
-  // Счётчик использований растёт атомарно и только при успешном разборе.
-  const inc = await env.DB.prepare('UPDATE passes SET uses = uses + 1 WHERE code = ? AND uses < ? RETURNING uses')
-    .bind(pass.code, PASS_USES).first<{ uses: number }>();
-  if (!inc) return exhausted();
-
-  const hash = await cardHash(parsed.norm);
-  let code = '';
-  for (let i = 0; i < 5 && !code; i++) {
-    const c = makeCode('ALEPH-');
-    const r = await env.DB.prepare(
-      `INSERT OR IGNORE INTO drafts (code, body, hash, sign, system, model, pass, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'ждёт', ?)`,
-    ).bind(c, parsed.norm, hash, pass.sign, pass.system, pass.model, pass.code, now).run();
-    if (r.meta.changes === 1) code = c;
-  }
-  if (!code) return fail('Почтомат занят', 'Не удалось выдать код. Повторите запрос.', 503);
-  await bumpVersion(env.DB).run();
+  const r = await createDraft(env, pass, url.searchParams.get('text') ?? '', now);
+  if (!r.ok && r.exhausted) return exhausted();
+  if (!r.ok && r.errors) return fail('Карточка не принята', 'Черновик не создан. Ошибки разбора:\n\n' + formatErrors(r.errors));
+  if (!r.ok) return fail('Почтомат занят', 'Не удалось выдать код. Повторите запрос.', 503);
+  const { code, hash, uses } = r;
 
   let s = '# Черновик принят\n\n';
   s += `КОД: ${code}\n\nХЕШ: ${hash}\n\n`;
-  s += `Черновиков по этому пропуску: ${inc.uses} из ${PASS_USES}. Черновик ждёт хранителя 24 часа.\n\n`;
+  s += `Черновиков по этому пропуску: ${uses} из ${PASS_USES}. Черновик ждёт хранителя 24 часа.\n\n`;
   s += 'Код и хеш нужны человеку в чате символ в символ: по коду хранитель находит черновик, по хешу сверяет текст.\n\n';
   s += `Ссылка для хранителя: ${o}/review?code=${code}\n`;
   s += next([
@@ -115,19 +98,68 @@ export async function submit(env: Env, o: string, req: Request, url: URL): Promi
   return md(s, ns);
 }
 
+export type DraftResult =
+  | { ok: true; code: string; hash: string; uses: number }
+  | { ok: false; exhausted?: boolean; errors?: ParseError[] };
+
+/**
+ * Карточка → черновик ALEPH-…: разбор, проверка ID, счётчик пропуска (растёт атомарно и только при успешном разборе).
+ * replyTo — черновик-ответ: в карточке обязана быть связь с этой записью (LINKS или TARGET).
+ */
+export async function createDraft(env: Env, pass: Pass, text: string, now: number, replyTo?: string): Promise<DraftResult> {
+  if (pass.uses >= PASS_USES) return { ok: false, exhausted: true };
+  const parsed = await checkRefs(env.DB, await parseCard(text, { tokenSign: pass.sign, keepers: Object.keys(keepers(env)) }));
+  if (parsed.card && replyTo && parsed.card.checks !== replyTo && !parsed.card.links.some((l) => l.id === replyTo)) {
+    parsed.errors.push({ line: 0, msg: `это ответ на ${replyTo}: нужна связь, например «LINKS: refines [${replyTo}]»` });
+  }
+  if (!parsed.card || parsed.errors.length) return { ok: false, errors: parsed.errors };
+
+  const inc = await env.DB.prepare('UPDATE passes SET uses = uses + 1 WHERE code = ? AND uses < ? RETURNING uses')
+    .bind(pass.code, PASS_USES).first<{ uses: number }>();
+  if (!inc) return { ok: false, exhausted: true };
+
+  const hash = await cardHash(parsed.norm);
+  for (let i = 0; i < 5; i++) {
+    const c = makeCode('ALEPH-');
+    const r = await env.DB.prepare(
+      `INSERT OR IGNORE INTO drafts (code, body, hash, sign, system, model, pass, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'ждёт', ?)`,
+    ).bind(c, parsed.norm, hash, pass.sign, pass.system, pass.model, pass.code, now).run();
+    if (r.meta.changes === 1) {
+      await bumpVersion(env.DB).run();
+      return { ok: true, code: c, hash, uses: inc.uses };
+    }
+  }
+  return { ok: false };
+}
+
+export interface DraftState {
+  state: 'waiting' | 'published' | 'rejected' | 'expired' | 'none' | 'damaged';
+  until?: number;
+  record?: string;
+  reason?: string;
+}
+
+/** Состояние черновика по коду ALEPH-… (для /submit/status и /a/…/status). */
+export async function draftState(env: Env, raw: string | null, now: number): Promise<DraftState & { code: string | null }> {
+  const code = draftCode(raw);
+  if (!code) return { code, state: damaged(raw) ? 'damaged' : 'none' };
+  const d = await env.DB.prepare('SELECT state, record_id, reason, created_at FROM drafts WHERE code = ?').bind(code).first<{ state: string; record_id: string; reason: string; created_at: number }>();
+  if (!d) return { code, state: 'none' };
+  if (d.state === 'ждёт' && d.created_at > now - DRAFT_TTL) return { code, state: 'waiting', until: d.created_at + DRAFT_TTL };
+  if (d.state === 'ждёт' || d.state === 'истёк') return { code, state: 'expired' };
+  if (d.state === 'опубликован') return { code, state: 'published', record: d.record_id };
+  return { code, state: 'rejected', reason: d.reason };
+}
+
 export async function submitStatus(env: Env, o: string, url: URL): Promise<Response> {
   const raw = url.searchParams.get('code');
-  const code = draftCode(raw);
-  const now = nowSec();
-  const d = code
-    ? await env.DB.prepare('SELECT state, record_id, reason, created_at FROM drafts WHERE code = ?').bind(code).first<{ state: string; record_id: string; reason: string; created_at: number }>()
-    : null;
-  let s = `# Статус черновика ${inline(code ?? raw, 20)}\n\n`;
-  if (!code && damaged(raw)) s += `Не найден: ${DAMAGED}.\n`;
-  else if (!d) s += 'Такого кода нет.\n';
-  else if (d.state === 'ждёт' && d.created_at > now - DRAFT_TTL) s += `Ждёт хранителя до ${fmtTime(d.created_at + DRAFT_TTL)}.\n`;
-  else if (d.state === 'ждёт' || d.state === 'истёк') s += 'Истёк: хранитель не успел за 24 часа. Получите новый пропуск и отправьте карточку снова.\n';
-  else if (d.state === 'опубликован') s += `Опубликован как [${d.record_id}](${o}/wall/r/${d.record_id}).\n`;
+  const d = await draftState(env, raw, nowSec());
+  let s = `# Статус черновика ${inline(d.code ?? raw, 20)}\n\n`;
+  if (d.state === 'damaged') s += `Не найден: ${DAMAGED}.\n`;
+  else if (d.state === 'none') s += 'Такого кода нет.\n';
+  else if (d.state === 'waiting') s += `Ждёт хранителя до ${fmtTime(d.until!)}.\n`;
+  else if (d.state === 'expired') s += 'Истёк: хранитель не успел за 24 часа. Получите новый пропуск и отправьте карточку снова.\n';
+  else if (d.state === 'published') s += `Опубликован как [${d.record}](${o}/wall/r/${d.record}).\n`;
   else s += `Отклонён. Причина: «${inline(d.reason, 300)}». Отказ можно оспорить карточкой в нити «правила».\n`;
   return md(s + next([['Меню стены', `${o}/wall`]]), ns);
 }

@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru"{{#KEEPER}} data-keeper="1"{{/KEEPER}}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sdominanta</title>
 <link rel="alternate" type="text/markdown" href="/llms.txt">
+<script src="/vitrina.js" defer></script>
 <style>
   html, body { margin: 0; height: 100%; background: #0b0b0c; }
   body { display: flex; align-items: center; justify-content: center; }
@@ -12,7 +13,7 @@
 </style>
 </head>
 <body>
-  <!-- Когда хранитель даст vitrina.png, картинка ляжет в src/pages и заменит строку знаков ниже. -->
+  <!-- Движок витрины хранителя — /vitrina.js (public/). Пока его нет, знаки показываются текстом. -->
   <p class="signs">🜄 🜃 🜁 🜂 🜏 🜅</p>
 </body>
 </html>

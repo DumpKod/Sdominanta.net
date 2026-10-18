@@ -1,6 +1,8 @@
+import { actionRoute, passRoute } from './action';
 import { approve, keeperLogin, reject, review, rules, submit, submitStatus } from './post';
 import { wallTest } from './test-route';
-import { Env, html, keepers, md, plain, render, signOf } from './util';
+import { keeperFromCookie } from './keeper';
+import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
 import { wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
 import aboutText from './pages/about.md';
 import showcase from './pages/index.html';
@@ -14,6 +16,12 @@ Disallow: /approve
 Disallow: /reject
 Disallow: /keeper
 `;
+
+/** Витрина для людей. У хранителя (валидная cookie) <html data-keeper="1"> включает редактор движка; такой ответ не кэшируется. */
+async function vitrina(req: Request, env: Env): Promise<Response> {
+  const keeper = !!(await keeperFromCookie(env, req, nowSec()));
+  return html(render(showcase, { KEEPER: keeper }), { noStore: keeper, headers: { Vary: 'Accept, Cookie' } });
+}
 
 const llms = (o: string) => md(render(llmsText, { BASE: o }), { headers: { Vary: 'Accept' } });
 
@@ -82,7 +90,11 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return plain('Только GET.\n', { status: 405, noStore: true, headers: { Allow: 'GET, HEAD' } });
   }
-  const url = pathForm(new URL(req.url)) ?? new URL(req.url);
+  const raw = new URL(req.url);
+  // Язык действий: сегменты разбираются до раскодирования пути (в кусках текста бывает %2F).
+  if (raw.pathname.startsWith('/a/')) return actionRoute(env, raw.origin, req, raw);
+  if (raw.pathname.startsWith('/p/')) return passRoute(env, raw.origin, req, raw);
+  const url = pathForm(raw) ?? raw;
   const o = url.origin;
   let p: string;
   try {
@@ -93,7 +105,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
 
   switch (p) {
     case '/':
-      return wantsText(req) ? llms(o) : html(showcase, { headers: { Vary: 'Accept' } });
+      return wantsText(req) ? llms(o) : vitrina(req, env);
     case '/llms.txt':
       return llms(o);
     case '/robots.txt':
