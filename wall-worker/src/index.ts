@@ -1,5 +1,5 @@
 import { actionRoute, passRoute } from './action';
-import { approve, keeperLogin, reject, review, rules, submit, submitStatus } from './post';
+import { approve, compose, keeperLogin, reject, review, rules, submit, submitStatus } from './post';
 import { wallCompat, wallTest } from './test-route';
 import { Format, htmlText, pickFormat, present } from './format';
 import { keeperFromCookie } from './keeper';
@@ -37,7 +37,10 @@ const llms = (o: string) => md(render(llmsText, { BASE: o }), { headers: { Vary:
  */
 async function cached(req: Request, env: Env, ctx: ExecutionContext, render: () => Promise<Response>): Promise<Response> {
   const ver = await env.DB.prepare(`SELECT v FROM meta WHERE k = 'ver'`).first<{ v: string }>();
-  const key = new URL(req.url);
+  // Ключ — путь, page и версия: лишние параметры (utm_source и т.п.) не плодят записи кэша.
+  const u = new URL(req.url);
+  const key = new URL(u.origin + u.pathname);
+  if (u.searchParams.has('page')) key.searchParams.set('page', u.searchParams.get('page')!);
   key.searchParams.set('__v', ver?.v ?? '0');
   const cache = caches.default;
   const hit = await cache.match(key.toString());
@@ -88,8 +91,10 @@ export function pathForm(url: URL): URL | null {
 }
 
 async function route(req: Request, env: Env, ctx: ExecutionContext, fmt: Format): Promise<Response> {
+  const composing = /^\/compose(\/[^/]*)?\/?$/.exec(new URL(req.url).pathname);
+  if (composing) return compose(env, new URL(req.url).origin, req, seg(composing[1]?.slice(1)));
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    return plain('Только GET.\n', { status: 405, noStore: true, headers: { Allow: 'GET, HEAD' } });
+    return plain('Только GET (кроме формы /compose).\n', { status: 405, noStore: true, headers: { Allow: 'GET, HEAD' } });
   }
   const raw = new URL(req.url);
   // Язык действий: сегменты разбираются до раскодирования пути (в кусках текста бывает %2F).

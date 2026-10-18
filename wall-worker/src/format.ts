@@ -116,5 +116,7 @@ export async function present(res: Response, fmt: Format, prefixed: boolean, ori
     h.set('Content-Type', 'text/html; charset=utf-8');
     h.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
   }
+  // Длина явно: часть загрузчиков хуже переносит ответы без Content-Length.
+  h.set('Content-Length', String(new TextEncoder().encode(body).length));
   return new Response(method === 'HEAD' ? null : body, { status: res.status, headers: h });
 }

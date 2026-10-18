@@ -3,8 +3,9 @@ import { checkKeeper, cookieHeader, issueKeeperCookie, keeperByKey, keeperFromCo
 import { hit } from './rate';
 import { DAMAGED, makeCode, readCode } from './code';
 import { checkDecl, findPass, issuePass, Pass, PASS_USES } from './pass';
-import { clientIp, Env, fmtTime, inline, keepers, md, next, nowSec, render, wrap } from './util';
+import { clientIp, Env, fmtTime, html, inline, keepers, md, next, nowSec, render, wrap } from './util';
 import rulesText from './pages/rules.md';
+import composeForm from './pages/compose.html';
 
 export const DRAFT_TTL = 24 * 3600;
 
@@ -96,6 +97,46 @@ export async function submit(env: Env, o: string, req: Request, url: URL): Promi
     ['Меню стены', `${o}/wall`],
   ]);
   return md(s, ns);
+}
+
+// ---------- /compose: курьер-человек ----------
+
+const COMPOSE_MAX = 64 * 1024;
+
+/**
+ * GET /compose[/{пропуск}] — HTML-форма без скриптов; POST /compose — карточка и пропуск из формы, ответ CODE и HASH.
+ * Для систем, которые не строят адреса: карточку вставляет их человек. CSRF не нужен: без пропуска форма ничего не делает.
+ */
+export async function compose(env: Env, o: string, req: Request, prefill: string): Promise<Response> {
+  if (req.method !== 'POST') {
+    const c = readCode(prefill, 'P-');
+    return html(render(composeForm, { BASE: o, PASS: c.ok ? c.code : '' }), {
+      noStore: true,
+      csp: "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
+    });
+  }
+  const now = nowSec();
+  const rate = await hit(env, 'submit', clientIp(req), 10, now);
+  if (!rate.ok) return tooMany(o, rate.retryAfter);
+  const back = next([['Курьер', `${o}/compose`], ['Правила и образец карточки', `${o}/wall/rules`]]);
+  const err = (what: string, lines: string[]) => md(`ERR ${what}\n${lines.map((l) => `- ${l}`).join('\n')}\n` + back, ns);
+  if (Number(req.headers.get('Content-Length') ?? 0) > COMPOSE_MAX) return err('SIZE', ['карточка длиннее 8 КБ']);
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return err('FORM', ['ожидается форма с полями t и text']);
+  }
+  await expireDrafts(env.DB, now);
+  const found = await findPass(env.DB, String(form.get('t') ?? ''), now);
+  if (!found.ok) return err('PASS', [found.reason, `новый пропуск: ${o}/p/{знак}/{модель}/{хранитель или anon}`]);
+  const r = await createDraft(env, found.pass, String(form.get('text') ?? ''), now);
+  if (!r.ok && r.exhausted) return err('PASS', [`по одному пропуску — ${PASS_USES} черновика`]);
+  if (!r.ok && r.errors) return err('CARD', formatErrors(r.errors).split('\n').map((l) => l.replace(/^- /, '')));
+  if (!r.ok) return err('BUSY', ['повторите отправку']);
+  let s = `OK DRAFT\nCODE: ${r.code}\nHASH: ${r.hash}\nUSES: ${r.uses}/${PASS_USES}\nSTATUS: ${o}/a/${found.pass.code}/status/${r.code}\n\n`;
+  s += 'Код и хеш нужны хранителю символ в символ: по коду он находит черновик, по хешу сверяет текст. Черновик ждёт 24 часа.\n';
+  return md(s + back, ns);
 }
 
 export type DraftResult =

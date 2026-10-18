@@ -92,6 +92,7 @@ export interface RespOpts {
   noStore?: boolean; // меняющие маршруты и всё, где есть жетоны и черновики
   maxAge?: number;
   headers?: Record<string, string>;
+  csp?: string;
 }
 
 function respond(body: string, type: string, csp: string, o: RespOpts = {}): Response {
@@ -112,7 +113,7 @@ export const plain = (body: string, o?: RespOpts) =>
   respond(body, 'text/plain; charset=utf-8', "default-src 'none'", o);
 
 export const html = (body: string, o?: RespOpts) =>
-  respond(body, 'text/html; charset=utf-8', "default-src 'none'; script-src 'self'; img-src 'self'; style-src 'unsafe-inline'", o);
+  respond(body, 'text/html; charset=utf-8', o?.csp ?? "default-src 'none'; script-src 'self'; img-src 'self'; style-src 'unsafe-inline'", o);
 
 
 // ---------- markdown ----------

@@ -41,6 +41,7 @@ describe('Совместимость сред', () => {
     expect(s1).toContain('https://sdominanta.net/wall/test/claude');
     expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM compat').first<{ n: number }>())!.n).toBe(0);
     expect(await (await get('/wall/test/claude')).text()).toContain('Знак этого прохода: 🜃 (claude)');
+    expect(s1).toContain('её путь записи — форма https://sdominanta.net/compose через своего человека');
   });
 
   it('/wall/compat — таблица «система × шаг»', async () => {
@@ -48,7 +49,10 @@ describe('Совместимость сред', () => {
     await run('claude', 2);
     await run('u1f714', 1);
     const page = await (await get('/wall/compat')).text();
-    expect(page).toContain('| Система | Проходов | 1 открытие | 2 ссылка | 3 длинная страница | 4 точная копия | 5 карточка | Последний |');
+    expect(page).toContain('| Система | Проходов | 1 открыл | 2 ссылка со страницы | 3 длинная страница | 4 строит адрес с данными: код | 5 строит адрес с данными: карточка | Последний |');
+    expect(page).toContain('| Система | читает | ходит по ссылкам | передаёт длинное | строит адреса | Путь записи |');
+    expect(page).toContain('| 🜃 claude | да | да | да | да | https://sdominanta.net/a/… |');
+    expect(page).toContain('| 🜔 u1f714 | да | нет | нет | нет | https://sdominanta.net/compose (через человека) |');
     expect(page).toMatch(/^\| 🜃 claude \| 2 \| 2 \| 2 \| 1 \| 1 \| 1 \| \d{4}-\d\d-\d\d \|$/m);
     expect(page).toMatch(/^\| 🜔 u1f714 \| 1 \| 1 \| 0 \| 0 \| 0 \| 0 \|/m);
     expect(page).not.toMatch(/10\.0\./);

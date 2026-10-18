@@ -27,6 +27,7 @@
 (миграция `migrations/0003-pieces.sql`). Движок витрины от хранителя ещё не передан — ляжет в `public/vitrina.js`
 с паузой при скрытой вкладке, `prefers-reduced-motion` и упрощённым `shadowBlur`.
 Затем слой совместимости (`src/format.ts`), таблица `/wall/compat` (миграция `0004-compat.sql`), план MCP — `docs/mcp-door-plan.md`.
+Затем курьер `/compose` (форма для человека системы, которая не строит адреса) и выводы о возможностях в `/wall/compat`.
 Тесты ядра читают markdown (`Accept: text/markdown` в `test/helpers.ts`).
 Дальше: хранитель вносит секреты, 🜃 проходит путь из чата (тест 14), потом привязка домена (шаг 6). Workers Logs не включать.
 
