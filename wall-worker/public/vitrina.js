@@ -35,7 +35,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   let hl = -1; // индекс подсвеченного объекта
   let userMoved = false; // камеру двигал человек: при смене размера окна не возвращать к общему виду
   let tween = null; // плавный перелёт камеры { from, to, t }
-  const S = { drift: 1.4, density: 0.85, glow: 0.8, sound: 1 }; // пространство всей сцены
+  const S = { drift: 1.4, density: 0.85, glow: 0.8, haze: 0.45, sound: 1 }; // пространство всей сцены
   // Слух: music.js отдаёт раз в кадр полосы частот, басы/середину/верх, громкость и удар (0..1). Без музыки — нули.
   const SILENT = { bands: new Float32Array(1), low: 0, mid: 0, high: 0, level: 0, beat: 0, on: false };
   let hearFn = null, snd = SILENT;
@@ -291,37 +291,30 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   let fx, fy, fvx, fvy, fhx, fhy, fph, fb, fsc, fcode = new Int32Array(0);
   // ответ поля пустоты на узел — по очереди: каждый кадр пересчитывается треть узлов, остальные берут прошлый
   // (узел за кадр сдвигается на доли пикселя). Это главный расход кадра, и он растёт с толщиной жил.
-  let vSd, vNx, vNy, vTx, vTy, vV, vTick = 0;
+  let vSd, vNx, vNy, vTx, vTy, vV, vTick = 0, fon = new Uint8Array(0);
   const VOID_EVERY = 3;
   let fkeys = new Map(); // ключ клетки или куска → [начало, число]
 
-  function calcPx() { return Math.max(10, Math.sqrt((W * H) / 9000)) / (S.density * Math.sqrt(Q)); }
+  function calcPx() { return Math.max(10, Math.sqrt((W * H) / 9000)) / S.density; }
   // Одна картина на любом экране: движок считает кадр для экрана-образца (не больше REF_AREA пикселей CSS),
   // холст растягивается на весь экран. Большой экран получает ту же композицию крупнее, а не в разы больше узлов.
   // W, H, мышь и камера внутри движка — в пикселях образца; наружу (редактору) — в пикселях CSS, множитель VK.
-  const REF_AREA = 400000, PIXEL_BUDGET = 1600000, BAND_BUDGET = 6000;
-  let VK = 1;
+  // PIXEL_BUDGET — пикселей холста: хватает на экран ноутбука с ретиной (2880×1800); медленнее — снизит регулятор качества.
+  const REF_AREA = 700000, PIXEL_BUDGET = 5200000, BAND_BUDGET = 7000;
+  let VK = 1, SPARK = 1;
 
-  // Качество под устройство: Q — доля узлов поля и пикселей холста (1 — полное). Сколько стоит кадр, видно только
-  // на самом устройстве: движок меряет время своего кадра и шаг кадров и снижает Q, пока кадр не уложится;
-  // запас — понемногу поднимает обратно, но не выше уровня, на котором уже не справился. В браузере ничего не хранится.
-  const QS = [1, 0.8, 0.64, 0.5, 0.38, 0.28];
-  let qi = 0;
-  let Q = QS[qi], qCeil = 0;
-  const perf = { work: 8, gap: 16.7, t: 0, hold: 0 };
+  // Качество под устройство — плавно и по месту. Узлы собираются всегда полностью; у каждого свой постоянный ранг.
+  // Там, куда смотрят (курсор, раскрытая рама, центр экрана), считаются и рисуются все узлы, к краям экрана —
+  // только доля qG. Движок меряет свой кадр: не успевает — qG понемногу снижается, запас — понемногу растёт.
+  // Ни пересборки, ни смены размера холста: ничего не мигает.
+  let qG = 1;
+  const perf = { work: 8, gap: 16.7 };
   function govern(work, gap, dt) {
     perf.work += (work - perf.work) * 0.05;
     perf.gap += (Math.min(100, gap) - perf.gap) * 0.05;
-    perf.t += dt;
-    if (going || perf.t < 0.8) return; // после смены качества — дать кадрам устояться
-    let want = qi;
-    if (perf.work > 11 || perf.gap > 26) want = Math.min(QS.length - 1, qi + 1);
-    else if (perf.work < 5 && perf.gap < 19) { perf.hold += dt; if (perf.hold > 6 && qi > qCeil) want = qi - 1; }
-    else perf.hold = 0;
-    if (want === qi) return;
-    if (want > qi) qCeil = Math.max(qCeil, want); // не справился на qi — выше want не подниматься
-    qi = want; Q = QS[qi]; perf.t = 0; perf.hold = 0;
-    resize();
+    if (going) return;
+    if (perf.work > 11 || perf.gap > 26) qG = Math.max(0.2, qG - dt * 0.3);
+    else if (perf.work < 6 && perf.gap < 19) qG = Math.min(1, qG + dt * 0.06);
   }
 
   function buildField(keep) {
@@ -343,7 +336,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       groups.push([key, start, c1 - c0 + 1]);
     }
     // Полосы узлов вдоль жил. Толщина расширяет полосу, но узлы в ней реже (шаг растёт как корень четвёртой
-    // степени ширины), а все полосы вместе не больше BAND_BUDGET·Q узлов: иначе толстые жилы съедают кадр.
+    // степени ширины), а все полосы вместе не больше BAND_BUDGET узлов: иначе толстые жилы съедают кадр.
     const plan = [];
     let total = 0;
     for (const ch of chunks) {
@@ -352,13 +345,13 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       const near = Math.min(fieldSp * 1.3, v.R * 2.5 + fieldSp * 0.5);
       // полоса узлов вокруг тонкой жилы уже: иначе мелкие слова тонут в ореоле
       const B = v.R * v.st.thick * 1.5 + near, B1 = v.R * 1.5 + near;
-      const sf = (Math.max(4.2 * u, Math.min(fieldSp * 0.62, v.R * 0.55)) / Math.sqrt(S.density * Q)) * Math.pow(Math.max(1, B / B1), 0.25);
+      const sf = (Math.max(4.2 * u, Math.min(fieldSp * 0.62, v.R * 0.55)) / Math.sqrt(S.density)) * Math.pow(Math.max(1, B / B1), 0.25);
       const span = Math.max(1, ch.j1 - ch.j0);
       const cnt = ((span * v.step * 2 * B) / (sf * sf)) * 0.65;
       plan.push({ ch, v, B, sf, span, cnt });
       total += cnt;
     }
-    const kB = Math.min(1, (BAND_BUDGET * Q) / Math.max(1, total)), kS = 1 / Math.sqrt(kB);
+    const kB = Math.min(1, BAND_BUDGET / Math.max(1, total)), kS = 1 / Math.sqrt(kB);
     for (const { ch, v, B, sf: sf0, span, cnt: c0 } of plan) {
       const start = H_.length / 3;
       const sf = sf0 * kS, cnt = Math.round(c0 * kB);
@@ -506,7 +499,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       const a = bucket[k];
       if (!a.length) continue;
       ctx.strokeStyle = COLORS[k];
-      ctx.lineWidth = widthBase + (0.9 * k) / NB;
+      ctx.lineWidth = (widthBase + (0.9 * k) / NB) * VK;
       ctx.beginPath();
       for (let i = 0; i < a.length; i += 4) { ctx.moveTo(a[i], a[i + 1]); ctx.lineTo(a[i + 2], a[i + 3]); }
       ctx.stroke();
@@ -526,9 +519,21 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (win) win.k += (1 - win.k) * (reduce.matches ? 1 : 0.1);
     const hlArea = hl >= 0 && objs[hl] && objs[hl].area && objs[hl].area.length >= 3 ? objs[hl].area : null;
     const ax0 = act.x0, ay0 = act.y0, ax1 = act.x1, ay1 = act.y1;
+    const hole = win || (rama && rama.hole);
     vTick = (vTick + 1) % VOID_EVERY;
+    // фокус детализации (мир): раскрытая рама, курсор или центр экрана
+    const [qfx, qfy] = rama ? cam.toWorld(rama.x + rama.w / 2, rama.y + rama.h / 2, W, H) : mouse.in ? [mwx, mwy] : [cam.x, cam.y];
+    const bandSc = fieldSp * 0.8;
+    const qR = (rama ? Math.max(rama.w, rama.h) * 0.8 : Math.max(W, H) * 0.42) * iz, qR2 = 1 / (qR * qR), qLow = qG, qSpan = 1 - qG;
+    if (fon.length < NF) fon = new Uint8Array(Math.max(NF, 1024));
     for (let i = 0; i < NF; i++) {
-      if (fx[i] < ax0 || fx[i] > ax1 || fy[i] < ay0 || fy[i] > ay1) continue; // вне камеры узел замирает
+      if (fx[i] < ax0 || fx[i] > ax1 || fy[i] < ay0 || fy[i] > ay1) { fon[i] = 1; continue; } // вне камеры узел замирает
+      if (qLow < 1) {
+        const ddx = fx[i] - qfx, ddy = fy[i] - qfy, t = 1 - (ddx * ddx + ddy * ddy) * qR2;
+        // далеко от фокуса и ранг высок — узел спит; узлы у жил (слова) засыпают последними
+        if (fph[i] * 0.15915 * (fsc[i] < bandSc ? 0.55 : 1) > qLow + qSpan * (t > 0 ? t : 0)) { fon[i] = 0; continue; }
+      }
+      fon[i] = 1;
       const hx = fhx[i] + drift * (Math.sin(fhy[i] * 0.009 * lv + t * 0.35 + fph[i] * 0.3) + 0.5 * Math.sin(fhx[i] * 0.017 * lv - t * 0.27));
       const hy = fhy[i] + drift * (Math.cos(fhx[i] * 0.008 * lv - t * 0.31) + 0.5 * Math.sin(fhy[i] * 0.021 * lv + t * 0.4 + fph[i] * 0.3));
       let ax = (hx - fx[i]) * 0.035, ay = (hy - fy[i]) * 0.035;
@@ -553,8 +558,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
           if (d < cr) { const q = 1 - d / cr, p = q * q * 1.6 * iz; ax += (dx / d) * p; ay += (dy / d) * p; b = Math.max(b, q * 0.5); }
         }
       }
-      if (win) {
-        const p = voidPush((fx[i] - cam.x) * z + W / 2, (fy[i] - cam.y) * z + H / 2);
+      if (hole) {
+        const p = voidPush(hole, (fx[i] - cam.x) * z + W / 2, (fy[i] - cam.y) * z + H / 2);
         if (p) { ax += p[0] * iz; ay += p[1] * iz; b = Math.max(b, p[2]); }
       }
       if (hlArea && inPoly(hlArea, fx[i], fy[i])) b = Math.max(b, 0.6 * objs[hl].$lift);
@@ -585,7 +590,10 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     const z = cam.zoom, ox = W / 2 - cam.x * z, oy = H / 2 - cam.y * z;
     if (sfx.length < NF) { sfx = new Float32Array(NF); sfy = new Float32Array(NF); }
     if (smx.length < NM) { smx = new Float32Array(NM); smy = new Float32Array(NM); }
-    for (let i = 0; i < NF; i++) { sfx[i] = fx[i] * z + ox; sfy[i] = fy[i] * z + oy; }
+    for (let i = 0; i < NF; i++) {
+      if (!fon[i]) { sfx[i] = -1e9; sfy[i] = -1e9; continue; } // спящий узел не связывается и не рисуется
+      sfx[i] = fx[i] * z + ox; sfy[i] = fy[i] * z + oy;
+    }
     for (let i = 0; i < NM; i++) {
       if (mb[i] < 0) { smx[i] = -1e9; smy[i] = -1e9; continue; }
       smx[i] = mx[i] * z + ox; smy[i] = my[i] * z + oy;
@@ -614,7 +622,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
     ctx.globalCompositeOperation = 'lighter';
     // ось жил тонкой линией: по ней читаются мелкие слова; подсвеченный объект ярче
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 1.2 * VK; // линии — в пикселях экрана, как до виртуального разрешения: тонкие и чёткие
     ctx.lineCap = 'round';
     const ox = W / 2 - cam.x * z, oy = H / 2 - cam.y * z;
     let lastObj = -2;
@@ -647,7 +655,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       if (b < 0.35 - 0.2 * S.sound * snd.high) continue;
       const x = sfx[i], y = sfy[i];
       if (x < -4 || y < -4 || x > W + 4 || y > H + 4) continue;
-      const s = 0.6 + b * 1.3 * (0.75 + 0.25 * Math.sin(T * 3 + fph[i] * 5));
+      const s = (0.6 + b * 1.3 * (0.75 + 0.25 * Math.sin(T * 3 + fph[i] * 5))) * SPARK;
       ctx.rect(x - s / 2, y - s / 2, s, s);
     }
     ctx.fill();
@@ -657,16 +665,35 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       if (mb[i] < 0.05) continue;
       const tw = Math.sin(T * 2.2 + mph[i] * 7);
       if (tw < 0.55) continue;
-      const s = 0.8 + tw * 1.6;
+      const s = (0.8 + tw * 1.6) * SPARK;
       ctx.rect(smx[i] - s / 2, smy[i] - s / 2, s, s);
     }
     ctx.fill();
     if (win) drawWindow();
+    if (rama && rama.hole && rama.k > 0) {
+      const f = rama, a = Math.min(1, f.k * 1.4);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = `rgba(1, 3, 6, ${(0.93 * a).toFixed(3)})`;
+      ctx.fillRect(f.x, f.y, f.w, f.h);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = `rgba(0, 242, 254, ${(0.35 * a).toFixed(3)})`;
+      ctx.lineWidth = VK;
+      ctx.strokeRect(f.x + 0.5, f.y + 0.5, f.w - 1, f.h - 1);
+    }
     // свечение: размытый уменьшенный кадр поверх (дешевле shadowBlur)
     // Размытие без ctx.filter: в Firefox и на части видеокарт blur() считается на процессоре и съедает кадр.
     // Уменьшение в 4 раза, ещё в 2 и обратно — сглаживание растягивает свет в мягкий ореол.
     gctx.globalCompositeOperation = 'copy';
     gctx.drawImage(cv, 0, 0, glowCv.width, glowCv.height);
+    // дымка: тот же кадр в четверть разрешения, растянутый обратно, — мягкий слой под чёткими линиями (space.haze)
+    if (S.haze > 0.001) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(1, S.haze * (1 + S.sound * 0.4 * snd.level));
+      ctx.drawImage(glowCv, 0, 0, cv.width, cv.height);
+      ctx.globalAlpha = 1;
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
     g2ctx.globalCompositeOperation = 'copy';
     g2ctx.drawImage(glowCv, 0, 0, glow2.width, glow2.height);
     gctx.globalAlpha = 0.6;
@@ -734,6 +761,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     snd = hearFn ? hearFn(dt) || SILENT : SILENT;
     stepFade(dt);
     if (tween) stepTween(dt);
+    if (rama) stepFrame(dt);
     updateRadii();
     step();
     draw();
@@ -741,7 +769,6 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     loop();
   }
   function loop() {
-    if (pages.length && !tween) return; // открыт текст: поле стоит
     if (!raf && !document.hidden && !reduce.matches) raf = requestAnimationFrame(frame);
   }
   function stop() {
@@ -906,11 +933,13 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   cv.addEventListener('wheel', (e) => {
     e.preventDefault();
-    if (going || pages.length) return; // переход между пространствами не прерывается
-    tween = null;
+    if (going) return; // переход между пространствами не прерывается
     const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1;
+    if (rama && tool === 'view') { frameWheel(e.deltaY * k); return; }
+    tween = null;
     // гостю колёсико — масштаб; в инструментах правки — сдвиг, а масштаб — с Ctrl/⌘ (щипок трекпада приходит с Ctrl)
     if (tool === 'view' && depthWheel(e.clientX * VK, e.clientY * VK, e.deltaY * k)) return;
+    const z0 = cam.zoom;
     if (tool === 'view' || e.ctrlKey || e.metaKey) {
       cam.zoomAt(e.clientX * VK, e.clientY * VK, W, H, Math.exp(-e.deltaY * k * (e.ctrlKey ? 0.01 : 0.0015)), 0, ZOOM_MAX);
     } else {
@@ -918,6 +947,12 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     }
     userMoved = true;
     cameraChanged();
+    // приближать дальше некуда: над областью-входом — объект фиксируется в раму, иначе пространство вздрагивает
+    if (tool === 'view' && e.deltaY < 0 && cam.zoom <= z0 * 1.002) {
+      const i = portalAt(e.clientX * VK, e.clientY * VK);
+      if (i >= 0) openFrame(i, false);
+      else { shake = Math.min(1.2, shake + 0.35); loop(); }
+    }
   }, { passive: false });
 
   cv.addEventListener('dblclick', (e) => {
@@ -927,7 +962,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   window.addEventListener('keydown', (e) => {
     if (typing(e)) return;
-    if (e.key === 'Escape' && pages.length) history.back();
+    if (e.key === 'Escape' && rama) frameBack();
     else if (e.key === 'Escape' && win) closeWindow();
     else if (e.key === 'Escape' && tool === 'view' && SPACE !== 'main') goOut();
     if (e.code === 'Space' && !spaceDown) { spaceDown = true; cv.classList.add('grab-ready'); if (tool !== 'view') e.preventDefault(); }
@@ -975,11 +1010,12 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   function activate(i) {
     const o = scene.objects[i];
     if (!o) return;
-    if (o.inner) goIn(i);
-    else if (o.window) openWindow(o);
-    else if (o.href) openLink(o.href, i);
+    // окно открывает только приближение в область; клик по такому объекту подлетает к области
+    if (kindOf(o)) flyTo(expand(areaBounds(o), 0));
+    else if (o.href) location.href = new URL(o.href, location.origin).href;
   }
   function tap(x, y) {
+    if (rama) { if (x < rama.x || y < rama.y || x > rama.x + rama.w || y > rama.y + rama.h) frameBack(); return; }
     if (win) {
       const l = winTarget(x, y);
       if (l && l.href) { closeWindow(); openLink(l.href); }
@@ -1015,8 +1051,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       a.addEventListener('click', (e) => {
         const o = scene.objects[idx()];
         if (o && o.inner) { e.preventDefault(); goIn(idx()); }
-        else if (o && o.window) { e.preventDefault(); openWindow(o); }
-        else if (o && o.href && ownPath(o.href)) { e.preventDefault(); openLink(o.href, idx()); }
+        else if (o && kindOf(o)) { e.preventDefault(); openFrame(idx(), true); } // с клавиатуры и для чтецов — сразу
+        else if (o && o.href && ownPath(o.href)) { e.preventDefault(); openFrame(idx(), true); }
       });
     }
   }
@@ -1057,16 +1093,14 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     return c;
   }
   /** Объект-вход под точкой экрана: по жилам и областям, иначе — самый маленький вход, в чьей рамке точка. */
+  /** Вход под точкой экрана: объект, в чью область (многоугольник узлов) смотрит курсор; из нескольких — меньший. */
   function portalAt(sx, sy) {
-    const door = (o) => o.inner || (o.href && ownPath(o.href));
-    const i = hit(sx, sy);
-    if (i >= 0 && door(scene.objects[i])) return i;
     const [wx, wy] = cam.toWorld(sx, sy, W, H);
     let best = -1, area = Infinity;
     scene.objects.forEach((o, j) => {
-      if (!door(o)) return;
-      const b = o.bounds(), a = (b.x1 - b.x0) * (b.y1 - b.y0);
-      if (wx >= b.x0 && wx <= b.x1 && wy >= b.y0 && wy <= b.y1 && a < area) { best = j; area = a; }
+      if (!kindOf(o) || !inPoly(o.area, wx, wy)) return;
+      const b = areaBounds(o), a = (b.x1 - b.x0) * (b.y1 - b.y0);
+      if (a < area) { best = j; area = a; }
     });
     return best;
   }
@@ -1078,12 +1112,11 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       pull = 0;
       const i = portalAt(sx, sy);
       if (i >= 0) {
-        const b = scene.objects[i].bounds();
+        const b = areaBounds(scene.objects[i]);
         const sw = (b.x1 - b.x0) * cam.zoom, sh = (b.y1 - b.y0) * cam.zoom;
-        if (Math.max(sw / W, sh / H) > 0.55 || cam.zoom >= ZOOM_MAX * 0.98) { activate(i); return true; }
-        return false;
+        // область заполнила экран — объект фиксируется: дальше колёсико раскрывает раму
+        if (Math.max(sw / W, sh / H) > 0.55) { openFrame(i, false); return true; }
       }
-      if (cam.zoom >= ZOOM_MAX * 0.98) { shake = Math.min(1.2, shake + 0.35); loop(); return true; }
       return false;
     }
     if (dy > 0 && SPACE !== 'main') {
@@ -1233,8 +1266,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   window.addEventListener('popstate', (e) => {
     const st = e.state || {};
-    if (st.page) { showPage(st.page, true); return; }
-    if (pages.length) closePages();
+    if (framePop(st)) return;
     const m = /^\/in\/([a-z0-9-]{1,32})\/?$/.exec(location.pathname);
     const target = m ? m[1] : 'main';
     if (target === SPACE) return;
@@ -1244,17 +1276,24 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   });
 
   /* ---------------------------------------------------------------------
-     СТРАНИЦЫ ВНУТРИ: объект-ссылка на страницу сети открывает её в алеф-нуле — тем же текстом, что у страницы
-     (markdown по Accept), с живыми ссылками; ссылка внутри ведёт глубже, «Наружу», Esc и «назад» — на уровень выше.
-     Адрес — настоящий адрес страницы (history): перезагрузка или ссылка дают ту же страницу обычным HTML.
-     Пока открыт текст, поле не считается: позади — неподвижный снимок раздутого объекта, кадр ничего не стоит.
+     РАМА: вход в объект. Колёсико приближает объект целиком; когда он заполнил экран, он фиксируется:
+     камера встаёт (новые узлы не появляются), а дальше колёсико раздвигает континуум — из рамки объекта
+     складывается прямоугольник по центру экрана. Снаружи поле движется, внутри — блоки: окно объекта или
+     страница сети (тот же markdown, что у моделей) со ссылками глубже. Колёсико назад сводит прямоугольник
+     обратно в объект и возвращает холст; так же — Esc, «Наружу», клик мимо, «назад» браузера.
+     Объект-вход (inner) в конце раскрытия переводит в своё пространство.
+     Адрес страницы — настоящий (history): перезагрузка или ссылка дают ту же страницу обычным HTML.
      --------------------------------------------------------------------- */
   const ownPath = (href) => {
     try { const u = new URL(href, location.origin); return u.origin === location.origin && !/^\/(k|in)(\/|$)/.test(u.pathname) ? u.pathname : null; }
     catch { return null; }
   };
-  const pages = []; // стопка открытых страниц: адреса путей
-  let pageEl = null, pageBody = null, pageBack = null, pageReq = 0, pageRim = null;
+  const FRAME_WHEEL = 0.0012; // доля раскрытия на пиксель колёсика
+  let rama = null; // { o, kind: page|window|space, path, from, k, want, x, y, w, h, pushed }
+  const pages = []; // стопка страниц внутри рамы
+  let pageEl = null, pageBody = null, pageBack = null, pageReq = 0;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const ease = (t) => t * t * (3 - 2 * t);
 
   function pageBox() {
     if (pageEl) return;
@@ -1267,89 +1306,178 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     pageBack = document.createElement('button');
     pageBack.type = 'button';
     pageBack.textContent = '← Наружу';
-    pageBack.addEventListener('click', () => history.back());
+    pageBack.addEventListener('click', () => frameBack());
     bar.append(pageBack);
     pageBody = document.createElement('div');
     pageBody.className = 'page-body';
     pageEl.append(bar, pageBody);
+    // колёсико над блоками: текст прокручивается, пока есть куда; дальше «назад» сводит раму
+    pageEl.addEventListener('wheel', (e) => {
+      if (!rama || e.deltaY <= 0) return;
+      if (pageEl.scrollTop + pageEl.clientHeight < pageEl.scrollHeight - 2) return;
+      e.preventDefault();
+      frameWheel(e.deltaY * (e.deltaMode === 1 ? 16 : 1));
+    }, { passive: false });
     pageEl.addEventListener('click', (e) => {
       const a = e.target.closest && e.target.closest('a[href]');
       if (!a) return;
       const path = ownPath(a.getAttribute('href'));
-      if (path) { e.preventDefault(); openLink(path); }
+      if (path) { e.preventDefault(); deeper(path); }
     });
     document.body.append(pageEl);
   }
 
-  /** Открыть ссылку: своя страница — внутри (из объекта i — раздуть его), чужая — как обычно. */
-  function openLink(href, i) {
-    const path = ownPath(href);
-    if (!path) { location.href = new URL(href, location.origin).href; return; }
-    if (going) return;
-    if (i === undefined || pages.length || reduce.matches) { pushPage(path); return; }
-    const o = scene.objects[i];
-    highlight(-1);
-    going = { dir: 'page' };
-    tween = {
-      from: cam.clone(), to: inflated(o.bounds(), 1.5), t: 0, dur: 0.5, free: true,
-      done: () => { pageRim = snapshot(); fade.veilTo = 1; setTimeout(() => { going = null; pushPage(path, cam.clone()); }, 140); },
-    };
-    loop();
+  /** Прямоугольник раскрытой рамы: по центру экрана, столбец для чтения. */
+  function frameTarget() {
+    const m = 16 * VK, w = Math.min(W - 2 * m, 760 * VK), h = Math.min(H - 2 * m, Math.max(H * 0.82, 320 * VK));
+    return { x: (W - w) / 2, y: (H - h) / 2, w, h };
   }
-  function pushPage(path, camBefore) {
-    if (!pages.length) pages.base = camBefore || null;
-    history.pushState({ page: path }, '', path);
-    showPage(path);
+  function objRect(o) {
+    const b = areaBounds(o);
+    const [x0, y0] = cam.toScreen(b.x0, b.y0, W, H), [x1, y1] = cam.toScreen(b.x1, b.y1, W, H);
+    const x = Math.max(0, x0), y = Math.max(0, y0);
+    return { x, y, w: Math.max(8, Math.min(W, x1) - x), h: Math.max(8, Math.min(H, y1) - y) };
+  }
+  // Входом служит только объект с областью: окно открывается приближением в неё, иначе — никак.
+  const kindOf = (o) => (!o.area || o.area.length < 3 ? null : o.inner ? 'space' : o.window ? 'window' : o.href && ownPath(o.href) ? 'page' : null);
+  function areaBounds(o) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of o.area) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    return { x0, y0, x1, y1 };
   }
 
-  /** Показать страницу path (вперёд — в стопку; назад по истории — срезать стопку до неё). */
-  async function showPage(path, fromHistory) {
+  /** Начать раму у объекта i. auto — раскрыть до конца само (клик); иначе раскрытие ведёт колёсико. */
+  function openFrame(i, auto) {
+    const o = scene.objects[i], kind = o && kindOf(o);
+    if (!kind || going) return;
+    if (win) closeWindow();
+    highlight(-1);
+    tween = null;
+    rama = { o, kind, path: kind === 'page' ? ownPath(o.href) : null, from: objRect(o), k: 0, want: auto ? 1 : null, pushed: false };
+    placeFrame();
+    if (kind !== 'space') loadFrame();
+    loop();
+  }
+  /** Рама без объекта (вперёд по истории, прямой переход): из точки в центре. */
+  function openFramePath(path) {
+    const t = frameTarget();
+    rama = { o: null, kind: 'page', path, from: { x: t.x + t.w / 2 - 4, y: t.y + t.h / 2 - 4, w: 8, h: 8 }, k: 0, want: 1, pushed: true };
+    pages.length = 0;
+    loadFrame();
+    loop();
+  }
+
+  function placeFrame() {
+    const t = frameTarget(), f = rama, e = ease(f.k);
+    f.x = lerp(f.from.x, t.x, e); f.y = lerp(f.from.y, t.y, e); f.w = lerp(f.from.w, t.w, e); f.h = lerp(f.from.h, t.h, e);
+    // дыра в поле: та же сила раздвигания, что у окна из пустоты
+    f.hole = { x: f.x, y: f.y, w: f.w, h: f.h, k: Math.min(1, f.k * 1.6) };
+    if (!pageEl) return;
+    const show = f.kind !== 'space' && f.k > 0.75;
+    pageEl.hidden = !show;
+    if (!show) return;
+    pageEl.style.left = f.x / VK + 'px'; pageEl.style.top = f.y / VK + 'px';
+    pageEl.style.width = f.w / VK + 'px'; pageEl.style.height = f.h / VK + 'px';
+    pageEl.style.opacity = String(Math.min(1, (f.k - 0.75) / 0.2));
+    pageEl.classList.toggle('live', f.k >= 0.98);
+  }
+
+  /** Кадр рамы: раскрытие к цели (клик, «назад»), пересчёт прямоугольника, вход в пространство, закрытие. */
+  function stepFrame(dt) {
+    const f = rama;
+    if (f.want !== null) {
+      const d = f.want - f.k, sp = dt * 2.4;
+      f.k = Math.abs(d) <= sp || reduce.matches ? f.want : f.k + Math.sign(d) * sp;
+      if (f.k === f.want) { if (f.want === 0) { closeFrameNow(); return; } f.want = null; }
+    }
+    placeFrame();
+    if (f.k >= 1 && f.kind === 'space') { const i = scene.objects.indexOf(f.o); rama = null; goIn(i); return; }
+    if (f.k >= 1 && !f.pushed && f.path) { f.pushed = true; pages.length = 0; pages.push(f.path); history.pushState({ page: f.path }, '', f.path); }
+  }
+  function closeFrameNow() {
+    rama = null;
+    pages.length = 0;
+    pageReq++;
+    if (pageEl) { pageEl.hidden = true; pageEl.classList.remove('live'); }
+    clampCam();
+    refresh(10);
+  }
+
+  /** Колёсико при раме: вглубь — раскрыть, назад — свести (до нуля — рама закрыта, холст снова масштабируется). */
+  function frameWheel(dy) {
+    const f = rama;
+    f.want = null;
+    f.k = Math.max(0, Math.min(1, f.k - dy * FRAME_WHEEL));
+    if (f.k <= 0) { if (f.pushed) history.replaceState(baseState(), '', baseUrl()); closeFrameNow(); return; }
+    if (f.k < 1 && f.pushed) { f.pushed = false; history.replaceState(baseState(), '', baseUrl()); }
+    loop();
+  }
+  const baseUrl = () => spaceUrl(SPACE), baseState = () => ({ space: SPACE });
+
+  /** «Наружу»: страница глубже — назад по стопке; иначе свести раму. */
+  function frameBack() {
+    if (!rama) return;
+    if (pages.length > 1) { history.back(); return; }
+    if (rama.pushed) { history.back(); return; }
+    rama.want = 0;
+    loop();
+  }
+
+  /** Содержимое рамы: окно объекта (заголовок, текст, ссылки) или страница сети. */
+  async function loadFrame() {
     pageBox();
-    const at = pages.lastIndexOf(path);
-    if (fromHistory && at >= 0) pages.length = at + 1;
-    else pages.push(path);
-    if (!pageRim) pageRim = snapshot();
-    pageEl.hidden = false;
-    document.documentElement.classList.add('in-page');
-    stop();
-    calmFrame();
-    const req = ++pageReq;
+    const f = rama, req = ++pageReq;
+    pageBody.textContent = '';
+    if (f.kind === 'window') {
+      const w = f.o.window, md = [`# ${w.title || f.o.label}`, '', ...(w.text ? [w.text, ''] : [])];
+      if (f.o.href) md.push(`- [${f.o.label}](${f.o.href})`);
+      for (const l of w.links || []) md.push(`- [${l.label}](${l.href})`);
+      renderMd(md.join('\n'), pageBody);
+      return;
+    }
     pageBody.textContent = '…';
     let text;
     try {
-      const r = await fetch(path, { headers: { Accept: 'text/markdown' }, credentials: 'same-origin' });
+      const r = await fetch(f.path, { headers: { Accept: 'text/markdown' }, credentials: 'same-origin' });
       text = await r.text();
-    } catch { text = 'ERR\nСтраница не открылась. Её адрес: ' + path; }
+    } catch { text = 'ERR\nСтраница не открылась. Её адрес: ' + f.path; }
     if (req !== pageReq) return;
     pageBody.textContent = '';
     renderMd(text, pageBody);
     pageEl.scrollTop = 0;
-    pageBack.focus({ preventScroll: true });
   }
 
-  function closePages() {
-    pages.length = 0;
-    pageReq++;
-    if (pageEl) pageEl.hidden = true;
-    document.documentElement.classList.remove('in-page');
-    pageRim = null;
-    fade.veil = 1; fade.veilTo = 0;
-    if (pages.base) { const b = pages.base; cam.x = b.x; cam.y = b.y; cam.zoom = b.zoom; pages.base = null; }
-    // назад из раздутого объекта к общему виду
-    const all = fitTarget(scene.bounds());
-    if (!reduce.matches) tween = { from: cam.clone(), to: userMoved ? cam.clone().clampTo(limitRect(), W, H, 0.05, ZOOM_MAX) : all, t: 0, dur: 0.6, free: true, done: clampCam };
-    else { clampCam(); still(30); }
-    loop();
+  /** Ссылка внутри рамы на свою страницу — глубже: то же окно, новый текст, адрес в истории. */
+  function deeper(path) {
+    if (!rama) return;
+    if (rama.kind === 'window') { rama.kind = 'page'; }
+    rama.path = path;
+    pages.push(path);
+    if (rama.pushed) history.pushState({ page: path }, '', path);
+    else { rama.pushed = true; history.pushState({ page: path }, '', path); }
+    loadFrame();
   }
 
-  /** Неподвижный кадр позади текста: снимок раздутого объекта, приглушённый. */
-  function calmFrame() {
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = '#010306';
-    ctx.fillRect(0, 0, W, H);
-    if (pageRim) { ctx.globalAlpha = 0.28; ctx.drawImage(pageRim, -W * 0.1, -H * 0.1, W * 1.2, H * 1.2); ctx.globalAlpha = 1; }
+  /** Открыть ссылку (окно холста, ссылка вне объекта): своя страница — рамой из центра, чужая — как обычно. */
+  function openLink(href) {
+    const path = ownPath(href);
+    if (!path) { location.href = new URL(href, location.origin).href; return; }
+    if (rama) deeper(path);
+    else { openFramePath(path); pages.push(path); history.pushState({ page: path }, '', path); }
+  }
+
+  /** «Назад»/«вперёд» браузера при рамах. true — событие обработано здесь. */
+  function framePop(st) {
+    if (st.page) {
+      if (!rama) { openFramePath(st.page); pages.push(st.page); return true; }
+      const at = pages.lastIndexOf(st.page);
+      if (at >= 0) pages.length = at + 1; else pages.push(st.page);
+      rama.path = st.page; rama.kind = 'page'; rama.pushed = true; rama.want = 1;
+      loadFrame();
+      return true;
+    }
+    if (rama) { rama.pushed = false; rama.want = 0; loop(); return true; }
+    return false;
   }
 
   /** Markdown страниц сети → DOM, только текстом (никакого HTML из ответа): заголовки, абзацы, списки, ссылки, код. */
@@ -1469,7 +1597,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   }
 
   /** Пустота окна: узлы внутри уходят к ближайшему краю, у края светятся — рамка из самого поля (пиксели экрана). */
-  function voidPush(px, py) {
+  function voidPush(win, px, py) {
     const m = fieldPx * 1.2, k = win.k;
     const dl = px - win.x, dr = win.x + win.w - px, dt = py - win.y, db = win.y + win.h - py;
     const d = Math.min(dl, dr, dt, db);
@@ -1530,7 +1658,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     VK = Math.min(1, Math.sqrt(REF_AREA / Math.max(1, cw * ch)));
     W = cw * VK; H = ch * VK;
     // пиксели холста: как у экрана, но в пределах бюджета (свечение мягкое, лишние пиксели рисуются впустую)
-    DPR = Math.max(1, Math.min((window.devicePixelRatio || 1) / VK, 2 / VK, Math.sqrt((PIXEL_BUDGET * Q) / Math.max(1, W * H))));
+    DPR = Math.max(1, Math.min((window.devicePixelRatio || 1) / VK, 3 / VK, Math.sqrt(PIXEL_BUDGET / Math.max(1, W * H))));
+    SPARK = Math.sqrt(VK);
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
     glowCv.width = Math.max(1, Math.round(W / 4)); glowCv.height = Math.max(1, Math.round(H / 4));
     glow2.width = Math.max(1, Math.round(W / 8)); glow2.height = Math.max(1, Math.round(H / 8));
@@ -1539,8 +1668,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (win) win = layoutWindow(win.o);
     fx = null;
     ensureView(true);
-    if (pages.length) calmFrame();
-    else if (reduce.matches) still(60);
+    if (rama) placeFrame();
+    if (reduce.matches) still(60);
   }
 
   function readSpace() {
@@ -1570,6 +1699,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     setTool(t) { tool = t; cv.classList.toggle('edit', t !== 'view'); if (t !== 'view') { highlight(-1); if (win) closeWindow(); } cameraChanged(2); },
     setOverlay(f) { overlay = f; refresh(2); },
     get space() { return SPACE; },
+    get rama() { return rama && { kind: rama.kind, k: rama.k, want: rama.want, path: rama.path }; },
     goIn, goOut,
     /** Слух холста: f(dt) → { bands, low, mid, high, level, beat } (music.js). null — тишина. */
     setSound(f) { hearFn = f; loop(); },

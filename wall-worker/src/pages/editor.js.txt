@@ -57,6 +57,17 @@
     const TOOLS = { view: 'Смотреть', select: 'Выбор', points: 'Точки', brush: 'Кисть', erase: 'Ластик', area: 'Область' };
     const btns = {};
     for (const [t, name] of Object.entries(TOOLS)) btns[t] = button(toolsRow, name, () => setTool(t));
+    // Размер кисти — в пикселях экрана: мазок получает радиус в мире по текущему масштабу (приблизил — тоньше в мире).
+    const brushRow = el('label', 'kp-f');
+    const brushOut = el('span', '', '');
+    const brushR = el('input', 'kp-range');
+    brushR.type = 'range'; brushR.min = '1'; brushR.max = '60'; brushR.step = '0.5'; brushR.value = '4';
+    const showBrush = () => { brushOut.textContent = `Кисть: ${brushR.value} px на экране`; };
+    brushR.addEventListener('input', showBrush);
+    showBrush();
+    brushRow.append(brushOut, brushR);
+    const brushWorld = () => Math.round((+brushR.value / E.cam.zoom) * 100) / 100;
+    let brushAt = null; // курсор кисти на экране
     const histRow = el('div', 'kp-row');
     const bUndo = button(histRow, 'Отменить', undo, '', 'Ctrl+Z');
     const bRedo = button(histRow, 'Повторить', redo, '', 'Ctrl+Shift+Z');
@@ -93,7 +104,7 @@
     });
     const winBox = section('Окно из пустоты');
     winBox.append(wrap(fTitle, 'Заголовок'), wrap(fText, 'Текст'), wrap(fLinks, 'Ссылки, по строке «подпись | /путь»'));
-    const SPACE_NAMES = { drift: 'Дрейф поля', density: 'Плотность', glow: 'Свечение', sound: 'Реакция поля на звук (0 — нет)' };
+    const SPACE_NAMES = { drift: 'Дрейф поля', density: 'Плотность', glow: 'Свечение', haze: 'Дымка (мягкий слой под линиями)', sound: 'Реакция поля на звук (0 — нет)' };
     const spaceBox = section('Пространство сцены');
     const spaceSliders = {};
     for (const [k, [lo, hi]] of Object.entries(M.SPACE)) spaceSliders[k] = slider(spaceBox, k, SPACE_NAMES[k], lo, hi, 'space');
@@ -104,7 +115,7 @@
     const box = el('textarea', 'kp-json');
     box.spellcheck = false;
     box.hidden = true;
-    panel.append(head, toolsRow, histRow, pick, objRow, props, styleBox, winBox, spaceBox, sceneRow, note, keys, box);
+    panel.append(head, toolsRow, brushRow, histRow, pick, objRow, props, styleBox, winBox, spaceBox, sceneRow, note, keys, box);
     document.body.append(panel);
 
     // Предпросмотр: витрина как у гостя — без панели, рамок, мини-карты и места хранителя; правка не теряется.
@@ -516,7 +527,8 @@
             showFields();
           }
           raw = [[wx, wy]];
-          E.setLive({ obj: E.objects.indexOf(o), st: { r: o.tubeR(), pts: raw.slice() } });
+          raw.r = brushWorld();
+          E.setLive({ obj: E.objects.indexOf(o), st: { r: raw.r, pts: raw.slice() } });
         } else if (tool === 'erase') {
           const n = E.nearest(x, y);
           if (!n || n.sd > 14 || n.si < 0) return;
@@ -530,6 +542,7 @@
       move(e) {
         const x = e.clientX, y = e.clientY, [wx, wy] = E.toWorld(x, y);
         if (tool === 'points' && !drag) hoverPt = nearPoint(x, y, 8);
+        if (tool === 'brush') brushAt = [x, y]; // кадр и так перерисовывается: движок в движении
         if (!drag && !band && !raw.length) return;
         if (drag && drag.kind === 'mini') miniJump(x, y);
         else if (drag && (drag.kind === 'stretch' || drag.kind === 'rotate')) applyHandle(e, wx, wy);
@@ -552,7 +565,7 @@
           if (Math.hypot(wx - l[0], wy - l[1]) * E.cam.zoom > 1.5) {
             raw.push([wx, wy]);
             const o = first();
-            E.setLive({ obj: E.objects.indexOf(o), st: { r: o.tubeR(), pts: smoothPts(raw, 2) } });
+            E.setLive({ obj: E.objects.indexOf(o), st: { r: raw.r, pts: smoothPts(raw, 2) } });
           }
         }
       },
@@ -573,7 +586,7 @@
           if (raw.length > 1 && o) {
             const eps = 0.35 / E.cam.zoom;
             const pts = rdp(smoothPts(smoothPts(raw, 4), 2), eps).map((p) => p.map(r1));
-            o.strokes.push({ r: o.tubeR(), pts });
+            o.strokes.push({ r: raw.r || brushWorld(), pts });
           }
           raw = [];
           E.setLive(null);
@@ -688,6 +701,14 @@
               c.fillRect(sx - (on || hov ? 4 : 2.5), sy - (on || hov ? 4 : 2.5), on || hov ? 8 : 5, on || hov ? 8 : 5);
             }));
         }
+      }
+      if (tool === 'brush' && brushAt) {
+        // кружок кисти: видимая толщина мазка (радиус × толщина объекта)
+        const o = first(), th = o ? o.get('thick') : M.STYLE.thick[2];
+        c.strokeStyle = 'rgba(165, 243, 252, 0.7)';
+        c.beginPath();
+        c.arc(brushAt[0], brushAt[1], Math.max(1, +brushR.value * th), 0, Math.PI * 2);
+        c.stroke();
       }
       drawMini(c);
     });

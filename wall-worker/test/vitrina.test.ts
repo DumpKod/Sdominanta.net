@@ -99,7 +99,7 @@ describe('Витрина: файлы', () => {
       expect(text, name).not.toMatch(/\burl\(/); // CSS url(…): ни картинок, ни шрифтов извне
       expect(text, name).not.toMatch(/XMLHttpRequest|WebSocket|EventSource|sendBeacon|import\(/);
       // fetch — только своих путей: сцена, шрифт из жил, действия редактора
-      for (const m of text.matchAll(/fetch\(([^,)]+)/g)) expect(m[1], name).toMatch(/^(?:'\/vitrina\/font\.json'|cv\.dataset\.scene \|\| '\/vitrina\/scene\.json'|sceneUrl\(sp|path)$/);
+      for (const m of text.matchAll(/fetch\(([^,)]+)/g)) expect(m[1], name).toMatch(/^(?:'\/vitrina\/font\.json'|cv\.dataset\.scene \|\| '\/vitrina\/scene\.json'|sceneUrl\(sp|path|f\.path)$/);
       // сцена пространства (алеф-нуля) — тоже только свой путь
       if (text.includes('sceneUrl = ')) expect(text).toContain("const sceneUrl = (sp) => (sp === 'main' ? '/vitrina/scene.json' : `/vitrina/scene/${sp}.json`);");
     }
@@ -527,9 +527,11 @@ describe('Места в сцене: плеер и вход хранителя', 
 });
 
 describe('Страницы сети внутри алеф-нуля и предпросмотр', () => {
-  it('ссылка объекта открывает страницу внутри: текст markdown, ссылки глубже, адрес — настоящий; поле стоит', () => {
-    for (const s of ['function openLink(', 'function showPage(', 'function renderMd(', "Accept: 'text/markdown'", 'history.pushState({ page: path }', 'if (pages.length && !tween) return;'])
+  it('рама: приближение в область объекта фиксирует его, колёсико раскрывает прямоугольник; внутри окно или страница', () => {
+    for (const s of ['function openFrame(', 'function frameWheel(', 'function stepFrame(', 'function renderMd(', "Accept: 'text/markdown'", 'history.pushState({ page: path }', 'inPoly(o.area, wx, wy)', 'voidPush(hole,'])
       expect(vitrinaJs, s).toContain(s);
+    // страницу рама берёт только со своего адреса
+    expect(vitrinaJs).toContain("return u.origin === location.origin && !/^\\/(k|in)(\\/|$)/.test(u.pathname) ? u.pathname : null;");
     // текст ответа только через textContent и узлы, никакого HTML из ответа
     expect(vitrinaJs).not.toMatch(/innerHTML|insertAdjacentHTML|outerHTML/);
   });

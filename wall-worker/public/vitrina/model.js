@@ -33,6 +33,7 @@ export const SPACE = {
   drift: [0, 2, 1.4],
   density: [0.5, 1.6, 0.85],
   glow: [0, 1.5, 0.8],
+  haze: [0, 1.5, 0.45], // дымка: мягкий слой в четверть разрешения под чёткими линиями
   sound: [0, 2, 1], // реакция поля всей сцены на музыку (дрейф, свечение, удары)
 };
 const defaults = (spec) => Object.fromEntries(Object.entries(spec).map(([k, v]) => [k, v[2]]));

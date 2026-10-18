@@ -51,7 +51,7 @@ const LIMITS = { objects: 200, strokes: 400, pts: 2000, area: 200, links: 20, la
 export const STYLE_RANGE: Record<string, [number, number]> = {
   tubeR: [0.5, 200], thick: [0.4, 2.5], resonance: [0, 1], tact: [0, 3], flow: [0, 2], wobble: [0, 1], fill: [0, 1], sound: [0, 2],
 };
-export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], density: [0.5, 1.6], glow: [0, 1.5], sound: [0, 2] };
+export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], density: [0.5, 1.6], glow: [0, 1.5], haze: [0, 1.5], sound: [0, 2] };
 
 /** Имя пространства: main — главная витрина, остальные — алеф-нули. */
 export const SPACE_RE = /^[a-z0-9-]{1,32}$/;
