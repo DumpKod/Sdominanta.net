@@ -1,13 +1,15 @@
 // Сцена витрины по умолчанию и шрифт из жил («электрошрифт»). Запускается вручную, в браузере (Playwright + Chromium):
 //   node tools/build-scene.mjs
 // Пишет:
-//   src/scene-default.json     — встроенная сцена (версия 1): надпись хранителя + слова кистью, ссылки, подписи;
+//   src/scene-default.json     — встроенная сцена: надпись хранителя + слова кистью, ссылки, подписи; раскладка v1
+//                                переводится в координаты мира (upgradeV1 из public/vitrina/model.js);
 //   public/vitrina/font.json   — жилы каждого символа: окна витрины пишут ими текст без шрифтов в браузере.
 // Слова и символы рисуются системным шрифтом на скрытом холсте, автотрассировка движка хранителя (tools/trace.js)
 // находит осевые линии и радиусы. Шрифт нужен только здесь: посетителю уходят готовые жилы.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { upgradeV1 } from '../public/vitrina/model.js';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const require = createRequire(import.meta.url);
@@ -118,12 +120,13 @@ const out = await page.evaluate(
 await browser.close();
 
 const brand = JSON.parse(readFileSync(here('./brand.json'), 'utf8'));
-const scene = {
+const v1 = {
   v: 1,
   objects: OBJECTS.map(({ id, label, href }) => ({ id, label, href, glyph: id === 'about' ? brand : out.words[id] })),
 };
+const scene = upgradeV1(v1);
 writeFileSync(here('../src/scene-default.json'), JSON.stringify(scene) + '\n');
 mkdirSync(here('../public/vitrina'), { recursive: true });
 writeFileSync(here('../public/vitrina/font.json'), JSON.stringify(out.font) + '\n');
-for (const o of scene.objects) console.log(o.id, `${o.glyph.w}×${o.glyph.h}`, o.glyph.strokes.length, 'жил');
+for (const o of scene.objects) console.log(o.id, o.strokes.length, 'жил');
 console.log('шрифт:', Object.keys(out.font.glyphs).length, 'символов, без жил:', Object.entries(out.font.glyphs).filter(([, g]) => !g.s.length).map(([c]) => c).join(''));

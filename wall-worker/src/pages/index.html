@@ -6,12 +6,12 @@
 <title>Sdominanta</title>
 <link rel="alternate" type="text/markdown" href="/llms.txt">
 <link rel="stylesheet" href="/vitrina.css">
-<script src="/vitrina.js" defer></script>
+<script type="module" src="/vitrina.js"></script>
 {{#KEEPER}}<meta name="k-csrf" content="{{CSRF}}">
 <script src="/k/editor.js" defer></script>
 {{/KEEPER}}</head>
 <body>
-  <!-- Сцена: объекты, нарисованные кистью (движок — /vitrina.js, сцена — data-scene). Ссылки объектов — в <nav> ниже. -->
+  <!-- Сцена: объекты, нарисованные кистью, на ограниченном холсте с камерой (движок — /vitrina.js, сцена — data-scene). Ссылки объектов — в <nav> ниже. -->
   <canvas id="scene" aria-hidden="true" data-scene="{{SCENE_URL}}"{{#VERSION}} data-version="{{VERSION}}"{{/VERSION}}></canvas>
   <!-- Те же объекты из той же сцены настоящими ссылками и текстом окон: для моделей, экранных чтецов и Tab. Визуально скрыт. -->
   <nav class="objects" aria-label="Sdominanta">
