@@ -13,6 +13,7 @@
 //     strokes: [ { r, pts: [[x, y(, r)]…], closed? } ],   жилы в координатах мира
 //     area?: [[x, y]…],                   область попадания в координатах мира (многоугольник)
 //     window?: { title?, text?, links?: [ { label, href } ] }   окно из пустоты по клику
+//     links?: [ { to: "wall", w: 0.8 } ]  связи узла (до 10): при входе внутрь — нити сквозь горизонт к портам
 //     widget?: "player"                   живое управление в окне: player, keeper, queue, music, vitrina (три последних — хранителю)
 //     frame?: { width, aspect, round, ring, far }   рама окна (FRAME в public/vitrina/model.js)
 //     slot?: "player"                     место для живого HTML: player — плеер, keeper — вход хранителя
@@ -38,6 +39,7 @@ export interface SceneObject {
   style?: Record<string, number>;
   frame?: Record<string, number>;
   widget?: (typeof WIDGETS)[number];
+  links?: { to: string; w?: number }[];
   inner?: string;
   slot?: (typeof SLOTS)[number];
 }
@@ -58,7 +60,7 @@ export const STYLE_RANGE: Record<string, [number, number]> = {
 export const FRAME_RANGE: Record<string, [number, number]> = {
   width: [240, 1400], aspect: [0, 2], round: [0, 1], ring: [4, 160], far: [0, 1],
 };
-export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], density: [0.5, 1.6], glow: [0, 1.5], haze: [0, 1.5], sound: [0, 2], reach: [0.05, 2] };
+export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], density: [0.5, 1.6], glow: [0, 1.5], haze: [0, 1.5], sound: [0, 2], reach: [0.05, 2], horizon: [0, 1] };
 
 /** Имя пространства: main — главная витрина, остальные — алеф-нули. */
 export const SPACE_RE = /^[a-z0-9-]{1,32}$/;
@@ -106,7 +108,18 @@ export function validateScene(raw: string): Check {
   j.objects.forEach((o: unknown, i: number) => {
     const at = `objects[${i}]`;
     if (!isObj(o)) return void errors.push(`${at}: объект`);
-    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'window', 'frame', 'widget', 'style', 'inner', 'slot'], at);
+    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'window', 'frame', 'widget', 'links', 'style', 'inner', 'slot'], at);
+    if (o.links !== undefined) {
+      if (!Array.isArray(o.links) || o.links.length > 10) errors.push(`${at}.links: массив до 10 связей { to, w }`);
+      else
+        o.links.forEach((l: unknown, k: number) => {
+          const la = `${at}.links[${k}]`;
+          if (!isObj(l)) return void errors.push(`${la}: { to, w }`);
+          only(l, ['to', 'w'], la);
+          if (typeof l.to !== 'string' || !/^[a-z0-9-]{1,32}$/.test(l.to)) errors.push(`${la}.to: id объекта`);
+          if (l.w !== undefined && !num(l.w, 0, 1)) errors.push(`${la}.w: 0…1`);
+        });
+    }
     if (o.widget !== undefined && !(WIDGETS as readonly unknown[]).includes(o.widget)) errors.push(`${at}.widget: ${WIDGETS.join(', ')}`);
     if (o.slot !== undefined && !(SLOTS as readonly unknown[]).includes(o.slot)) errors.push(`${at}.slot: место — ${SLOTS.join(' или ')}`);
     if (o.inner !== undefined && (typeof o.inner !== 'string' || !SPACE_RE.test(o.inner) || o.inner === 'main'))

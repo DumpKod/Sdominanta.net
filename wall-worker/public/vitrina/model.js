@@ -8,6 +8,7 @@
 //     strokes: [ { r, pts: [[x, y(, r)]…], closed? } ],   жилы в координатах мира
 //     area?: [[x, y]…],                        область попадания в координатах мира
 //     window?: { title?, text?, links?: [ { label, href } ] },
+//     links?: [ { to, w } ]                    связи узла (до 10, вес 0…1): при входе — нити сквозь горизонт
 //     widget?: "player" | "keeper" | "queue" | "music" | "vitrina"   живое управление в окне объекта
 //     frame?: { width, aspect, round, ring, far }   рама окна: размер, форма, рамка из узлов области, фон
 //     style?: { tubeR, thick, resonance, tact, flow, wobble, fill, sound }   свои параметры объекта, как в движке хранителя
@@ -37,6 +38,7 @@ export const SPACE = {
   glow: [0, 1.5, 0.8],
   haze: [0, 1.5, 0.45], // дымка: мягкий слой в четверть разрешения под чёткими линиями
   sound: [0, 2, 1], // реакция поля всей сцены на музыку (дрейф, свечение, удары)
+  horizon: [0, 1, 0.6], // горизонт: кадр уровня выше кольцом по краю экрана; 0 — чистый холст
   reach: [0.05, 2, 0.45], // радиус музыки вокруг плеера: доля размера сцены; моды дальше её не слышат
 };
 const defaults = (spec) => Object.fromEntries(Object.entries(spec).map(([k, v]) => [k, v[2]]));
@@ -166,6 +168,8 @@ export class SceneObject {
     this.frame = src.frame ? clone(src.frame) : null;
     /** Виджет в окне: открывается приближением в область, как окно. */
     this.widget = src.widget || null;
+    /** Связи узла с соседями по уровню: { to — id, w — вес 0…1 }; при входе внутрь — нити сквозь горизонт. */
+    this.links = src.links ? clone(src.links) : null;
     this.style = src.style ? clone(src.style) : null;
   }
   /** Параметр объекта: свой или по умолчанию. */
@@ -245,6 +249,7 @@ export class SceneObject {
     if (this.window && Object.keys(this.window).length) o.window = this.window;
     if (this.frame && Object.keys(this.frame).length) o.frame = this.frame;
     if (this.widget) o.widget = this.widget;
+    if (this.links && this.links.length) o.links = this.links;
     if (this.style && Object.keys(this.style).length) o.style = this.style;
     return o;
   }

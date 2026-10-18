@@ -115,6 +115,8 @@ export function mainWithNet(main, x0 = 1030) {
   s.objects = s.objects.filter((o) => o.id !== 'net');
   s.objects.push({
     id: 'net', label: 'Сеть: стена, правила, проверка, журнал', inner: 'net', z: 1,
+    // связи узла: при входе в сеть они идут нитями сквозь горизонт — к надписи и к месту алеф-теории
+    links: [{ to: 'about', w: 0.9 }, ...(s.objects.some((o) => o.id === 'obj-1') ? [{ to: 'obj-1', w: 0.6 }] : [])],
     strokes: net, style: about.style,
     area: [[r1(xa - m), r1(ya - m)], [r1(x1 + m), r1(ya - m)], [r1(x1 + m), r1(y1 + m)], [r1(xa - m), r1(y1 + m)]],
   });

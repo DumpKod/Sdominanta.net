@@ -79,7 +79,8 @@
     const objRow = el('div', 'kp-row');
 
     const props = section('Объект', true);
-    const fId = input(), fLabel = input(), fHref = input(), fInner = input(), fSlot = input('select'), fZ = input(), fTitle = input(), fText = input('textarea'), fLinks = input('textarea'), fWidget = input('select');
+    const fId = input(), fLabel = input(), fHref = input(), fInner = input(), fSlot = input('select'), fZ = input(), fTitle = input(), fText = input('textarea'), fLinks = input('textarea'), fWidget = input('select'), fRel = input('textarea');
+    fRel.rows = 3;
     for (const [v, t] of [['', '— нет —'], ['player', 'плеер'], ['keeper', 'вход хранителя']]) fSlot.append(new Option(t, v));
     const WIDGET_NAMES = { player: 'плеер', keeper: 'вход хранителя', queue: 'очередь (хранителю)', music: 'музыка (хранителю)', vitrina: 'витрина (хранителю)' };
     fWidget.append(new Option('— нет —', ''));
@@ -94,6 +95,7 @@
       wrap(fSlot, 'Место: плеер или вход хранителя встанут в рамку объекта'),
       wrap(fInner, 'Алеф-нуль: имя пространства внутри (латиница, цифры, дефис), пусто — не вход'),
       wrap(fZ, 'Слой: выше — поверх и первым ловит клик'),
+      wrap(fRel, 'Связи узла: по строке «id вес», вес 0…1 (до 10) — при входе внутрь нити сквозь горизонт'),
     );
     const STYLE_NAMES = { tubeR: 'Радиус трубки (tubeR)', thick: 'Толщина ×', resonance: 'Резонанс', tact: 'Такты', flow: 'Течение', wobble: 'Волнистость', fill: 'Заливка жилы', sound: 'Реакция на звук (0 — нет)' };
     const sliders = {};
@@ -140,7 +142,7 @@
       if (!what) return 'Область есть, содержимого нет: текст, адрес или алеф-нуль.';
       return `Готово: в конце приближения над областью раскроется ${what}.`;
     }
-    const SPACE_NAMES = { drift: 'Дрейф поля', density: 'Плотность', glow: 'Свечение', haze: 'Дымка (мягкий слой под линиями)', sound: 'Реакция поля на звук (0 — нет)', reach: 'Радиус музыки вокруг плеера (доля сцены)' };
+    const SPACE_NAMES = { drift: 'Дрейф поля', density: 'Плотность', glow: 'Свечение', haze: 'Дымка (мягкий слой под линиями)', sound: 'Реакция поля на звук (0 — нет)', reach: 'Радиус музыки вокруг плеера (доля сцены)', horizon: 'Горизонт уровня выше (0 — чистый холст)' };
     const spaceBox = section('Пространство сцены');
     const spaceSliders = {};
     for (const [k, [lo, hi]] of Object.entries(M.SPACE)) spaceSliders[k] = slider(spaceBox, k, SPACE_NAMES[k], lo, hi, 'space');
@@ -273,6 +275,8 @@
       const o = first();
       for (const f of [fId, fLabel, fHref, fInner, fSlot, fWidget, fZ, fTitle, fText, fLinks]) f.disabled = !o;
       fWidget.value = (o && o.widget) || '';
+      fRel.value = ((o && o.links) || []).map((l) => `${l.to} ${l.w ?? 0.5}`).join('\n');
+      fRel.disabled = !o;
       for (const s of [...Object.values(sliders), ...Object.values(frameSliders)]) s.r.disabled = !o;
       fId.value = o ? o.id : '';
       fLabel.value = o ? o.label : '';
@@ -315,6 +319,9 @@
       o.inner = fInner.value.trim().toLowerCase() || null;
       o.slot = fSlot.value || null;
       o.widget = fWidget.value || null;
+      const rel = fRel.value.split('\n').map((l) => l.trim().split(/\s+/)).filter((l) => /^[a-z0-9-]{1,32}$/.test(l[0] || ''))
+        .slice(0, 10).map(([to, w]) => ({ to, w: Math.max(0, Math.min(1, Number.isFinite(+w) ? +w : 0.5)) }));
+      o.links = rel.length ? rel : null;
       o.z = Math.max(-100, Math.min(100, Math.round(+fZ.value || 0)));
       const links = fLinks.value
         .split('\n')
@@ -331,7 +338,7 @@
       if (opt) opt.textContent = `${o.id} — ${o.label}`;
     }
     pick.addEventListener('change', () => select(pick.value ? [pick.value] : []));
-    for (const f of [fLabel, fHref, fInner, fSlot, fWidget, fZ, fTitle, fText, fLinks]) {
+    for (const f of [fLabel, fHref, fInner, fSlot, fWidget, fRel, fZ, fTitle, fText, fLinks]) {
       f.addEventListener('input', readFields);
       f.addEventListener('change', () => changed(f === fZ));
     }

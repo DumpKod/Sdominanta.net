@@ -546,6 +546,24 @@ describe('Окно объекта: рама из узлов области', () 
   });
 });
 
+describe('Портал в алеф-нуль, горизонт, нити', () => {
+  it('links узла — до 10 связей { to, w }; горизонт — параметр пространства', () => {
+    expect(validateScene(tiny({ links: [{ to: 'wall', w: 0.8 }] })).ok).toBe(true);
+    expect(validateScene(tiny({ links: [{ to: 'Wall!', w: 2 }] })).ok).toBe(false);
+    expect(validateScene(JSON.stringify({ v: 2, space: { horizon: 0 }, objects: [] })).ok).toBe(true);
+    expect(new M.SceneObject({ id: 'a', label: 'A', strokes: [], links: [{ to: 'b', w: 1 }] }).toJSON()).toMatchObject({ links: [{ to: 'b', w: 1 }] });
+  });
+  it('дыра с дочерней сценой, морф с ободка, горизонт и нити в движке', () => {
+    for (const s of ['function openPortal(', 'function renderPreview(', 'function portalEnter(', 'function makeHorizon(', 'function drawThreads(', 'function threadAt(', 'win.circle', 'portalHover'])
+      expect(vitrinaJs, s).toContain(s);
+  });
+  it('виджеты: разделы панели только хранителю, панель встраивается только своим сайтом', () => {
+    expect(validateScene(tiny({ widget: 'queue' })).ok).toBe(true);
+    expect(validateScene(tiny({ widget: 'admin' })).ok).toBe(false);
+    expect(vitrinaJs).toContain('if (M.KEEPER_WIDGETS[w]) return keeper;');
+  });
+});
+
 describe('Страницы сети внутри алеф-нуля и предпросмотр', () => {
   it('рама: приближение в область объекта фиксирует его, колёсико раскрывает прямоугольник; внутри окно или страница', () => {
     for (const s of ['function openFrame(', 'function frameWheel(', 'function stepFrame(', 'function renderMd(', "Accept: 'text/markdown'", 'history.pushState({ page: path }', 'inPoly(o.area, wx, wy)', 'voidPush(hole,'])
