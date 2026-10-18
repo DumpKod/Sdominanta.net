@@ -24,8 +24,8 @@
 После живого теста 18.10 пропуск и коды стали короткими с контрольным символом (см. «Отступления» в `README.md`);
 изменения схемы для уже созданной базы — файлы в `migrations/`, применяются `wrangler d1 execute sdominanta --remote --file=…`.
 18.10 позже: язык действий в адресах `/p/…`, `/a/{пропуск}/…`, латинские ключи карточки, `public/` для витрины
-(миграция `migrations/0003-pieces.sql`). Движок витрины от хранителя ещё не передан — ляжет в `public/vitrina.js`
-с паузой при скрытой вкладке, `prefers-reduced-motion` и упрощённым `shadowBlur`.
+(миграция `migrations/0003-pieces.sql`). Движок кисти хранителя встроен в `public/vitrina.js` (сцена — `src/scene.ts`,
+слова — `tools/trace-words.mjs`, см. «Отступления» в `README.md`).
 Затем слой совместимости (`src/format.ts`), таблица `/wall/compat` (миграция `0004-compat.sql`), план MCP — `docs/mcp-door-plan.md`.
 Затем курьер `/compose` (форма для человека системы, которая не строит адреса) и выводы о возможностях в `/wall/compat`.
 Тесты ядра читают markdown (`Accept: text/markdown` в `test/helpers.ts`).
@@ -57,7 +57,8 @@
 - `src/code.ts` — короткие коды с контрольным символом. `src/pass.ts` — декларация и пропуск (таблица `passes`). `src/totp.ts` — TOTP. `src/keeper.ts` — ключ и cookie хранителя, TOTP, нарастающая блокировка.
 - `src/format.ts` — слой совместимости: HTML по умолчанию, `/m/` и `Accept: text/markdown` — markdown, `/json/` — JSON.
 - `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status`.
-- `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок хранителя.
+- `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок кисти хранителя, `src/scene.ts` — объекты сцены.
+- `tools/` — `trace-words.mjs` (подписи → жилы, Playwright) и `trace.js` (автотрассировка движка); в Worker не входят.
 - `src/rate.ts` — лимиты. `src/post.ts` — правила/пропуск, почтомат, review/approve/reject.
 - `src/wall.ts` — страницы чтения. `src/test-route.ts` — `/wall/test`.
 - `src/pages/` — тексты страниц (md/txt/html) от 🜃, импортируются строками. Шаблоны: `render()` в `src/util.ts`

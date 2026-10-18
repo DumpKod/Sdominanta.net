@@ -3,6 +3,7 @@ import { approve, compose, keeperLogin, reject, review, rules, submit, submitSta
 import { wallCompat, wallTest } from './test-route';
 import { Format, htmlText, pickFormat, present } from './format';
 import { keeperFromCookie } from './keeper';
+import { sceneNav } from './scene';
 import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
 import { wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
 import aboutText from './pages/about.md';
@@ -25,7 +26,11 @@ Disallow: /keeper
 async function vitrina(req: Request, env: Env, o: string): Promise<Response> {
   const keeper = !!(await keeperFromCookie(env, req, nowSec()));
   const ENTRY = htmlText(render(llmsText, { BASE: o }));
-  return html(render(showcase, { KEEPER: keeper, ENTRY }), { noStore: keeper, headers: { Vary: 'Accept, Cookie' } });
+  return html(render(showcase, { KEEPER: keeper, ENTRY, NAV: sceneNav(o) }), {
+    noStore: keeper,
+    headers: { Vary: 'Accept, Cookie' },
+    csp: "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'",
+  });
 }
 
 const llms = (o: string) => md(render(llmsText, { BASE: o }), { headers: { Vary: 'Accept' } });

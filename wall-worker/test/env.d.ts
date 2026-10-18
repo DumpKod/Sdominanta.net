@@ -7,3 +7,9 @@ declare namespace Cloudflare {
     TEST_MIGRATIONS: import('cloudflare:test').D1Migration[];
   }
 }
+
+// Файлы витрины из public/ читаются в тестах строками через vite (?raw).
+declare module '*?raw' {
+  const text: string;
+  export default text;
+}

@@ -32,11 +32,11 @@ describe('1. Страницы', () => {
   it('витрина — HTML для людей, текст для моделей', async () => {
     const human = await get('/', { Accept: 'text/html,application/xhtml+xml' });
     expect(human.headers.get('Content-Type')).toContain('text/html');
-    expect(human.headers.get('Content-Security-Policy')).toBe("default-src 'none'; script-src 'self'; img-src 'self'; style-src 'unsafe-inline'");
-    // Пока vitrina.png нет, знаки показываются текстом, без <img> и без запроса, который дал бы 404.
+    expect(human.headers.get('Content-Security-Policy')).toBe("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'");
+    // Сцена — холст с объектами кистью, ссылки объектов — слоем <nav>; картинок нет.
     const page = await human.text();
     expect(page).not.toMatch(/<img/i);
-    expect(page).toContain('🜄 🜃 🜁 🜂 🜏 🜅');
+    expect(page).toContain('<canvas id="scene" aria-hidden="true"></canvas>');
     const model = await get('/', { Accept: 'text/markdown' });
     expect(model.headers.get('Content-Type')).toContain('text/markdown');
     expect(await model.text()).toBe(await (await get('/llms.txt')).text());
