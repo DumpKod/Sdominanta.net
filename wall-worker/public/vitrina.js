@@ -536,6 +536,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   /** Собрать жилы и поле для того, что видит камера: при смене уровня масштаба или выходе за собранный прямоугольник. */
   function ensureView(force) {
+    if (!force && rama && rama.dive) return false; // провал в область: те же узлы растягиваются, новых нет
     const view = cam.view(W, H);
     const level = 2 ** Math.round(Math.log2(cam.zoom));
     if (!force && built && built.lv === level && contains(built.rect, view)) return false;
@@ -711,7 +712,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (hl >= 0 && objs[hl] && objs[hl].area && objs[hl].area.length >= 3 && objs[hl].$lift > 0.02) lit.push(litOf(objs[hl].area, 0.6 * objs[hl].$lift));
     for (const m of marks) if (m && m.length >= 3) lit.push(litOf(m, 0.55));
     // рама: узлы области растекаются в рамку окна, фон уходит вдаль
-    const R = rama && rama.o && rama.o.area && rama.o.area.length >= 3 ? rama : null;
+    const R = rama && !rama.dive && rama.o && rama.o.area && rama.o.area.length >= 3 ? rama : null;
     let kk = 0, far = 0;
     if (R) {
       if (R.gen !== fieldGen) capture(R);
@@ -719,6 +720,10 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       far = kk * R.far;
       ringTargets(R, z);
     }
+    // провал: узлы области — основа нового континуума, светятся ярче по мере падения; остальное поле гаснет
+    const D = rama && rama.dive && rama.o && rama.o.area && rama.o.area.length >= 3 ? rama : null;
+    let dk = 0;
+    if (D) { if (D.gen !== fieldGen) capture(D); dk = ease(Math.min(1, D.k)); }
     const ax0 = act.x0, ay0 = act.y0, ax1 = act.x1, ay1 = act.y1;
     const hole = win || (rama && rama.hole);
     const morph = T < morphUntil; // после входа узлы летят с ободка: в пути не замирают и не спят
@@ -787,6 +792,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
         }
       }
       if (far > 0 && !cap) b *= 1 - 0.6 * far;
+      if (dk > 0) b = fcap[i] ? Math.max(b, 0.5 * dk) : b * (1 - 0.7 * dk);
       if (hole && !(cap && kk > 0)) {
         const p = voidPush(hole, (fx[i] - cam.x) * z + W / 2, (fy[i] - cam.y) * z + H / 2);
         if (p) { ax += p[0] * iz; ay += p[1] * iz; b = Math.max(b, p[2]); }
@@ -1130,6 +1136,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (p) { p.x = e.clientX * VK; p.y = e.clientY * VK; }
     if (gesture && gesture.kind === 'pinch' && pointers.size >= 2) {
       const s = pinchState(), z0 = cam.zoom, grow = s.d / gesture.d;
+      // щипок при раме — как колёсико: развести пальцы — глубже, свести — обратно
+      if (rama && tool === 'view') { frameWheel(Math.log(grow) * -900); gesture = { kind: 'pinch', ...s }; return; }
       cam.zoomAt(s.cx, s.cy, W, H, grow, 0, ZOOM_MAX);
       if (tool === 'view' && !rama && grow > 1.01) {
         clampCam();
@@ -1152,6 +1160,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       highlight(-1);
     }
     if (gesture && gesture.kind === 'pan') {
+      if (rama && rama.dive) return; // в провале камеру ведёт только глубина
       cam.panBy(e.clientX * VK - gesture.x, e.clientY * VK - gesture.y);
       gesture.x = e.clientX * VK; gesture.y = e.clientY * VK;
       userMoved = true;
@@ -1625,7 +1634,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     const o = f.o, target = o.inner, from = SPACE, z = cam.zoom, ox = W / 2 - cam.x * z, oy = H / 2 - cam.y * z;
     const ring = [];
     if (f.cap) for (let j = 0; j < f.cap.length; j++) { const i = f.cap[j]; ring.push([fx[i] * z + ox, fy[i] * z + oy]); }
-    const level = { img: S.horizon > 0.01 && f.snap ? makeHorizon(f.snap) : null, threads: threadsOf(o, scene), from: o.id };
+    const level = { img: S.horizon > 0.01 && f.snap ? makeHorizon(f.snap) : null, threads: threadsOf(o, scene), from: o.id, cam: cam.clone() };
     giveBack();
     rama = null;
     if (pageEl) { pageEl.hidden = true; pageEl.classList.remove('live'); }
@@ -1675,7 +1684,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
         return;
       }
       if (!fromHistory) history.pushState({ space: target }, '', spaceUrl(target));
-      const level = { img: S.horizon > 0.01 && next ? makeHorizon(next) : null, threads: threadsOf(o, scene), from: id };
+      const level = { img: S.horizon > 0.01 && next ? makeHorizon(next) : null, threads: threadsOf(o, scene), from: id, cam: before };
       swapScene(j, target, from, id);
       ups.unshift(level);
       if (ups.length > 4) ups.length = 4;
@@ -1697,7 +1706,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     loop();
   }
 
-  /** Наружу: сцена родителя, камера — внутри объекта-входа, затем отлёт к общему виду. */
+  /** Наружу: сцена родителя, камера — внутри объекта-входа, затем отлёт туда, откуда вошли (точка и масштаб экрана). */
   function goOut(fromHistory, toSpace, flyId) {
     if (going || SPACE === 'main') return;
     const target = toSpace || parentSpace || 'main', was = SPACE;
@@ -1710,21 +1719,24 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       if (!j) { going = null; fade.veilTo = 0; return; }
       if (!fromHistory) history.pushState({ space: target }, '', spaceUrl(target));
       const back = Scene.from(j).objects.find((o) => o.inner === was);
+      const came = ups[0] && back && ups[0].from === back.id ? ups[0].cam : null;
       // родитель родителя неизвестен без сервера: страница пространства отдаёт его в data-parent при прямом заходе
       swapScene(j, target, target === 'main' ? null : 'main', null);
       ups.shift();
       threads = ups.length ? ups[0].threads : [];
       resize();
+      if (came) userMoved = true;
       // нить вела к соседу узла: после выхода — полёт к нему
       const fly = flyId && scene.objects.find((o) => o.id === flyId);
-      const all = fly && !isEmpty(fly.bounds()) ? fitTarget(expand(fly.bounds(), Math.max(fly.bounds().x1 - fly.bounds().x0, 60) * 0.6)) : cam.clone();
+      const all = fly && !isEmpty(fly.bounds()) ? fitTarget(expand(fly.bounds(), Math.max(fly.bounds().x1 - fly.bounds().x0, 60) * 0.6)) : came ? came.clone() : cam.clone();
+      calmUntil = T + 0.8; // инерция колёсика наружу не уносит дальше той точки
       if (back && !quick) {
         const start = inflated(back.bounds(), 1.5);
         cam.x = start.x; cam.y = start.y; cam.zoom = start.zoom;
         fade.veil = 1; fade.veilTo = 0;
         tween = { from: start, to: all, t: 0, dur: 0.7, free: true, done: () => { going = null; clampCam(); } };
         loop();
-      } else { fade.veil = 0; fade.veilTo = 0; going = null; refresh(30); }
+      } else { cam.x = all.x; cam.y = all.y; cam.zoom = all.zoom; clampCam(); ensureView(false); fade.veil = 0; fade.veilTo = 0; going = null; refresh(30); }
     });
   }
 
@@ -1740,12 +1752,13 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   });
 
   /* ---------------------------------------------------------------------
-     РАМА: вход в объект. Колёсико приближает объект целиком; когда он заполнил экран, он фиксируется:
-     камера встаёт (новые узлы не появляются), а дальше колёсико раздвигает континуум — из рамки объекта
-     складывается прямоугольник по центру экрана. Снаружи поле движется, внутри — блоки: окно объекта или
-     страница сети (тот же markdown, что у моделей) со ссылками глубже. Колёсико назад сводит прямоугольник
-     обратно в объект и возвращает холст; так же — Esc, «Наружу», клик мимо, «назад» браузера.
-     Объект-вход (inner) в конце раскрытия переводит в своё пространство.
+     РАМА: вход в объект. Колёсико приближает объект; в пределе масштаба над его областью начинается провал:
+     дальше колёсико ведёт камеру внутрь области (p = rama.k), новые узлы не появляются — узлы самой области
+     растягиваются на весь экран и становятся основой нового континуума, остальное уходит за края. В конце провала
+     поверх живого поля встаёт текст на весь экран: окно объекта, страница сети (тот же markdown, что у моделей)
+     со ссылками глубже или виджет. Колёсико назад поднимает обратно — ровно в ту точку и масштаб, откуда упали;
+     так же — Esc, «Наружу», «назад» браузера.
+     Объект-вход (inner) раскрывается порталом (ниже) и в конце переводит в своё пространство.
      Адрес страницы — настоящий (history): перезагрузка или ссылка дают ту же страницу обычным HTML.
      --------------------------------------------------------------------- */
   const ownPath = (href) => {
@@ -1753,7 +1766,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     catch { return null; }
   };
   const FRAME_WHEEL = 0.0012; // доля раскрытия на пиксель колёсика
-  let rama = null; // { o, kind: page|window|space, path, from, k, want, x, y, w, h, pushed }
+  let rama = null; // { o, kind: page|window|widget|space, path, from, k, want, x, y, w, h, pushed, dive, base }
+  const DIVE_MIN = 2.2, DIVE_MAX = 14; // во сколько раз камера уходит вглубь области при провале
   const pages = []; // стопка страниц внутри рамы
   let pageEl = null, pageBody = null, pageBack = null, pageReq = 0;
   const lerp = (a, b, t) => a + (b - a) * t;
@@ -1840,6 +1854,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     tween = null;
     rama = { o, kind, path: kind === 'page' ? ownPath(o.href) : null, from: objRect(o), k: 0, want: auto ? 1 : null, pushed: false, gen: -1, ...frameParams(o) };
     if (kind === 'space') openPortal(rama);
+    else { rama.dive = true; rama.base = cam.clone(); }
     placeFrame();
     if (kind !== 'space') loadFrame();
     loop();
@@ -1847,19 +1862,49 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   /** Рама без объекта (вперёд по истории, прямой переход): из точки в центре. */
   function openFramePath(path) {
     const t = frameTarget(null);
-    rama = { o: null, kind: 'page', path, from: { x: t.x + t.w / 2 - 4, y: t.y + t.h / 2 - 4, w: 8, h: 8 }, k: 0, want: 1, pushed: true, ...frameParams(null) };
+    rama = { o: null, kind: 'page', path, from: { x: t.x + t.w / 2 - 4, y: t.y + t.h / 2 - 4, w: 8, h: 8 }, k: 0, want: 1, pushed: true, dive: true, base: cam.clone(), ...frameParams(null) };
     pages.length = 0;
     loadFrame();
     loop();
   }
 
+  /** Камера в конце провала: середина области — в середине экрана, рамка области накрывает экран. */
+  function diveCam(f) {
+    const b = f.base, to = b.clone();
+    if (f.o && f.o.area && f.o.area.length >= 3) {
+      const a = areaBounds(f.o), aw = Math.max(1e-6, (a.x1 - a.x0) * b.zoom), ah = Math.max(1e-6, (a.y1 - a.y0) * b.zoom);
+      to.x = (a.x0 + a.x1) / 2; to.y = (a.y0 + a.y1) / 2;
+      to.zoom = b.zoom * Math.max(DIVE_MIN, Math.min(DIVE_MAX, Math.max(W / aw, H / ah)));
+    } else to.zoom = b.zoom * DIVE_MIN;
+    return to;
+  }
+  /** Провал: масштаб растёт по экспоненте, а середина области идёт к середине экрана по прямой — падаем прямо в неё. */
+  function placeDive(f) {
+    const b = f.base, to = diveCam(f), e = ease(f.k), z = Math.exp(Math.log(b.zoom) + (Math.log(to.zoom) - Math.log(b.zoom)) * e);
+    const q = ((1 - e) * b.zoom) / z;
+    cam.zoom = z; cam.x = to.x - (to.x - b.x) * q; cam.y = to.y - (to.y - b.y) * q;
+    f.x = 0; f.y = 0; f.w = W; f.h = H; f.hole = null;
+    if (!pageEl) return;
+    const show = f.k > 0.72;
+    pageEl.hidden = !show;
+    if (!show) return;
+    pageEl.classList.add('dive');
+    for (const k of ['left', 'top', 'width', 'height', 'borderRadius']) pageEl.style[k] = '';
+    // ширина колонки текста и сколько поля приглушить под ним — из параметров окна объекта (width, far)
+    pageEl.style.setProperty('--col', Math.round(f.o && f.o.frameGet ? f.o.frameGet('width') : M.FRAME_DEFAULTS.width) + 'px');
+    pageEl.style.setProperty('--veil', (0.35 + 0.5 * f.far).toFixed(2));
+    pageEl.style.opacity = String(Math.min(1, (f.k - 0.72) / 0.24));
+    pageEl.classList.toggle('live', f.k >= 0.98);
+  }
   function placeFrame() {
+    if (rama.dive) { placeDive(rama); return; }
     const f = rama, t = f.kind === 'space' ? portalTarget() : frameTarget(f.o), e = ease(f.k);
     f.x = lerp(f.from.x, t.x, e); f.y = lerp(f.from.y, t.y, e); f.w = lerp(f.from.w, t.w, e); f.h = lerp(f.from.h, t.h, e);
     // дыра в поле: та же сила раздвигания, что у окна из пустоты
     f.hole = { x: f.x, y: f.y, w: f.w, h: f.h, k: Math.min(1, f.k * 1.6), circle: f.kind === 'space' };
     if (!pageEl) return;
     const show = f.kind !== 'space' && f.k > 0.75;
+    pageEl.classList.remove('dive');
     pageEl.hidden = !show;
     if (!show) return;
     pageEl.style.left = f.x / VK + 'px'; pageEl.style.top = f.y / VK + 'px';
@@ -1888,7 +1933,9 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   }
   function closeFrameNow() {
     giveBack();
+    const base = rama && rama.dive ? rama.base : null;
     rama = null;
+    if (base) { cam.x = base.x; cam.y = base.y; cam.zoom = base.zoom; ensureView(false); }
     pages.length = 0;
     pageReq++;
     if (pageEl) { pageEl.hidden = true; pageEl.classList.remove('live'); }
@@ -1949,7 +1996,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       return;
     }
     if (f.kind === 'window') {
-      const w = f.o.window, md = [`# ${w.title || f.o.label}`, '', ...(w.text ? [w.text, ''] : [])];
+      // строки текста окна хранитель пишет абзацами
+      const w = f.o.window, md = [`# ${w.title || f.o.label}`, '', ...(w.text ? [w.text.replace(/\n+/g, '\n\n'), ''] : [])];
       if (f.o.href) md.push(`- [${f.o.label}](${f.o.href})`);
       for (const l of w.links || []) md.push(`- [${l.label}](${l.href})`);
       renderMd(md.join('\n'), pageBody);
@@ -2003,7 +2051,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   /** Markdown страниц сети → DOM, только текстом (никакого HTML из ответа): заголовки, абзацы, списки, ссылки, код. */
   function renderMd(md, box) {
     const lines = md.replace(/\r/g, '').split('\n');
-    let list = null, para = null, pre = null;
+    let list = null, para = null, pre = null, brk = false;
     const end = () => { list = null; para = null; };
     for (const line of lines) {
       if (pre) { if (/^```/.test(line)) { pre = null; } else pre.textContent += line + '\n'; continue; }
@@ -2018,8 +2066,10 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       }
       if (/^\s*\|/.test(line) || /^ {4}/.test(line)) { end(); const p = document.createElement('pre'); p.className = 'page-row'; p.textContent = line; box.append(p); continue; }
       list = null;
-      if (!para) { para = document.createElement('p'); box.append(para); } else para.append(document.createElement('br'));
-      inline(line.replace(/^>\s?/, ''), para);
+      // строки абзаца текут одной строкой по ширине экрана (как в markdown); два пробела в конце — перенос
+      if (!para) { para = document.createElement('p'); box.append(para); } else para.append(brk ? document.createElement('br') : ' ');
+      brk = / {2}$/.test(line);
+      inline(line.replace(/^>\s?/, '').trim(), para);
     }
   }
   /** Строка: [текст](адрес), **жирный**, `код`; остальное — текстом. Адреса — только http(s) и свои пути. */
@@ -2194,6 +2244,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (!userMoved) { const to = fitTarget(scene.bounds()); cam.x = to.x; cam.y = to.y; cam.zoom = to.zoom; }
     clampCam();
     if (win) win = layoutWindow(win.o);
+    // в провале поле собирается для точки, откуда упали, — и снова растягивается вглубь
+    if (rama && rama.dive) { cam.x = rama.base.x; cam.y = rama.base.y; cam.zoom = rama.base.zoom; }
     fx = null;
     ensureView(true);
     if (rama) placeFrame();

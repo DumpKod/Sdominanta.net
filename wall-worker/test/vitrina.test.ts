@@ -540,6 +540,14 @@ describe('Окно объекта: рама из узлов области', () 
     for (const s of ['function capture(', 'function ringTargets(', 'fieldGen', 'fph[i] * 0.15915 > 1 - far', 'cam.zoom <= z0 * 1.002'])
       expect(vitrinaJs, s).toContain(s);
   });
+  it('провал в область: камера уходит вглубь, поле не пересобирается, назад — ровно туда, откуда упали', () => {
+    for (const s of ['function placeDive(', 'function diveCam(', 'if (!force && rama && rama.dive) return false;', 'cam.x = base.x; cam.y = base.y; cam.zoom = base.zoom', "classList.add('dive')"])
+      expect(vitrinaJs, s).toContain(s);
+  });
+  it('выход из алеф-нуля — в ту же точку экрана, откуда вошли', () => {
+    expect(vitrinaJs).toContain('cam: cam.clone() };');
+    expect(vitrinaJs).toContain('came ? came.clone()');
+  });
   it('параметры объекта — его собственные: области такта не сливаются между объектами, поле не перенимает течение', () => {
     expect(vitrinaJs).toContain('veins[vj].obj !== v.obj');
     expect(vitrinaJs).not.toContain('v.st.flow * b');

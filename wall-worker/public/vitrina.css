@@ -130,6 +130,29 @@ html:not(.js) .music-play { display: none; }
 .page-body pre { margin: 0 0 0.9em; white-space: pre-wrap; overflow-wrap: anywhere; color: #94a3b8; }
 .page-body pre.page-row { margin: 0; }
 
+/* Текст в конце провала: на весь экран любого устройства, поверх живого поля (оно видно сквозь вуаль по краям).
+   --col — ширина колонки (frame.width объекта), --veil — насколько приглушить поле под текстом (frame.far). */
+.page-space.dive {
+  inset: 0; width: auto; height: auto; border-radius: 0;
+  padding: max(52px, 7vh, env(safe-area-inset-top)) max(16px, 5vw, env(safe-area-inset-right)) 14vh max(16px, 5vw, env(safe-area-inset-left));
+  background: radial-gradient(ellipse 80% 90% at 50% 45%, rgba(1, 4, 9, var(--veil, 0.7)) 0%, rgba(1, 4, 9, calc(var(--veil, 0.7) * 0.85)) 55%, rgba(1, 4, 9, calc(var(--veil, 0.7) * 0.35)) 100%);
+  color: #d8e4ef; font: 400 clamp(16px, 0.4vw + 14.5px, 19px)/1.72 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  text-shadow: 0 0 10px rgba(1, 3, 6, 0.9); text-rendering: optimizeLegibility;
+  scrollbar-width: thin; scrollbar-color: rgba(0, 242, 254, 0.35) transparent;
+}
+.page-space.dive .page-bar, .page-space.dive .page-body { max-width: min(var(--col, 760px), 100%); }
+.page-space.dive .page-bar { padding-bottom: 2.2em; }
+.page-space.dive .page-body h2 { font-size: clamp(1.7em, 1.6vw + 1.1em, 2.4em); line-height: 1.18; margin: 0.2em 0 0.7em; letter-spacing: 0.01em; }
+.page-space.dive .page-body h3 { font-size: 1.3em; margin-top: 1.8em; color: #bff7ff; }
+.page-space.dive .page-body p { margin: 0 0 1.05em; hyphens: auto; overflow-wrap: break-word; }
+.page-space.dive .page-body li { margin: 0.35em 0; }
+.page-space.dive .page-body li::marker { color: rgba(0, 242, 254, 0.7); }
+.page-space.dive .page-body strong { color: #f1fdff; font-weight: 600; }
+.page-space.dive .page-body code, .page-space.dive .page-body pre { font: 0.88em/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.page-space.dive .page-body pre { padding: 0.8em 1em; background: rgba(0, 242, 254, 0.04); border-left: 2px solid rgba(0, 242, 254, 0.3); border-radius: 4px; }
+.page-space.dive .page-body pre.page-row { padding: 0 1em; background: none; border: 0; overflow-x: auto; white-space: pre; }
+.page-space.dive .widget-frame { height: calc(100vh - 13em); }
+
 /* Предпросмотр хранителя: витрина как у гостя, одна кнопка возврата к правке. */
 .kp[hidden], .kp-back[hidden] { display: none; }
 .kp-back { position: fixed; left: 14px; top: 14px; z-index: 5; }

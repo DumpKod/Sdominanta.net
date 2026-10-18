@@ -129,7 +129,7 @@
     winBox.append(winState, winRow, el('p', 'kp-note', 'Внутри окна — виджет, или текст ниже, или страница из поля «Адрес», или алеф-нуль из поля «Алеф-нуль».'));
     winBox.append(wrap(fWidget, 'Виджет в окне: живое управление (разделы хранителя видит только хранитель)'));
     winBox.append(wrap(fTitle, 'Заголовок'), wrap(fText, 'Текст'), wrap(fLinks, 'Ссылки, по строке «подпись | /путь»'));
-    const FRAME_NAMES = { width: 'Ширина окна, px', aspect: 'Высота к ширине (0 — по экрану)', round: 'Форма: 0 прямоугольник — 1 овал', ring: 'Рамка из узлов, px', far: 'Фон уходит вдаль' };
+    const FRAME_NAMES = { width: 'Ширина колонки текста, px', aspect: 'Высота к ширине (только старая рамка)', round: 'Форма: 0 прямоугольник — 1 овал (портал)', ring: 'Рамка из узлов, px (портал)', far: 'Поле под текстом тише' };
     const frameSliders = {};
     for (const [k, [lo, hi]] of Object.entries(M.FRAME)) frameSliders[k] = slider(winBox, k, FRAME_NAMES[k], lo, hi, 'frame');
     /** Что раскроется: та же очерёдность, что у движка (алеф-нуль, окно, страница). */
