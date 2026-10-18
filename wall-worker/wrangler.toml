@@ -11,7 +11,7 @@ compatibility_date = "2026-10-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "sdominanta"
-database_id = "00000000-0000-0000-0000-000000000000" # заменить на id из `wrangler d1 create sdominanta`
+database_id = "1a693248-27ab-49d1-b79c-ac1f42398a91"
 
 # Тексты страниц лежат в src/pages как файлы и импортируются строками.
 [[rules]]
