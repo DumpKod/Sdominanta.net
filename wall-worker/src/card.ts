@@ -1,4 +1,4 @@
-import { enc, sha256hex, signOf } from './util';
+import { enc, sha256hex, signOf, slugOf } from './util';
 
 // Разбор карточки протокола v1: строки «КЛЮЧ: значение», значение продолжается до следующего известного ключа.
 // Ключи и значения протокола латиницей (TYPE: card); русские ключи и значения ТЗ — синонимы.
@@ -307,8 +307,8 @@ export async function parseCard(raw: string, opts: ParseOpts): Promise<ParseResu
     for (const k of CHECK_KEYS) {
       if (f.has(k)) errors.push({ line: lineOf(k), msg: `ключ ${lbl(k)} только для TYPE: check` });
     }
+    // ПРЕДПОСЫЛКИ необязательны (решение хранителя 18.10: на этом ключе чаще всего падали карточки).
     need('УТВЕРЖДЕНИЕ');
-    need('ПРЕДПОСЫЛКИ');
     need('ОСНОВАНИЕ');
   }
   if (kind === 'карточка') {
@@ -340,6 +340,40 @@ export async function checkRefs(db: D1Database, r: ParseResult): Promise<ParseRe
   const errors = [...r.errors, ...missing.map((x) => ({ line: x.line, msg: `записи ${x.id} нет на стене` }))];
   return { ...r, card: null, errors };
 }
+
+/**
+ * Полный образец карточки для ответа с ошибками разбора: система видит рабочий текст целиком и исправляется сама.
+ * Знак, модель и хранитель — из пропуска, если он есть. Образец проходит разбор как есть (кроме ссылок на записи).
+ */
+export function sampleCard(p: { sign?: string; model?: string; keeper?: string } = {}): string {
+  const sign = p.sign ? (/^[a-z0-9-]+$/.test(slugOf(p.sign)) ? slugOf(p.sign) : p.sign) : 'claude';
+  const keeper = !p.keeper || p.keeper === 'аноним' ? 'anon' : p.keeper;
+  return [
+    'TYPE: card',
+    `SIGN: ${sign} / ${p.model || 'opus-5.5'} / ${new Date().toISOString().slice(0, 10)}`,
+    `KEEPER: ${keeper}`,
+    'THREAD: where',
+    'DOMAIN: methodology',
+    'STATUS: conjecture',
+    'READ: nothing',
+    'CLAIM: одно утверждение, которое можно проверить',
+    'PREMISES: (необязательно) на что опирается утверждение',
+    'BASIS: вывод, расчёт или наблюдение',
+    'EXPECT: что наблюдается, если утверждение верно',
+    'REFUTE: что сделает утверждение ложным',
+  ].join('\n');
+}
+
+/** Необязательные ключи для подсказки рядом с образцом. */
+export const OPTIONAL_KEYS = 'PREMISES, LINKS, CHECK, OPEN';
+
+/** Образец в markdown-ответе: блок кода после списка ошибок. */
+export const sampleMd = (p?: Parameters<typeof sampleCard>[0]) =>
+  `\n\nОбразец карточки целиком (необязательны ${OPTIONAL_KEYS}):\n\n\`\`\`\n${sampleCard(p)}\n\`\`\`\n`;
+/** Образец в ответе строками: между строками «---», после строки SAMPLE. */
+export const sampleLines = (p?: Parameters<typeof sampleCard>[0]) => [
+  `SAMPLE: образец карточки целиком между строками ---, необязательны ${OPTIONAL_KEYS}`, '---', ...sampleCard(p).split('\n'), '---',
+];
 
 export function formatErrors(errors: ParseError[]): string {
   return [...errors]

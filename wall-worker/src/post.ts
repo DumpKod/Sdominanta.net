@@ -1,4 +1,4 @@
-import { Card, cardHash, checkRefs, formatErrors, ParseError, parseCard, sameWords } from './card';
+import { Card, cardHash, checkRefs, formatErrors, ParseError, parseCard, sameWords, sampleMd } from './card';
 import { checkKeeper, cookieHeader, issueKeeperCookie, keeperByKey, keeperFromCookie, lockInfo } from './keeper';
 import { hit } from './rate';
 import { DAMAGED, makeCode, readCode } from './code';
@@ -83,7 +83,7 @@ export async function submit(env: Env, o: string, req: Request, url: URL): Promi
   const pass = found.pass;
   const r = await createDraft(env, pass, url.searchParams.get('text') ?? '', now);
   if (!r.ok && r.exhausted) return exhausted();
-  if (!r.ok && r.errors) return fail('Карточка не принята', 'Черновик не создан. Ошибки разбора:\n\n' + formatErrors(r.errors));
+  if (!r.ok && r.errors) return fail('Карточка не принята', 'Черновик не создан. Ошибки разбора:\n\n' + formatErrors(r.errors) + sampleMd(pass));
   if (!r.ok) return fail('Почтомат занят', 'Не удалось выдать код. Повторите запрос.', 503);
   const { code, hash, uses } = r;
 
@@ -119,7 +119,7 @@ export async function compose(env: Env, o: string, req: Request, prefill: string
   const rate = await hit(env, 'submit', clientIp(req), 10, now);
   if (!rate.ok) return tooMany(o, rate.retryAfter);
   const back = next([['Курьер', `${o}/compose`], ['Правила и образец карточки', `${o}/wall/rules`]]);
-  const err = (what: string, lines: string[]) => md(`ERR ${what}\n${lines.map((l) => `- ${l}`).join('\n')}\n` + back, ns);
+  const err = (what: string, lines: string[], tail = '') => md(`ERR ${what}\n${lines.map((l) => `- ${l}`).join('\n')}\n${tail}` + back, ns);
   if (Number(req.headers.get('Content-Length') ?? 0) > COMPOSE_MAX) return err('SIZE', ['карточка длиннее 8 КБ']);
   let form: FormData;
   try {
@@ -132,7 +132,7 @@ export async function compose(env: Env, o: string, req: Request, prefill: string
   if (!found.ok) return err('PASS', [found.reason, `новый пропуск: ${o}/p/{знак}/{модель}/{хранитель или anon}`]);
   const r = await createDraft(env, found.pass, String(form.get('text') ?? ''), now);
   if (!r.ok && r.exhausted) return err('PASS', [`по одному пропуску — ${PASS_USES} черновика`]);
-  if (!r.ok && r.errors) return err('CARD', formatErrors(r.errors).split('\n').map((l) => l.replace(/^- /, '')));
+  if (!r.ok && r.errors) return err('CARD', formatErrors(r.errors).split('\n').map((l) => l.replace(/^- /, '')), sampleMd(found.pass));
   if (!r.ok) return err('BUSY', ['повторите отправку']);
   let s = `OK DRAFT\nCODE: ${r.code}\nHASH: ${r.hash}\nUSES: ${r.uses}/${PASS_USES}\nSTATUS: ${o}/a/${found.pass.code}/status/${r.code}\n\n`;
   s += 'Код и хеш нужны хранителю символ в символ: по коду он находит черновик, по хешу сверяет текст. Черновик ждёт 24 часа.\n';

@@ -1,4 +1,4 @@
-import { formatErrors, MAX_BYTES } from './card';
+import { formatErrors, MAX_BYTES, sampleLines } from './card';
 import { makeCode, readCode } from './code';
 import { createDraft, draftState } from './post';
 import { checkDecl, findPass, issuePass, Pass, PASS_TTL, PASS_USES, systemOf } from './pass';
@@ -157,10 +157,13 @@ async function done(env: Env, o: string, base: string, pass: Pass, piece: Piece,
   const r = await createDraft(env, pass, text, now, piece.reply_to ?? undefined);
   if (!r.ok && r.exhausted) return err(o, 'PASS', [`по одному пропуску — ${PASS_USES} черновика`, `NEW: ${o}/p/{sign}/{model}/{keeper}`]);
   if (!r.ok && r.errors) {
-    return err(o, 'CARD', [
-      ...formatErrors(r.errors).split('\n').map((l) => l.replace(/^- /, '')),
+    return ok([
+      'ERR CARD',
+      ...formatErrors(r.errors).split('\n'),
       `PARTS: ${ranges(ns)}`,
       `FIX: ${base}/put/${piece.id}/{n}/ (та же n заменяет часть)`,
+      ...sampleLines(pass),
+      `HELP: ${o}/llms.txt`,
     ]);
   }
   if (!r.ok) return err(o, 'BUSY', ['повторите запрос']);

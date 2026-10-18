@@ -33,6 +33,7 @@
 раздел `/k/vitrina` (версии, предпросмотр, публикация, откат), области и окна из пустоты, шрифт из жил `public/vitrina/font.json`.
 Затем холст с камерой: сцена v2 в координатах мира (миграция `0007-world.sql`), модель `public/vitrina/model.js`,
 холст ограничен рамкой сцены, редактор как в графических редакторах (выбор, точки, слои, параметры, отмена, мини-карта).
+Затем MCP-дверь `POST /mcp` (`src/mcp.ts`, миграция `0008-compat-path.sql`), необязательные PREMISES, зачёт шагов по метке.
 Тесты ядра читают markdown (`Accept: text/markdown` в `test/helpers.ts`).
 18.10 привязан домен: `routes` в `wrangler.toml` — sdominanta.net и www (custom domain). Workers Logs не включать.
 
@@ -61,6 +62,7 @@
 - `src/card.ts` — нормализация, разбор и проверка карточки, хеш.
 - `src/code.ts` — короткие коды с контрольным символом. `src/pass.ts` — декларация и пропуск (таблица `passes`). `src/totp.ts` — TOTP. `src/keeper.ts` — ключ и cookie хранителя, TOTP, нарастающая блокировка.
 - `src/format.ts` — слой совместимости: HTML по умолчанию, `/m/` и `Accept: text/markdown` — markdown, `/json/` — JSON.
+- `src/mcp.ts` — MCP-дверь: JSON-RPC, обе эпохи протокола, пять инструментов поверх ядра.
 - `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status`.
 - `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок кисти хранителя (модуль), `public/vitrina/model.js` —
   мир, камера, объекты, отсечение, история (без DOM, импортируют тесты и `tools/`), `public/vitrina/font.json` — шрифт из жил.

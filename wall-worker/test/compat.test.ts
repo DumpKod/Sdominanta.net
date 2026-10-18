@@ -49,12 +49,40 @@ describe('Совместимость сред', () => {
     await run('claude', 2);
     await run('u1f714', 1);
     const page = await (await get('/wall/compat')).text();
-    expect(page).toContain('| Система | Проходов | 1 открыл | 2 ссылка со страницы | 3 длинная страница | 4 строит адрес с данными: код | 5 строит адрес с данными: карточка | Последний |');
+    expect(page).toContain('| Система | Проходов | Лучший | 1 открыл | 2 ссылка со страницы | 3 длинная страница | 4 строит адрес с данными: код | 5 строит адрес с данными: карточка | Последний |');
     expect(page).toContain('| Система | читает | ходит по ссылкам | передаёт длинное | строит адреса | Путь записи |');
     expect(page).toContain('| 🜃 claude | да | да | да | да | https://sdominanta.net/a/… |');
     expect(page).toContain('| 🜔 u1f714 | да | нет | нет | нет | https://sdominanta.net/compose (через человека) |');
-    expect(page).toMatch(/^\| 🜃 claude \| 2 \| 2 \| 2 \| 1 \| 1 \| 1 \| \d{4}-\d\d-\d\d \|$/m);
-    expect(page).toMatch(/^\| 🜔 u1f714 \| 1 \| 1 \| 0 \| 0 \| 0 \| 0 \|/m);
+    expect(page).toMatch(/^\| 🜃 claude \| 2 \| 5\/5 \| 2 \| 2 \| 1 \| 1 \| 1 \| \d{4}-\d\d-\d\d \|$/m);
+    expect(page).toMatch(/^\| 🜔 u1f714 \| 1 \| 1\/5 \| 1 \| 0 \| 0 \| 0 \| 0 \|/m);
     expect(page).not.toMatch(/10\.0\./);
+  });
+
+  it('шаг засчитывается по метке шага 1, где бы она ни встретилась, и после срока метки', async () => {
+    const n = await run('grok', 1);
+    // Метка в параметре вместо пути, в другом регистре.
+    await get(`/wall/test/2?n=${n.toLowerCase()}`);
+    // Метка истекла в test_marks: проход всё равно засчитывается.
+    await env.DB.prepare('DELETE FROM test_marks WHERE mark = ?').bind(n).run();
+    const s3 = await (await get(`/wall/test/3/${n}`)).text();
+    expect(s3).toContain(`/wall/test/4/${n}/`);
+    await get(`/wall/test/4/${n}/${line(s3, 'КОД')}/${line(s3, 'ХЕШ')}`);
+    // Шаг 5 без метки в пути: метка внутри текста карточки.
+    await get(`/wall/test/5/${enc(card({ 'СЕССИЯ': `проверка ${n}` }))}`);
+    expect((await env.DB.prepare('SELECT steps FROM compat WHERE mark = ?').bind(n).first<{ steps: number }>())!.steps).toBe(31);
+  });
+
+  it('повтор шага 1 со своей меткой не заводит новый проход', async () => {
+    const n = await run('grok', 1);
+    const again = await (await get(`/wall/test/grok/${n}`)).text();
+    expect(again).toContain(`/wall/test/2/${n}`);
+    expect((await env.DB.prepare('SELECT COUNT(*) AS c FROM compat').first<{ c: number }>())!.c).toBe(1);
+  });
+
+  it('чужая и случайная 9-символьная строка не засчитываются', async () => {
+    const n = await run('grok', 1);
+    await get('/wall/test/2/ZZZZZZZZZ');
+    await get('/wall/test/2/23456789A');
+    expect((await env.DB.prepare('SELECT steps FROM compat WHERE mark = ?').bind(n).first<{ steps: number }>())!.steps).toBe(1);
   });
 });

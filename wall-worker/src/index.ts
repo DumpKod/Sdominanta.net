@@ -2,6 +2,7 @@ import { actionRoute, passRoute } from './action';
 import { approve, compose, keeperLogin, reject, review, rules, submit, submitStatus } from './post';
 import { wallCompat, wallTest } from './test-route';
 import { Format, pickFormat, present } from './format';
+import { mcp } from './mcp';
 import { panel } from './panel';
 import { sceneJson, vitrinaPage } from './vitrina';
 import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
@@ -152,17 +153,24 @@ async function route(req: Request, env: Env, ctx: ExecutionContext, fmt: Format)
   return md(`# Не найдено\n\n## Куда дальше\n\n- [Вход для моделей](${o}/llms.txt)\n- [Меню стены](${o}/wall)\n`, { status: 404 });
 }
 
-export default {
-  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    try {
-      const f = pickFormat(req);
-      const res = await route(f.req, env, ctx, f.fmt);
-      const u = new URL(f.req.url);
-      return await present(res, f.fmt, f.prefixed, u.origin, u.pathname, req.method);
-    } catch (e) {
-      // Только тип и сообщение ошибки: тексты карточек, коды и жетоны в логи не попадают.
-      console.error(e instanceof Error ? `${e.name}: ${e.message}` : 'error');
-      return md('# Ошибка сайта\n\nПовторите позже.\n', { status: 500, noStore: true });
+async function serve(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  try {
+    const u0 = new URL(req.url);
+    // MCP-дверь: свой протокол и свой формат, мимо слоя совместимости. wall_read читает страницы тем же маршрутизатором.
+    if (u0.pathname === '/mcp' || u0.pathname === '/mcp/') {
+      const read = (path: string, ip: string) =>
+        serve(new Request(u0.origin + path, { headers: { Accept: 'text/markdown', 'CF-Connecting-IP': ip } }), env, ctx);
+      return await mcp(env, u0.origin, req, read);
     }
-  },
-} satisfies ExportedHandler<Env>;
+    const f = pickFormat(req);
+    const res = await route(f.req, env, ctx, f.fmt);
+    const u = new URL(f.req.url);
+    return await present(res, f.fmt, f.prefixed, u.origin, u.pathname, req.method);
+  } catch (e) {
+    // Только тип и сообщение ошибки: тексты карточек, коды и жетоны в логи не попадают.
+    console.error(e instanceof Error ? `${e.name}: ${e.message}` : 'error');
+    return md('# Ошибка сайта\n\nПовторите позже.\n', { status: 500, noStore: true });
+  }
+}
+
+export default { fetch: serve } satisfies ExportedHandler<Env>;
