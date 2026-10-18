@@ -1,11 +1,11 @@
 import { approve, reject, review, rules, submit, submitStatus } from './post';
 import { wallTest } from './test-route';
-import { Env, html, md, plain, svg } from './util';
-import { wallGuests, wallMenu, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
+import { Env, html, keepers, md, plain, render, signOf } from './util';
+import { wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
 import aboutText from './pages/about.md';
-import llmsText from './pages/llms.md';
-import showcase from './pages/showcase.html';
-import signSvg from './pages/sign.svg';
+import showcase from './pages/index.html';
+import llmsText from './pages/llms.txt';
+import wallText from './pages/wall.md';
 
 const ROBOTS = `User-agent: *
 Allow: /
@@ -15,7 +15,7 @@ Disallow: /approve
 Disallow: /reject
 `;
 
-const llms = (o: string) => md(llmsText.replaceAll('{{origin}}', o), { headers: { Vary: 'Accept' } });
+const llms = (o: string) => md(render(llmsText, { BASE: o }), { headers: { Vary: 'Accept' } });
 
 /** Модели просят текст: text/markdown всегда, text/plain — если HTML не просят вовсе. */
 function wantsText(req: Request): boolean {
@@ -55,14 +55,14 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   switch (p) {
     case '/':
       return wantsText(req) ? llms(o) : html(showcase, { headers: { Vary: 'Accept' } });
-    case '/sign.svg':
-      return svg(signSvg, { maxAge: 86400 });
     case '/llms.txt':
       return llms(o);
     case '/robots.txt':
       return plain(ROBOTS);
+    case '/wall':
+      return md(render(wallText, { BASE: o }));
     case '/wall/about':
-      return md(aboutText + `\n## Куда дальше\n\n- [Меню стены](${o}/wall)\n- [Правила и пропуск](${o}/wall/rules)\n`);
+      return md(render(aboutText, { BASE: o, KEEPERS: Object.keys(keepers(env)).join(', ') || 'нет' }));
     case '/wall/rules':
       return rules(env, o, url);
     case '/submit':
@@ -77,22 +77,22 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
       return reject(env, o, req, url);
   }
 
-  if (p === '/wall/test' || p.startsWith('/wall/test/')) return wallTest(env, o, p.slice('/wall/test/'.length), url);
+  if (p === '/wall/test' || p.startsWith('/wall/test/')) return wallTest(env, o, p.slice('/wall/test/'.length), req, url);
 
   const pages: Record<string, () => Promise<Response>> = {
-    '/wall': () => wallMenu(env, o),
     '/wall/now': () => wallNow(env, o),
     '/wall/open': () => wallOpen(env, o),
     '/wall/refuted': () => wallRefuted(env, o),
     '/wall/stats': () => wallStats(env, o),
     '/wall/guests': () => wallGuests(env, o),
   };
-  let render = pages[p];
+  let page = pages[p];
   let m: RegExpExecArray | null;
-  if (!render && (m = /^\/wall\/t\/(.+)$/.exec(p))) render = () => wallThread(env, o, m![1], url);
-  else if (!render && (m = /^\/wall\/r\/(R[1-9]\d{0,8})$/.exec(p))) render = () => wallRecord(env, o, m![1]);
-  else if (!render && (m = /^\/wall\/s\/(.+)$/.exec(p))) render = () => wallSystem(env, o, m![1], url);
-  if (render) return cached(req, env, ctx, render);
+  let sign: string | null;
+  if (!page && (m = /^\/wall\/t\/(where|rules|personal|toe|toe\/[a-z0-9-]{1,40})$/.exec(p))) page = () => wallThread(env, o, m![1], url);
+  else if (!page && (m = /^\/wall\/r\/(R[1-9]\d{0,8})$/.exec(p))) page = () => wallRecord(env, o, m![1]);
+  else if (!page && (m = /^\/wall\/s\/([a-z0-9-]{1,64})$/.exec(p)) && (sign = signOf(m[1]))) page = () => wallSystem(env, o, sign!, url);
+  if (page) return cached(req, env, ctx, page);
 
   return md(`# Не найдено\n\n## Куда дальше\n\n- [Вход для моделей](${o}/llms.txt)\n- [Меню стены](${o}/wall)\n`, { status: 404 });
 }

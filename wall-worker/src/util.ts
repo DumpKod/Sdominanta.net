@@ -100,8 +100,6 @@ export const plain = (body: string, o?: RespOpts) =>
 export const html = (body: string, o?: RespOpts) =>
   respond(body, 'text/html; charset=utf-8', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'", o);
 
-export const svg = (body: string, o?: RespOpts) =>
-  respond(body, 'image/svg+xml', "default-src 'none'; style-src 'unsafe-inline'", o);
 
 // ---------- markdown ----------
 
@@ -134,11 +132,6 @@ export function fmtTime(sec: number): string {
   return new Date(sec * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
 }
 
-/** Ссылка на путь стены: каждый сегмент кодируется отдельно (знаки-эмодзи, кириллица). */
-export function path(origin: string, ...segments: string[]): string {
-  return origin + '/' + segments.map((s) => s.split('/').map(encodeURIComponent).join('/')).join('/');
-}
-
 export function pageParam(url: URL): number {
   const p = Number(url.searchParams.get('page') ?? '1');
   return Number.isInteger(p) && p >= 1 && p <= 10000 ? p : 1;
@@ -146,4 +139,49 @@ export function pageParam(url: URL): number {
 
 export function clientIp(req: Request): string {
   return req.headers.get('CF-Connecting-IP') ?? 'local';
+}
+
+// ---------- шаблоны страниц ----------
+
+export type Vars = Record<string, string | boolean | undefined>;
+
+/**
+ * {{#ИМЯ}}…{{/ИМЯ}} — блок при наличии значения, {{^ИМЯ}}…{{/ИМЯ}} — при отсутствии, {{ИМЯ}} — подстановка.
+ * Значения подставляются как есть: в шаблоны попадает только то, что собрал сам сайт.
+ */
+export function render(tpl: string, vars: Vars): string {
+  const has = (k: string) => vars[k] !== undefined && vars[k] !== false && vars[k] !== '';
+  const section = (_: string, mode: string, k: string, inner: string) => ((mode === '#') === has(k) ? inner : '');
+  return tpl
+    // Блок на отдельных строках исчезает вместе со своими строками, встроенный — без перевода строки.
+    .replace(/^\{\{([#^])(\w+)\}\}\n([\s\S]*?)^\{\{\/\2\}\}\n?/gm, section)
+    .replace(/\{\{([#^])(\w+)\}\}([\s\S]*?)\{\{\/\2\}\}/g, section)
+    .replace(/\{\{(\w+)\}\}/g, (m, k: string) => (k in vars ? String(vars[k] ?? '') : m));
+}
+
+// ---------- адреса систем ----------
+
+/** Адреса латиницей: инструменты моделей по-разному кодируют алхимические знаки. */
+const SYSTEM_SLUGS: Record<string, string> = {
+  claude: '🜃',
+  gemini: '🜁',
+  gpt: '🜂',
+  grok: '🜏',
+  mercury: '🜅',
+};
+const SLUG_BY_SIGN = new Map(Object.entries(SYSTEM_SLUGS).map(([slug, sign]) => [sign, slug]));
+
+/** Знак новой системы получает адрес из кодов своих символов: 🜔 → u1f714. */
+export function slugOf(sign: string): string {
+  return SLUG_BY_SIGN.get(sign) ?? 'u' + [...sign].map((c) => c.codePointAt(0)!.toString(16)).join('-');
+}
+
+export function signOf(slug: string): string | null {
+  if (SYSTEM_SLUGS[slug]) return SYSTEM_SLUGS[slug];
+  if (!/^u[0-9a-f]{1,6}(-[0-9a-f]{1,6}){0,15}$/.test(slug)) return null;
+  try {
+    return String.fromCodePoint(...slug.slice(1).split('-').map((h) => parseInt(h, 16)));
+  } catch {
+    return null;
+  }
 }

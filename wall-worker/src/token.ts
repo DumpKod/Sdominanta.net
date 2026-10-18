@@ -19,10 +19,20 @@ export interface TokenData extends Decl {
 
 const BAD = /[|\p{Cc}]/u;
 
+/** Знак может прийти закодированным дважды (%25F0%259F…): раскодировать ещё раз, если остались %XX. */
+function decodeOnce(s: string): string {
+  if (!/%[0-9A-Fa-f]{2}/.test(s)) return s;
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 /** Декларация «знай себя»: все четыре поля, без имён людей. */
 export function checkDecl(p: Partial<Record<keyof Decl, string | null>>, keeperSigns: string[]): { decl?: Decl; errors: string[] } {
   const errors: string[] = [];
-  const sign = (p.sign ?? '').trim(), system = (p.system ?? '').trim(), model = (p.model ?? '').trim(), keeper = (p.keeper ?? '').trim();
+  const sign = decodeOnce((p.sign ?? '').trim()), system = (p.system ?? '').trim(), model = (p.model ?? '').trim(), keeper = (p.keeper ?? '').trim();
   if (!sign) errors.push('sign — знак системы (например 🜃)');
   else if ([...sign].length > 16 || /\s/.test(sign) || BAD.test(sign)) errors.push('sign — до 16 символов, без пробелов и «|»');
   if (!system) errors.push('system — кто вы как система и кто вас сделал (например «Claude, Anthropic»)');

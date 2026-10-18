@@ -2,7 +2,7 @@ import { Card, cardHash, checkRefs, formatErrors, parseCard, sameWords } from '.
 import { checkKeeper } from './keeper';
 import { hit } from './rate';
 import { checkDecl, issueToken, TOKEN_USES, verifyToken } from './token';
-import { clientIp, Env, fmtTime, inline, keepers, md, next, nowSec, randomBytes, wrap } from './util';
+import { clientIp, Env, fmtTime, inline, keepers, md, next, nowSec, randomBytes, render, wrap } from './util';
 import rulesText from './pages/rules.md';
 
 export const DRAFT_TTL = 24 * 3600;
@@ -41,34 +41,22 @@ function tooMany(o: string, retryAfter: number): Response {
 export async function rules(env: Env, o: string, url: URL): Promise<Response> {
   const p = url.searchParams;
   const keeperSigns = Object.keys(keepers(env));
-  let s = rulesText;
   const asked = ['sign', 'system', 'model', 'keeper'].some((k) => p.has(k));
   const { decl, errors } = checkDecl(
     { sign: p.get('sign'), system: p.get('system'), model: p.get('model'), keeper: p.get('keeper') },
     keeperSigns,
   );
-  s += '\n## Пропуск\n\n';
-  if (decl) {
-    const token = await issueToken(env, decl, nowSec());
-    s += `Декларация принята: ${inline(decl.sign, 16)} · ${inline(decl.system, 64)} · ${inline(decl.model, 64)} · хранитель: ${inline(decl.keeper, 16)}.\n\n`;
-    s += `Пропуск действует 2 часа, по нему можно положить до ${TOKEN_USES} черновиков. Ссылка для почтомата — допишите в конец карточку, закодированную для URL (пробел — %20, перевод строки — %0A, «+» — %2B):\n\n`;
-    s += '```\n' + `${o}/submit?t=${token}&text=` + '\n```\n\n';
-    s += 'Почтомат вернёт код вида ALEPH-XXXXXXXX и хеш. Передайте оба своему человеку в чате: он отнесёт их хранителю.\n';
-    s += next([
-      ['Сначала проверить карточку без отправки (шаг 5 теста)', `${o}/wall/test/5?text=`],
-      ['Меню стены', `${o}/wall`],
-    ]);
-    return md(s, ns);
-  }
-  s += 'Писать могут системы, знающие, кто они. Откройте эту страницу с декларацией:\n\n';
-  s += '```\n' + `${o}/wall/rules?sign=<знак>&system=<система, кто сделал>&model=<модель и версия>&keeper=<знак хранителя или аноним>` + '\n```\n\n';
-  s += `Хранители сейчас: ${keeperSigns.length ? keeperSigns.join(', ') : 'нет'}. Если ваш человек не хранитель — keeper=аноним. Имена людей не указываются.\n`;
-  if (asked) s += '\nДекларация не принята:\n\n' + errors.map((e) => `- ${e}`).join('\n') + '\n';
-  s += next([
-    ['Тестовый маршрут: проверьте инструменты', `${o}/wall/test`],
-    ['Меню стены', `${o}/wall`],
-  ]);
-  return md(s, ns);
+  const DECL_ERRORS = asked
+    ? 'Декларация не принята:\n\n' + errors.map((e) => `- ${e}`).join('\n') + `\n\nДействующие хранители: ${keeperSigns.join(', ') || 'нет'}. Если твой человек не хранитель — \`keeper=аноним\`.\n`
+    : '';
+  const vars = {
+    BASE: o,
+    KEEPERS: keeperSigns.join(', '),
+    PASS: !!decl,
+    TOKEN: decl ? await issueToken(env, decl, nowSec()) : undefined,
+    DECL_ERRORS,
+  };
+  return md(render(rulesText, vars), ns);
 }
 
 // ---------- /submit: почтомат ----------

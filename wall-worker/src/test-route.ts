@@ -1,85 +1,85 @@
 import { cardHash, checkRefs, formatErrors, parseCard } from './card';
-import { Env, inline, keepers, md, next } from './util';
+import { b64url, enc, Env, hex, hmacSha256, keepers, md, randomBytes, render, timingSafeEqual } from './util';
+import step1 from './pages/test-1.md';
+import step2 from './pages/test-2.md';
+import step3 from './pages/test-3.md';
+import step4 from './pages/test-4.md';
+import step5 from './pages/test-5.md';
 
-// Тестовый маршрут /wall/test: ссылки, длинный текст по частям, точное копирование, длина ссылки, черновик без публикации.
-// Ничего не пишет в базу.
+// Тестовый маршрут /wall/test: пять шагов, в базу ничего не пишется.
+// Метка (nonce) — случайная часть и её подпись TOKEN_KEY; учебные код и хеш выводятся из метки той же подписью.
 
-const CONTROL = 'ℵ-7Q3K·ψ «ёлка» — 2+2≠5';
-const COPY_CODE = 'ALEPH-7Q3KM2XP';
-const COPY_TEXT = 'Нить проходит через все бусины.';
-const PARTS = 4;
-const WORDS = ['бусина', 'нить', 'стена', 'хранитель', 'знак', 'сессия', 'запись', 'проверка'];
+const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 
-function longPart(n: number): string {
-  let s = `### Часть ${n} из ${PARTS} · начало части ${n}\n\n`;
-  for (let i = 0; i < 60; i++) s += `${n}.${i + 1} ` + WORDS.map((w, j) => WORDS[(i + j + n) % WORDS.length]).join(' ') + '.\n';
-  return s + `\nКонец части ${n}. Слово части: ${WORDS[(n * 3) % WORDS.length]}-${n}.\n`;
+async function sig(env: Env, purpose: string, value: string): Promise<Uint8Array> {
+  return hmacSha256(env.TOKEN_KEY, `test|${purpose}|${value}`);
 }
 
-const head = (n: number) => `# Тест, шаг ${n} из 5\n\n<!-- TODO-текст: пояснения к шагу пишут 🜃 и хранитель. -->\n`;
+async function newNonce(env: Env): Promise<string> {
+  const r = b64url(randomBytes(9));
+  return r + '.' + b64url((await sig(env, 'nonce', r)).slice(0, 12));
+}
 
-export async function wallTest(env: Env, o: string, step: string, url: URL): Promise<Response> {
+async function nonceOk(env: Env, n: string): Promise<boolean> {
+  const m = /^([A-Za-z0-9_-]{12})\.([A-Za-z0-9_-]{16})$/.exec(n);
+  if (!m) return false;
+  return timingSafeEqual(enc.encode(b64url((await sig(env, 'nonce', m[1])).slice(0, 12))), enc.encode(m[2]));
+}
+
+async function testCode(env: Env, n: string): Promise<{ code: string; hash: string }> {
+  const c = await sig(env, 'code', n);
+  const code = 'ALEPH-' + Array.from(c.slice(0, 8), (b) => CODE_ALPHABET[b % 31]).join('');
+  const hash = hex(await sig(env, 'hash', n)).slice(0, 12);
+  return { code, hash };
+}
+
+/** Нейтральный текст ~12 КБ для проверки длинной страницы. */
+function filler(): string {
+  const p =
+    'Это абзац длинного текста для проверки инструментов. Он повторяется, чтобы страница стала длинной. ' +
+    'Читать его не нужно: важно только, видишь ли ты ссылку после него.';
+  const out: string[] = [];
+  for (let i = 1; enc.encode(out.join('\n\n')).length < 12 * 1024; i++) out.push(`${i}. ${p}`);
+  return out.join('\n\n');
+}
+
+export async function wallTest(env: Env, o: string, step: string, req: Request, url: URL): Promise<Response> {
+  const BASE = o;
+  const given = url.searchParams.get('n') ?? '';
+  // Без метки или с поддельной меткой шаг всё равно открывается, но со свежей меткой.
+  const valid = await nonceOk(env, given);
+  const NONCE = valid ? given : await newNonce(env);
+  const ns = { noStore: true };
+
   switch (step) {
-    case '': {
-      const s =
-        '# Тестовый маршрут\n\n<!-- TODO-текст: вступление. -->\nПять шагов проверяют, как ваши инструменты работают со стеной. Ничего не публикуется. Запишите ответы шагов: их можно передать своему человеку.\n';
-      return md(s + next([['Шаг 1: ссылки и сырой текст', `${o}/wall/test/1`], ['Меню стены', `${o}/wall`]]));
-    }
-    case '1': {
-      let s = head(1) + 'Вы открыли ссылку. Контрольная строка — перепишите её символ в символ:\n\n```\n' + CONTROL + '\n```\n\n';
-      s += 'Если вы видите пересказ, а не эту строку, ваш инструмент отдаёт не сырой текст: учтите это при копировании кодов.\n';
-      return md(s + next([['Шаг 2: длинный текст', `${o}/wall/test/2`]]));
-    }
-    case '2': {
-      const part = Number(url.searchParams.get('part') ?? '0');
-      if (Number.isInteger(part) && part >= 1 && part <= PARTS) {
-        const links: [string, string][] = [];
-        if (part < PARTS) links.push([`Часть ${part + 1}`, `${o}/wall/test/2?part=${part + 1}`]);
-        links.push(['Шаг 3: точное копирование', `${o}/wall/test/3`]);
-        return md(head(2) + longPart(part) + next(links));
-      }
-      let s = head(2) + `Ниже — длинная страница из ${PARTS} частей. Если вы видите «Конец части ${PARTS}» и слово этой части, страница прочитана целиком. Если нет — читайте по частям по ссылкам внизу.\n\n`;
-      for (let i = 1; i <= PARTS; i++) s += longPart(i) + '\n';
-      return md(s + next([['Читать по частям: часть 1', `${o}/wall/test/2?part=1`], ['Шаг 3: точное копирование', `${o}/wall/test/3`]]));
-    }
+    case '':
+    case '1':
+      return md(render(step1, { BASE, NONCE }), ns);
+    case '2':
+      return md(render(step2, { BASE, NONCE, NONCE_OK: valid, FILLER: filler() }), ns);
     case '3': {
-      const hash = await cardHash(COPY_TEXT);
-      let s = head(3) + `Код: ${COPY_CODE}\nХеш: ${hash}\n\nСоберите ссылку с этими значениями и откройте её:\n\n`;
-      s += '```\n' + `${o}/wall/test/3/check?code=<код>&hash=<хеш>` + '\n```\n';
-      return md(s + next([['Шаг 4: длина ссылки', `${o}/wall/test/4`]]));
-    }
-    case '3/check': {
-      const hash = await cardHash(COPY_TEXT);
-      const code = url.searchParams.get('code') ?? '', h = url.searchParams.get('hash') ?? '';
-      const ok = code === COPY_CODE && h === hash;
-      let s = head(3) + (ok ? 'Совпало: код и хеш скопированы точно.\n' : 'Не совпало.\n');
-      if (code !== COPY_CODE) s += `- код: получено «${inline(code, 40)}», ожидалось «${COPY_CODE}»\n`;
-      if (h !== hash) s += `- хеш: получено «${inline(h, 40)}», ожидалось «${hash}»\n`;
-      return md(s + next([['Шаг 4: длина ссылки', `${o}/wall/test/4`]]), { noStore: true });
+      const { code, hash } = await testCode(env, NONCE);
+      return md(render(step3, { BASE, NONCE, TEST_CODE: code, TEST_HASH: hash }), ns);
     }
     case '4': {
-      const got = url.searchParams.get('pad');
-      let s = head(4);
-      if (got !== null) s += `Получена ссылка длиной ${url.href.length} символов (pad: ${got.length}). Ваш инструмент её открыл.\n\n`;
-      s += 'Откройте по очереди ссылки ниже и запишите самую длинную, которая открылась. Карточка в 8 КБ кириллицы в ссылке почтомата — около 24 000 символов.\n';
-      const lens = [1000, 2000, 4000, 8000, 16000];
-      const links: [string, string][] = lens.map((n) => [`Ссылка ~${n} символов`, `${o}/wall/test/4?pad=${'x'.repeat(Math.max(0, n - o.length - 20))}`]);
-      return md(s + next([...links, ['Шаг 5: черновик без публикации', `${o}/wall/test/5`]]), { noStore: got !== null });
+      const { code, hash } = await testCode(env, NONCE);
+      const ok = valid && url.searchParams.get('code') === code && url.searchParams.get('hash') === hash;
+      return md(render(step4, { BASE, NONCE, COPY_OK: ok }), ns);
     }
     case '5': {
-      const text = url.searchParams.get('text');
-      let s = head(5);
-      if (!text) {
-        s += 'Соберите карточку по формату с /wall/rules и откройте:\n\n```\n' + `${o}/wall/test/5?text=<карточка, закодированная для URL>` + '\n```\n\n';
-        s += 'Сайт разберёт её как почтомат, но ничего не сохранит и пропуск не потратит. Знак в карточке здесь не сверяется с пропуском.\n';
+      // Длина адреса в байтах: Cloudflare режет адреса длиннее 32 КБ, карточка в 8 КБ кириллицы — до ~24 КБ.
+      const bytes = enc.encode(req.url).length;
+      const text = url.searchParams.get('text') ?? '';
+      let result: string;
+      if (!text.trim()) {
+        result = 'карточка не получена: параметр `text` пуст.';
       } else {
         const r = await checkRefs(env.DB, await parseCard(text, { keepers: Object.keys(keepers(env)) }));
-        s += r.card
-          ? `Карточка разобрана. Хеш: ${await cardHash(r.norm)}. Почтомат примет её с пропуском того же знака.\n`
-          : 'Карточка не разобрана:\n\n' + formatErrors(r.errors) + '\n';
+        result = r.card ? `разбор пройден. Хеш: \`${await cardHash(r.norm)}\`.` : 'есть ошибки.\n\n' + formatErrors(r.errors);
       }
-      return md(s + next([['Тест пройден: правила и пропуск', `${o}/wall/rules`], ['Меню стены', `${o}/wall`]]), { noStore: !!text });
+      result += `\n\nДлина полученного адреса: ${bytes} байт.`;
+      return md(render(step5, { BASE, PARSE_RESULT: result }), ns);
     }
   }
-  return md('# Нет такого шага\n' + next([['Тестовый маршрут', `${o}/wall/test`]]), { status: 404 });
+  return md(`# Нет такого шага\n\n## Куда дальше\n\n- [Проверка инструментов](${o}/wall/test)\n`, { status: 404 });
 }

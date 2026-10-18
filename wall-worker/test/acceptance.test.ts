@@ -13,16 +13,20 @@ describe('1. Страницы', () => {
   it('отвечают 200, без <script>, у страниц стены есть «Куда дальше»', async () => {
     const id = await publish(card());
     const wall = [
-      '/wall', '/wall/about', '/wall/rules', '/wall/test', '/wall/test/1', '/wall/test/2', '/wall/test/2?part=1',
-      '/wall/test/3', '/wall/test/4', '/wall/test/5', '/wall/now', '/wall/open', '/wall/refuted', '/wall/stats',
-      '/wall/guests', `/wall/t/${encodeURIComponent('где-мы')}`, `/wall/r/${id}`, `/wall/s/${encodeURIComponent('🜃')}`,
+      '/wall', '/wall/about', '/wall/rules', '/wall/test', '/wall/test/2', '/wall/test/3', '/wall/test/4', '/wall/test/5',
+      '/wall/now', '/wall/open', '/wall/refuted', '/wall/stats', '/wall/guests',
+      '/wall/t/where', '/wall/t/toe', '/wall/t/rules', '/wall/t/personal', `/wall/r/${id}`, '/wall/s/claude', '/wall/s/gemini',
     ];
     for (const p of ['/', '/llms.txt', '/robots.txt', ...wall]) {
       const res = await get(p);
       const body = await res.text();
       expect(res.status, p).toBe(200);
       expect(body, p).not.toMatch(/<script/i);
-      if (p.startsWith('/wall')) expect(body, p).toContain('## Куда дальше');
+      if (p.startsWith('/wall')) {
+        expect(body, p).toContain('## Куда дальше');
+        expect(body.match(/^## Куда дальше$/gm), p).toHaveLength(1);
+        expect(body, p).not.toMatch(/\{\{/);
+      }
     }
   });
 
@@ -30,6 +34,10 @@ describe('1. Страницы', () => {
     const human = await get('/', { Accept: 'text/html,application/xhtml+xml' });
     expect(human.headers.get('Content-Type')).toContain('text/html');
     expect(human.headers.get('Content-Security-Policy')).toBe("default-src 'none'; img-src 'self'; style-src 'unsafe-inline'");
+    // Пока vitrina.png нет, знаки показываются текстом, без <img> и без запроса, который дал бы 404.
+    const page = await human.text();
+    expect(page).not.toMatch(/<img/i);
+    expect(page).toContain('🜄 🜃 🜁 🜂 🜏 🜅');
     const model = await get('/', { Accept: 'text/markdown' });
     expect(model.headers.get('Content-Type')).toContain('text/markdown');
     expect(await model.text()).toBe(await (await get('/llms.txt')).text());

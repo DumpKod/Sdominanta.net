@@ -20,7 +20,9 @@ const KEYS = [
 const CHECK_KEYS = ['ПРОВЕРЯЕТ', 'МЕТОД', 'ДАННЫЕ', 'РЕЗУЛЬТАТ'];
 
 const ID_RE = /^R[1-9]\d{0,8}$/;
-const THREAD_RE = /^(где-мы|правила|личная|toe\/[a-zа-яё0-9-]{1,40})$/;
+const THREAD_RE = /^(where|rules|personal|toe\/[a-z0-9-]{1,40})$/;
+/** Русские названия нитей из ТЗ — синонимы латинских. */
+const THREAD_SYNONYMS: Record<string, string> = { 'где-мы': 'where', 'правила': 'rules', 'личная': 'personal' };
 
 export interface Card {
   kind: (typeof KINDS)[number];
@@ -28,7 +30,7 @@ export interface Card {
   model: string;
   session: string;
   keeper: string;
-  thread: string;
+  thread: string; // латиницей: where | rules | personal | toe/<тема>
   domain: string;
   status: string;
   readBefore: string; // ничего | заголовки | полные:[R1,R2]
@@ -180,15 +182,15 @@ export async function parseCard(raw: string, opts: ParseOpts): Promise<ParseResu
 
   // НИТЬ
   need('НИТЬ');
-  const thread = get('НИТЬ');
+  const thread = THREAD_SYNONYMS[get('НИТЬ')] ?? get('НИТЬ');
   if (thread && !THREAD_RE.test(thread)) {
-    errors.push({ line: lineOf('НИТЬ'), msg: 'НИТЬ: где-мы, toe/<тема> (строчные буквы, цифры, дефис), правила или личная' });
-  } else if (kind === 'личная' && thread !== 'личная') {
-    errors.push({ line: lineOf('НИТЬ'), msg: 'для ТИП: личная — НИТЬ: личная' });
-  } else if (kind === 'правило' && thread !== 'правила') {
-    errors.push({ line: lineOf('НИТЬ'), msg: 'для ТИП: правило — НИТЬ: правила' });
-  } else if (thread === 'личная' && kind && kind !== 'личная') {
-    errors.push({ line: lineOf('НИТЬ'), msg: 'в НИТЬ: личная пишутся только записи с ТИП: личная' });
+    errors.push({ line: lineOf('НИТЬ'), msg: 'НИТЬ: where, toe/<тема> (латинские строчные буквы, цифры, дефис), rules или personal' });
+  } else if (kind === 'личная' && thread !== 'personal') {
+    errors.push({ line: lineOf('НИТЬ'), msg: 'для ТИП: личная — НИТЬ: personal' });
+  } else if (kind === 'правило' && thread !== 'rules') {
+    errors.push({ line: lineOf('НИТЬ'), msg: 'для ТИП: правило — НИТЬ: rules' });
+  } else if (thread === 'personal' && kind && kind !== 'личная') {
+    errors.push({ line: lineOf('НИТЬ'), msg: 'в НИТЬ: personal пишутся только записи с ТИП: личная' });
   }
 
   // ОБЛАСТЬ
