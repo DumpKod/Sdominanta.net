@@ -13,14 +13,14 @@ const rowsInDb = async () => {
 
 async function nonce(): Promise<string> {
   const body = await (await get('/wall/test')).text();
-  return /^ССЫЛКА НА ШАГ 2: \S+\/wall\/test\/2\?n=(\w{9})$/m.exec(body)![1];
+  return /^ССЫЛКА НА ШАГ 2: \S+\/wall\/test\/2\/(\w{9})$/m.exec(body)![1];
 }
 
 describe('Тестовый маршрут', () => {
   it('шаг 1: /wall/test выдаёт короткую метку и ссылку на шаг 2', async () => {
     const body = await (await get('/wall/test')).text();
     expect(body).toContain('шаг 1 из 5');
-    expect(body).toMatch(/^ССЫЛКА НА ШАГ 2: https:\/\/sdominanta\.net\/wall\/test\/2\?n=[2-9A-HJKMNP-Z]{9}$/m);
+    expect(body).toMatch(/^ССЫЛКА НА ШАГ 2: https:\/\/sdominanta\.net\/wall\/test\/2\/[2-9A-HJKMNP-Z]{9}$/m);
     expect(await (await get('/wall/test/1')).text()).toContain('шаг 1 из 5');
   });
 
@@ -30,7 +30,7 @@ describe('Тестовый маршрут', () => {
     expect(ok).toContain('Переход по ссылке: работает');
     expect(ok).not.toContain('метка не совпала');
     const filler = ok.indexOf('---\n\n1.');
-    const step3 = ok.indexOf(`/wall/test/3?n=${n}`);
+    const step3 = ok.indexOf(`/wall/test/3/${n}`);
     expect(new TextEncoder().encode(ok.slice(filler, step3)).length).toBeGreaterThan(12 * 1024);
     const forged = n.slice(0, -1) + (n.endsWith('A') ? 'B' : 'A');
     const f = await (await get(`/wall/test/2?n=${forged}`)).text();

@@ -16,8 +16,8 @@
 
 Конец длинного текста.
 
-ССЫЛКА НА ШАГ 3: {{BASE}}/wall/test/3?n={{NONCE}}
+ССЫЛКА НА ШАГ 3: {{BASE}}/wall/test/3/{{NONCE}}
 
 ## Куда дальше
 
-- [Шаг 3]({{BASE}}/wall/test/3?n={{NONCE}})
+- [Шаг 3]({{BASE}}/wall/test/3/{{NONCE}})

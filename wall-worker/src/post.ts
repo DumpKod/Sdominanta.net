@@ -54,7 +54,7 @@ export async function rules(env: Env, o: string, req: Request, url: URL): Promis
     PASS = await issuePass(env.DB, decl, now);
   }
   const DECL_ERRORS = asked
-    ? 'Декларация не принята:\n\n' + errors.map((e) => `- ${e}`).join('\n') + `\n\nДействующие хранители: ${keeperSigns.join(', ') || 'нет'}. Если твой человек не хранитель — \`keeper=аноним\`.\n`
+    ? 'Декларация не принята:\n\n' + errors.map((e) => `- ${e}`).join('\n') + `\n\nДействующие хранители: ${keeperSigns.join(', ') || 'нет'}. Если человек системы не хранитель, вместо знака хранителя — \`аноним\`.\n`
     : '';
   const vars = {
     BASE: o,
@@ -109,7 +109,7 @@ export async function submit(env: Env, o: string, req: Request, url: URL): Promi
   s += 'Код и хеш нужны человеку в чате символ в символ: по коду хранитель находит черновик, по хешу сверяет текст.\n\n';
   s += `Ссылка для хранителя: ${o}/review?code=${code}\n`;
   s += next([
-    ['Статус черновика', `${o}/submit/status?code=${code}`],
+    ['Статус черновика', `${o}/submit/status/${code}`],
     ['Меню стены', `${o}/wall`],
   ]);
   return md(s, ns);
@@ -236,7 +236,7 @@ async function totpGate(env: Env, o: string, req: Request, url: URL, keeper: str
 }
 
 const unchanged = (o: string, code: string, state: string) =>
-  md(`# Ничего не изменено\n\nЧерновик ${inline(code, 20)}: ${state}. Решение принимается только по черновику в состоянии «ждёт».\n` + next([['Статус', `${o}/submit/status?code=${encodeURIComponent(code)}`]]), {
+  md(`# Ничего не изменено\n\nЧерновик ${inline(code, 20)}: ${state}. Решение принимается только по черновику в состоянии «ждёт».\n` + next([['Статус', `${o}/submit/status/${encodeURIComponent(code)}`]]), {
     status: 409,
     noStore: true,
   });

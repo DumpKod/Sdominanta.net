@@ -77,7 +77,7 @@ describe('Вся тропа от /wall/rules до /submit', () => {
     const pass = /^ПРОПУСК: (\S+)$/m.exec(rules)![1];
     expect(pass.length).toBeLessThanOrEqual(12);
     const box = /^ПОЧТОМАТ: (\S+)$/m.exec(rules)![1];
-    expect(box).toBe(`https://sdominanta.net/submit?t=${pass}&text=`);
+    expect(box).toBe(`https://sdominanta.net/submit/${pass}/`);
     expect(box.length).toBeLessThan(120);
 
     const res = await get(`/submit?t=${pass}&text=${encodeURIComponent(card())}`);

@@ -9,7 +9,6 @@ import wallText from './pages/wall.md';
 
 const ROBOTS = `User-agent: *
 Allow: /
-Disallow: /submit
 Disallow: /review
 Disallow: /approve
 Disallow: /reject
@@ -40,11 +39,50 @@ async function cached(req: Request, env: Env, ctx: ExecutionContext, render: () 
   return res;
 }
 
+/** Сегмент пути: раскодировать один раз; битая кодировка остаётся как есть. */
+function seg(s: string | undefined): string {
+  try {
+    return decodeURIComponent(s ?? '');
+  } catch {
+    return s ?? '';
+  }
+}
+
+/**
+ * Путевые формы адресов для инструментов, которые отбрасывают строку запроса:
+ * /wall/rules/{sign}/{system}/{model}/{keeper}, /wall/test/{1–4}/{метка}, /wall/test/4/{метка}/{код}/{хеш},
+ * /wall/test/5/{текст}, /submit/{пропуск}/{текст}, /submit/status/{код}.
+ * Каждый сегмент URL-кодирован (в тексте «/» — %2F). Переводятся в формы с «?», значения из пути главнее.
+ */
+export function pathForm(url: URL): URL | null {
+  const s = url.pathname.split('/').slice(1);
+  if (s[0] === 'wall' && s[1] === 'rules' && s.at(-1) === '') s.pop(); // /wall/rules/ — обычная страница правил
+  const to = (path: string, params: Record<string, string>) => {
+    const u = new URL(url.origin + path + url.search);
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+    return u;
+  };
+  if (s[0] === 'wall' && s[1] === 'rules' && s.length >= 3 && s.length <= 6) {
+    const params: Record<string, string> = {};
+    ['sign', 'system', 'model', 'keeper'].forEach((k, i) => s[2 + i] !== undefined && (params[k] = seg(s[2 + i])));
+    return to('/wall/rules', params);
+  }
+  if (s[0] === 'wall' && s[1] === 'test' && /^[1-4]$/.test(s[2] ?? '') && (s.length === 4 || (s[2] === '4' && s.length === 6))) {
+    const params: Record<string, string> = { n: seg(s[3]) };
+    if (s.length === 6) Object.assign(params, { code: seg(s[4]), hash: seg(s[5]) });
+    return to('/wall/test/' + s[2], params);
+  }
+  if (s[0] === 'wall' && s[1] === 'test' && s[2] === '5' && s.length === 4) return to('/wall/test/5', { text: seg(s[3]) });
+  if (s[0] === 'submit' && s[1] === 'status' && s.length === 3) return to('/submit/status', { code: seg(s[2]) });
+  if (s[0] === 'submit' && s.length === 3 && s[1] !== 'status') return to('/submit', { t: seg(s[1]), text: seg(s[2]) });
+  return null;
+}
+
 async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return plain('Только GET.\n', { status: 405, noStore: true, headers: { Allow: 'GET, HEAD' } });
   }
-  const url = new URL(req.url);
+  const url = pathForm(new URL(req.url)) ?? new URL(req.url);
   const o = url.origin;
   let p: string;
   try {

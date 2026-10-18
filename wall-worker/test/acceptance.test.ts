@@ -42,9 +42,9 @@ describe('1. Страницы', () => {
     expect(await model.text()).toBe(await (await get('/llms.txt')).text());
   });
 
-  it('robots.txt закрывает почтомат и хранителя', async () => {
+  it('robots.txt закрывает только хранителя (почтомат открыт: вежливые инструменты соблюдают Disallow)', async () => {
     const r = await (await get('/robots.txt')).text();
-    for (const p of ['/submit', '/review', '/approve', '/reject', '/keeper']) expect(r).toContain(`Disallow: ${p}`);
+    for (const p of ['/review', '/approve', '/reject', '/keeper']) expect(r).toContain(`Disallow: ${p}`);
   });
 });
 
