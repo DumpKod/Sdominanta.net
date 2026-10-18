@@ -200,7 +200,6 @@ describe('Редактор и версии сцены', () => {
       [tiny({ strokes: [{ r: 1, pts: [['1', 2]] }] }), /pts/],
       [tiny({ strokes: [{ r: 1e9, pts: [[1, 2]] }] }), /\.r: 0\.1…5000/],
       [tiny({ strokes: [{ r: 1, pts: [[1e9, 2]] }] }), /pts/],
-      [tiny({ strokes: [] }), /нужны жилы/],
       [tiny({ place: { x: 0.5, y: 0.5, k: 1 } }), /лишнее поле «place»/],
       [tiny({ z: 1000 }), /\.z/],
       [tiny({ style: { tact: 9 } }), /style\.tact: 0…3/],
@@ -211,6 +210,8 @@ describe('Редактор и версии сцены', () => {
       [JSON.stringify({ v: 1, objects: [] }), /v: ожидается 2/],
       [JSON.stringify({ v: 2, objects: [{ id: 'a', label: 'a', strokes: [{ r: 1, pts: Array(2001).fill([1, 1]) }] }] }), /pts/],
     ];
+    // Пустой объект (без жил и области) хранится: он есть в ссылках, на холсте не рисуется, пока его не нарисуют.
+    expect(validateScene(tiny({ strokes: [] })).ok).toBe(true);
     for (const [json, re] of bad) {
       const v = validateScene(json);
       expect(v.ok, json.slice(0, 80)).toBe(false);

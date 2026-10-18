@@ -128,7 +128,6 @@ export function validateScene(raw: string): Check {
         }
       }
     }
-    if (Array.isArray(o.strokes) && !o.strokes.length && o.area === undefined) errors.push(`${at}: нужны жилы (strokes) или область (area)`);
   });
   if (errors.length) return { ok: false, errors: errors.slice(0, 20) };
   return { ok: true, scene: j as unknown as Scene };
