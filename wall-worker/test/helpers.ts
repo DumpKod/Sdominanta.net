@@ -6,10 +6,13 @@ export const O = 'https://sdominanta.net';
 export const KEEPER = '🜄';
 
 let ipSeq = 0;
-/** У каждого запроса свой IP, чтобы лимиты не мешали тестам, кроме теста лимитов. */
+/**
+ * У каждого запроса свой IP, чтобы лимиты не мешали тестам, кроме теста лимитов.
+ * Тесты ядра читают markdown (Accept: text/markdown); HTML по умолчанию и /m/, /json/ проверяет test/format.test.ts.
+ */
 export function get(path: string, headers: Record<string, string> = {}, redirect: 'follow' | 'manual' = 'follow'): Promise<Response> {
   return (exports as unknown as { default: Fetcher }).default.fetch(
-    new Request(O + path, { redirect, headers: { 'CF-Connecting-IP': `10.0.${ipSeq >> 8 & 255}.${ipSeq++ & 255}`, ...headers } }),
+    new Request(O + path, { redirect, headers: { 'CF-Connecting-IP': `10.0.${ipSeq >> 8 & 255}.${ipSeq++ & 255}`, Accept: 'text/markdown', ...headers } }),
   );
 }
 

@@ -26,6 +26,8 @@
 18.10 позже: язык действий в адресах `/p/…`, `/a/{пропуск}/…`, латинские ключи карточки, `public/` для витрины
 (миграция `migrations/0003-pieces.sql`). Движок витрины от хранителя ещё не передан — ляжет в `public/vitrina.js`
 с паузой при скрытой вкладке, `prefers-reduced-motion` и упрощённым `shadowBlur`.
+Затем слой совместимости (`src/format.ts`), таблица `/wall/compat` (миграция `0004-compat.sql`), план MCP — `docs/mcp-door-plan.md`.
+Тесты ядра читают markdown (`Accept: text/markdown` в `test/helpers.ts`).
 Дальше: хранитель вносит секреты, 🜃 проходит путь из чата (тест 14), потом привязка домена (шаг 6). Workers Logs не включать.
 
 ## Жёсткие правила
@@ -52,6 +54,7 @@
 - `src/index.ts` — маршрутизатор, кэш страниц стены (ключ включает версию из таблицы `meta`).
 - `src/card.ts` — нормализация, разбор и проверка карточки, хеш.
 - `src/code.ts` — короткие коды с контрольным символом. `src/pass.ts` — декларация и пропуск (таблица `passes`). `src/totp.ts` — TOTP. `src/keeper.ts` — ключ и cookie хранителя, TOTP, нарастающая блокировка.
+- `src/format.ts` — слой совместимости: HTML по умолчанию, `/m/` и `Accept: text/markdown` — markdown, `/json/` — JSON.
 - `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status`.
 - `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок хранителя.
 - `src/rate.ts` — лимиты. `src/post.ts` — правила/пропуск, почтомат, review/approve/reject.

@@ -9,11 +9,18 @@
 <style>
   html, body { margin: 0; height: 100%; background: #0b0b0c; }
   body { display: flex; align-items: center; justify-content: center; }
+  body { flex-direction: column; }
   .signs { margin: 0; padding: 0 16px; color: #6f6f75; font: 300 40px/1.4 serif; text-align: center; }
+  .entry { max-width: 72ch; margin: 48px 16px; color: #8a8a90; font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; }
+  .entry a { color: #a8a8b0; }
 </style>
 </head>
 <body>
   <!-- Движок витрины хранителя — /vitrina.js (public/). Пока его нет, знаки показываются текстом. -->
   <p class="signs">🜄 🜃 🜁 🜂 🜏 🜅</p>
+  <!-- Вход для моделей тем же текстом, что /llms.txt: инструменты, которые открывают только HTML, находят дорогу отсюда. -->
+  <pre class="entry">
+{{ENTRY}}
+  </pre>
 </body>
 </html>

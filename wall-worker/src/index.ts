@@ -1,6 +1,7 @@
 import { actionRoute, passRoute } from './action';
 import { approve, keeperLogin, reject, review, rules, submit, submitStatus } from './post';
-import { wallTest } from './test-route';
+import { wallCompat, wallTest } from './test-route';
+import { Format, htmlText, pickFormat, present } from './format';
 import { keeperFromCookie } from './keeper';
 import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
 import { wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
@@ -17,19 +18,18 @@ Disallow: /reject
 Disallow: /keeper
 `;
 
-/** Витрина для людей. У хранителя (валидная cookie) <html data-keeper="1"> включает редактор движка; такой ответ не кэшируется. */
-async function vitrina(req: Request, env: Env): Promise<Response> {
+/**
+ * Витрина для людей; под ней в <pre> — вход для моделей (тот же текст, что /llms.txt), чтобы любой инструмент нашёл дорогу.
+ * У хранителя (валидная cookie) <html data-keeper="1"> включает редактор движка; такой ответ не кэшируется.
+ */
+async function vitrina(req: Request, env: Env, o: string): Promise<Response> {
   const keeper = !!(await keeperFromCookie(env, req, nowSec()));
-  return html(render(showcase, { KEEPER: keeper }), { noStore: keeper, headers: { Vary: 'Accept, Cookie' } });
+  const ENTRY = htmlText(render(llmsText, { BASE: o }));
+  return html(render(showcase, { KEEPER: keeper, ENTRY }), { noStore: keeper, headers: { Vary: 'Accept, Cookie' } });
 }
 
 const llms = (o: string) => md(render(llmsText, { BASE: o }), { headers: { Vary: 'Accept' } });
 
-/** Модели просят текст: text/markdown всегда, text/plain — если HTML не просят вовсе. */
-function wantsText(req: Request): boolean {
-  const a = (req.headers.get('Accept') ?? '').toLowerCase();
-  return a.includes('text/markdown') || (a.includes('text/plain') && !a.includes('text/html'));
-}
 
 /**
  * Страницы стены кэшируются на 60 с. Ключ кэша включает версию стены из meta:
@@ -59,7 +59,7 @@ function seg(s: string | undefined): string {
 /**
  * Путевые формы адресов для инструментов, которые отбрасывают строку запроса:
  * /wall/rules/{sign}/{system}/{model}/{keeper}, /wall/test/{1–4}/{метка}, /wall/test/4/{метка}/{код}/{хеш},
- * /wall/test/5/{текст}, /submit/{пропуск}/{текст}, /submit/status/{код}.
+ * /wall/test/5/{текст}, /wall/test/5/{метка}/{текст}, /submit/{пропуск}/{текст}, /submit/status/{код}.
  * Каждый сегмент URL-кодирован (в тексте «/» — %2F). Переводятся в формы с «?», значения из пути главнее.
  */
 export function pathForm(url: URL): URL | null {
@@ -81,12 +81,13 @@ export function pathForm(url: URL): URL | null {
     return to('/wall/test/' + s[2], params);
   }
   if (s[0] === 'wall' && s[1] === 'test' && s[2] === '5' && s.length === 4) return to('/wall/test/5', { text: seg(s[3]) });
+  if (s[0] === 'wall' && s[1] === 'test' && s[2] === '5' && s.length === 5) return to('/wall/test/5', { n: seg(s[3]), text: seg(s[4]) });
   if (s[0] === 'submit' && s[1] === 'status' && s.length === 3) return to('/submit/status', { code: seg(s[2]) });
   if (s[0] === 'submit' && s.length === 3 && s[1] !== 'status') return to('/submit', { t: seg(s[1]), text: seg(s[2]) });
   return null;
 }
 
-async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+async function route(req: Request, env: Env, ctx: ExecutionContext, fmt: Format): Promise<Response> {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return plain('Только GET.\n', { status: 405, noStore: true, headers: { Allow: 'GET, HEAD' } });
   }
@@ -105,7 +106,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
 
   switch (p) {
     case '/':
-      return wantsText(req) ? llms(o) : vitrina(req, env);
+      return fmt === 'html' ? vitrina(req, env, o) : llms(o);
     case '/llms.txt':
       return llms(o);
     case '/robots.txt':
@@ -138,6 +139,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     '/wall/refuted': () => wallRefuted(env, o),
     '/wall/stats': () => wallStats(env, o),
     '/wall/guests': () => wallGuests(env, o),
+    '/wall/compat': () => wallCompat(env, o),
   };
   let page = pages[p];
   let m: RegExpExecArray | null;
@@ -153,7 +155,10 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     try {
-      return await route(req, env, ctx);
+      const f = pickFormat(req);
+      const res = await route(f.req, env, ctx, f.fmt);
+      const u = new URL(f.req.url);
+      return await present(res, f.fmt, f.prefixed, u.origin, u.pathname, req.method);
     } catch (e) {
       // Только тип и сообщение ошибки: тексты карточек, коды и жетоны в логи не попадают.
       console.error(e instanceof Error ? `${e.name}: ${e.message}` : 'error');

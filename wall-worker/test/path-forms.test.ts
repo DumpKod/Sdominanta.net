@@ -77,7 +77,8 @@ describe('Тестовый маршрут', () => {
     expect(await (await get(`/wall/test/4?n=${n}&code=${code}&hash=${hash}`)).text()).toContain('Точное копирование: работает');
     expect(await (await get(`/wall/test/4/${n}/${code}/000000000000`)).text()).toContain('не совпало');
     const s4 = await (await get(`/wall/test/4/${n}/${code}/${hash}`)).text();
-    expect(s4).toContain('ССЫЛКА НА ШАГ 5: https://sdominanta.net/wall/test/5/\n');
+    expect(s4).toContain(`ССЫЛКА НА ШАГ 5: https://sdominanta.net/wall/test/5/${n}/\n`);
+    expect(await (await get(`/wall/test/5/${n}/${enc(card())}`)).text()).toContain('разбор пройден');
     expect(await (await get(`/wall/test/5/${enc(card())}`)).text()).toContain('разбор пройден');
     expect(await (await get(`/wall/test/5?text=${enc(card())}`)).text()).toContain('разбор пройден');
   });

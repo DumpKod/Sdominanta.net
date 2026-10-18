@@ -55,6 +55,10 @@ CREATE INDEX pieces_pass ON pieces (pass);
 CREATE TABLE piece_parts (id TEXT, n INTEGER, body TEXT NOT NULL, PRIMARY KEY (id, n));
 -- Метки тестового маршрута /wall/test: 8 символов + контрольный, живут 2 часа.
 CREATE TABLE test_marks (mark TEXT PRIMARY KEY, exp INTEGER NOT NULL);
+-- Совместимость сред: проход /wall/test/{знак} — метка, знак системы, пройденные шаги битами (1 — шаг 1, 2 — шаг 2, 4, 8, 16),
+-- день прохода. Ни людей, ни IP; строки не удаляются.
+CREATE TABLE compat (mark TEXT PRIMARY KEY, sign TEXT NOT NULL, steps INTEGER NOT NULL DEFAULT 1, day INTEGER NOT NULL);
+CREATE INDEX compat_sign ON compat (sign);
 CREATE TABLE otp_used (keeper TEXT, step INTEGER, PRIMARY KEY (keeper, step));
 -- Строки только для существующих хранителей. fails — неверные коды подряд; level — сколько блокировок было
 -- с последнего верного кода (каждая следующая вдвое длиннее); day_* — неверные коды за текущие сутки.
