@@ -61,3 +61,21 @@ html:not(.js) body { overflow: auto; }
 .kp-out { margin-left: auto; color: #e2e8f0; }
 .kp-x { font: inherit; color: #94a3b8; background: none; border: 0; padding: 0 2px; cursor: pointer; }
 .kp-range { width: 100%; accent-color: #22d3ee; }
+
+/* Музыка: подпись трека и ▶ внизу слева. Автор, трек и SoundCloud — всегда на виду и ссылками. */
+.music {
+  position: fixed; left: 14px; bottom: 14px; z-index: 1; max-width: calc(100vw - 80px);
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px;
+  border: 1px solid rgba(0, 242, 254, 0.25); border-radius: 19px; background: rgba(2, 8, 20, 0.7);
+  color: #94a3b8; font: 12px/1.3 ui-monospace, monospace;
+}
+.music a { color: #a5f3fc; text-decoration: none; }
+.music a:hover, .music a:focus-visible { text-decoration: underline; }
+.music-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-play {
+  flex: none; width: 26px; height: 26px; padding: 0; border: 1px solid rgba(0, 242, 254, 0.4); border-radius: 50%;
+  background: rgba(0, 242, 254, 0.1); color: #cffafe; font: 12px/1 system-ui, sans-serif; cursor: pointer;
+}
+.music-play:hover, .music-play:focus-visible { border-color: rgba(0, 242, 254, 0.8); outline: none; }
+.music-note { flex: none; color: #64748b; }
+html:not(.js) .music-play { display: none; }

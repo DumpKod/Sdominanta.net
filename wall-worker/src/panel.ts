@@ -7,6 +7,7 @@ import { bumpVersion } from './post';
 import { jsonResponse, vitrinaPage } from './vitrina';
 import { b64url, clientIp, enc, Env, fmtTime, hmacSha256, html, nowSec, plain, randomBytes, sha256hex, timingSafeEqual } from './util';
 import editorJs from './pages/editor.js.txt';
+import { currentTrack, hasKey, normTrackUrl, resolveTrack, Track } from './music';
 
 // Панель хранителя /k — простой HTML без скриптов.
 // Вход в два слоя, как у старых адресов: cookie ключа (__Host-keeper) → форма с 6 цифрами из аутентификатора →
@@ -88,7 +89,7 @@ function loginForm(csrf: string, note = ''): string {
 
 function header(sign: string, csrf: string): string {
   return (
-    `<div class="row"><a href="/k">Очередь</a><a href="/k/vitrina">Витрина</a><span class="muted">Хранитель ${esc(sign)}</span>` +
+    `<div class="row"><a href="/k">Очередь</a><a href="/k/vitrina">Витрина</a><a href="/k/music">Музыка</a><span class="muted">Хранитель ${esc(sign)}</span>` +
     `<form method="post" action="/k/logout"><input type="hidden" name="csrf" value="${esc(csrf)}"><button type="submit">Выйти</button></form>` +
     `<form method="post" action="/k/logout-all"><input type="hidden" name="csrf" value="${esc(csrf)}"><button type="submit">Выйти везде</button></form></div>`
   );
@@ -175,6 +176,7 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
       return new Response(null, { status: 303, headers: { Location: `${o}/k`, 'Set-Cookie': sessionCookie('', 0), 'Cache-Control': 'no-store' } });
     }
     if (path.startsWith('/vitrina/')) return sceneAction(env, o, req, path, f, me, now, top);
+    if (path.startsWith('/music/')) return musicAction(env, path, f, me, now, top);
     const code = (f.code ?? '').trim();
     const back = `<p><a href="/k">К очереди</a> · <a href="/k/d/${esc(encodeURIComponent(code))}">Черновик</a></p>`;
     if (path === '/approve') {
@@ -216,6 +218,7 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   }
 
   if (path === '/vitrina') return scenesPage(env, top, csrf);
+  if (path === '/music') return musicPage(env, top, csrf);
   const pv = /^\/vitrina\/v\/([1-9]\d{0,8})$/.exec(path);
   if (pv) {
     const row = await sceneRow(env, +pv[1]);
@@ -320,4 +323,67 @@ async function sceneAction(env: Env, o: string, req: Request, path: string, f: R
     return reply(true, ['OK ROLLBACK', `FROM: ${cur.version}`, `TO: ${now2.version || 'встроенная'}`]);
   }
   return reply(false, ['ERR ACTION'], 404);
+}
+
+// ---------- музыка витрины ----------
+
+async function musicPage(env: Env, top: string, csrf: string, note = ''): Promise<Response> {
+  const cur = await currentTrack(env);
+  const rows = (await env.DB.prepare('SELECT * FROM tracks ORDER BY id DESC LIMIT 200').all<Track>()).results;
+  const hidden = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
+  let b = top + '<h1>Музыка витрины</h1>\n';
+  if (note) b += `<p class="warn">${esc(note)}</p>\n`;
+  b += `<p>Сейчас на витрине: ${cur ? `«${esc(cur.title)}» — ${esc(cur.artist)}` : 'тишина'}.` +
+    (cur ? ` <form method="post" action="/k/music/off" style="display:inline">${hidden}<button type="submit">Выключить музыку</button></form>` : '') + '</p>\n';
+  b += `<p class="muted">Посетитель слышит трек только после своего нажатия ▶, по кругу. До нажатия к SoundCloud не уходит ни одного запроса. ` +
+    (hasKey(env) ? 'Ключ API внесён: звук идёт через свой плеер, холст слышит частоты.' : '<span class="warn">Ключ API SoundCloud не внесён (Secrets SC_CLIENT_ID и SC_CLIENT_SECRET): посетителю пока доступна только ссылка на трек.</span>') + '</p>\n';
+  b += `<form method="post" action="/k/music/add" class="row">${hidden}<label>Адрес трека на SoundCloud <input name="url" size="48" placeholder="https://soundcloud.com/автор/трек" required></label><button type="submit">Добавить</button></form>\n`;
+  if (!rows.length) b += '<p>Треков ещё нет.</p>';
+  else {
+    b += '<table><tr><th>Трек</th><th>Автор</th><th></th></tr>\n';
+    for (const t of rows) {
+      const id = `<input type="hidden" name="id" value="${t.id}">`;
+      b += `<tr><td><a href="${esc(t.url)}">${esc(t.title)}</a></td><td><a href="${esc(t.artist_url)}">${esc(t.artist)}</a></td><td class="row">`;
+      b += cur?.id === t.id ? '<span>на витрине</span>' :
+        `<form method="post" action="/k/music/choose">${hidden}${id}<button type="submit">Играть на витрине</button></form>` +
+        `<form method="post" action="/k/music/remove">${hidden}${id}<button type="submit">Убрать</button></form>`;
+      b += '</td></tr>\n';
+    }
+    b += '</table>';
+  }
+  return page('Музыка', b);
+}
+
+/** POST /k/music/add (url) · /choose (id) → трек на витрине · /off → тишина · /remove (id, не текущий). */
+async function musicAction(env: Env, path: string, f: Record<string, string>, me: string, now: number, top: string): Promise<Response> {
+  const back = (note: string, status = 200) => musicPage(env, top, f.csrf ?? '', note).then((r) => (status === 200 ? r : new Response(r.body, { status, headers: r.headers })));
+  if (path === '/music/add') {
+    const url = normTrackUrl(f.url ?? '');
+    if (!url) return back('Нужен адрес трека вида https://soundcloud.com/автор/трек (не плейлист и не профиль).', 400);
+    const t = await resolveTrack(url);
+    if ('error' in t) return back(`Не добавлено: ${t.error}.`, 400);
+    await env.DB.prepare('INSERT INTO tracks (url, sc_id, title, artist, artist_url, added_at, by_sign) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (url) DO UPDATE SET sc_id = excluded.sc_id, title = excluded.title, artist = excluded.artist, artist_url = excluded.artist_url')
+      .bind(t.url, t.sc_id, t.title, t.artist, t.artist_url, now, me).run();
+    return back(`Добавлено: «${t.title}» — ${t.artist}.`);
+  }
+  const id = Number(f.id);
+  if (path === '/music/choose') {
+    if (!Number.isInteger(id) || !(await env.DB.prepare('SELECT 1 AS x FROM tracks WHERE id = ?').bind(id).first())) return back('Такого трека нет.', 404);
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO meta (k, v) VALUES ('music', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v`).bind(String(id)),
+      bumpVersion(env.DB),
+    ]);
+    return back('Трек на витрине.');
+  }
+  if (path === '/music/off') {
+    await env.DB.batch([env.DB.prepare(`DELETE FROM meta WHERE k = 'music'`), bumpVersion(env.DB)]);
+    return back('Музыка выключена.');
+  }
+  if (path === '/music/remove') {
+    const cur = await currentTrack(env);
+    if (cur?.id === id) return back('Трек на витрине: сначала выберите другой или выключите музыку.', 409);
+    await env.DB.prepare('DELETE FROM tracks WHERE id = ?').bind(id).run();
+    return back('Убрано.');
+  }
+  return back('Нет такого действия.', 404);
 }

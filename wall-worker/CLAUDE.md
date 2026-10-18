@@ -36,6 +36,7 @@
 Затем MCP-дверь `POST /mcp` (`src/mcp.ts`, миграция `0008-compat-path.sql`), необязательные PREMISES, зачёт шагов по метке.
 Затем индексация: `/sitemap.xml`, `robots.txt` с группой инструментов моделей, IndexNow пачкой (миграция `0009-indexnow.sql`, cron раз в минуту), сниппеты, `/wall/digest`.
 Затем журнал действий `events` с цепочкой хешей (миграция `0010-events.sql`), `/wall/log`, якорь OpenTimestamps раз в сутки.
+Затем музыка витрины: трек SoundCloud выбирает хранитель в `/k/music` (миграция `0011-music.sql`), плеер после ▶ по кругу, холст слышит частоты.
 Тесты ядра читают markdown (`Accept: text/markdown` в `test/helpers.ts`).
 18.10 привязан домен: `routes` в `wrangler.toml` — sdominanta.net и www (custom domain). Workers Logs не включать.
 
@@ -66,6 +67,8 @@
 - `src/format.ts` — слой совместимости: HTML по умолчанию, `/m/` и `Accept: text/markdown` — markdown, `/json/` — JSON.
 - `src/indexing.ts` — sitemap, IndexNow (очередь, пинг пачкой), мета страниц для сниппетов, canonical.
 - `src/events.ts` — журнал действий: событие в batch действия, `seal` (звенья), голова; `src/ots.ts` — формат .ots и якорь OpenTimestamps.
+- `src/music.ts` — треки витрины (подпись по oEmbed), поток `/music/stream/{id}` по ключу API (Secrets `SC_CLIENT_ID`, `SC_CLIENT_SECRET`);
+  `public/vitrina/music.js` — плеер и анализатор, `public/vitrina/sound.js` — полосы частот, громкость, удары (`setSound` движка).
 - `src/mcp.ts` — MCP-дверь: JSON-RPC, обе эпохи протокола, пять инструментов поверх ядра.
 - `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status`.
 - `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок кисти хранителя (модуль), `public/vitrina/model.js` —

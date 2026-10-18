@@ -5,6 +5,7 @@ import { Format, pickFormat, present } from './format';
 import { flushIndexNow, INDEXNOW_KEY, SITEMAP_TTL, sitemapEntries, sitemapXml } from './indexing';
 import { head, headLine, seal } from './events';
 import { mcp } from './mcp';
+import { streamRoute } from './music';
 import { anchorDaily, unb64, upgradeAnchors } from './ots';
 import { panel } from './panel';
 import { sceneJson, vitrinaPage } from './vitrina';
@@ -18,7 +19,7 @@ import wallText from './pages/wall.md';
 const KEEPER_ONLY = ['/review', '/approve', '/reject', '/keeper', '/k'];
 /** Служебное и действия: черновики (/submit), язык действий, курьер, MCP. Открыты всем, но не индексируются. */
 const SERVICE = ['/a/', '/p/', '/compose', '/mcp', '/submit'];
-const SERVICE_RE = /^(\/(m|json))?\/(a\/|p\/|compose(\/|$)|mcp(\/|$)|submit(\/|$))/;
+const SERVICE_RE = /^(\/(m|json))?\/(a\/|p\/|compose(\/|$)|mcp(\/|$)|submit(\/|$)|music\/)/;
 /** Поисковым роботам служебное не нужно вовсе (решение хранителя 18.10). */
 const SEARCH_BOTS = ['Googlebot', 'Bingbot', 'YandexBot', 'DuckDuckBot', 'Applebot', 'Baiduspider'];
 /** Инструменты моделей по просьбе человека: страховка, та же группа, что «*» — иначе они перестали бы писать на стену. */
@@ -151,6 +152,8 @@ async function routeInner(req: Request, env: Env, ctx: ExecutionContext, fmt: Fo
   // Язык действий: сегменты разбираются до раскодирования пути (в кусках текста бывает %2F).
   if (raw.pathname.startsWith('/a/')) return actionRoute(env, raw.origin, req, raw);
   if (raw.pathname.startsWith('/p/')) return passRoute(env, raw.origin, req, raw);
+  const stream = /^\/music\/stream\/([1-9]\d{0,8})$/.exec(raw.pathname);
+  if (stream) return streamRoute(env, req, Number(stream[1]), nowSec());
   const url = pathForm(raw) ?? raw;
   const o = url.origin;
   let p: string;

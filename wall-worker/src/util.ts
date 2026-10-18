@@ -4,6 +4,9 @@ export interface Env {
   KEEPERS: string; // JSON: {"🜄": {"totp": "<base32>", "key_sha256": "<hex>"}}
   /** Только для тестов: другой адрес пинга IndexNow или off (не отправлять). */
   INDEXNOW_URL?: string;
+  /** Ключ API SoundCloud (Secrets хранителя): поток трека витрины. Нет — музыка только ссылкой. */
+  SC_CLIENT_ID?: string;
+  SC_CLIENT_SECRET?: string;
 }
 
 export const enc = new TextEncoder();

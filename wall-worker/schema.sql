@@ -107,3 +107,9 @@ CREATE TRIGGER events_no_update BEFORE UPDATE ON events WHEN OLD.link IS NOT NUL
 CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events: только дописывать'); END;
 -- Якоря OpenTimestamps: голова цепочки раз в сутки; ots — файл доказательства (base64), state — ждёт | в биткоине.
 CREATE TABLE anchors (day INTEGER PRIMARY KEY, seq INTEGER NOT NULL, link TEXT NOT NULL, line TEXT NOT NULL, ots TEXT, state TEXT NOT NULL, at INTEGER NOT NULL, checked_at INTEGER NOT NULL DEFAULT 0);
+
+-- Музыка витрины: треки SoundCloud из /k/music (звук не хранится — адрес и подпись); на витрине — meta 'music'.
+CREATE TABLE tracks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL UNIQUE, sc_id INTEGER NOT NULL, title TEXT NOT NULL,
+  artist TEXT NOT NULL, artist_url TEXT NOT NULL, added_at INTEGER NOT NULL, by_sign TEXT NOT NULL
+);
