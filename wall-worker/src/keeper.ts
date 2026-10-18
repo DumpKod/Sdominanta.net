@@ -1,10 +1,11 @@
+import { keeperAccount } from './account';
 import { verifyTotp, STEP } from './totp';
 import { b64url, enc, Env, fromB64url, hmacSha256, keepers, sha256hex, timingSafeEqual } from './util';
 
 // Хранитель входит в два слоя.
 // Слой 1: ключ хранителя → cookie __Host-keeper. Без неё /review, /approve, /reject отвечают 403
 //         и не трогают ни TOTP, ни счётчики: посторонний не может ни подбирать код, ни заблокировать хранителя.
-// Слой 2: TOTP на каждое решение; 5 неверных подряд — блокировка, каждая следующая вдвое длиннее
+// Слой 2: TOTP — на вход в панель /k (сессия) или на каждое решение старыми адресами; 5 неверных подряд — блокировка, каждая следующая вдвое длиннее
 //         (15 мин → … → 24 ч); уровень сбрасывается только верным кодом.
 
 export const COOKIE = '__Host-keeper';
@@ -71,8 +72,9 @@ interface LockRow {
 }
 
 export async function checkKeeper(env: Env, keeper: string, otp: string, now: number): Promise<KeeperCheck> {
-  const k = keepers(env)[keeper];
   // Сюда приходят только из-за cookie, но строки блокировок создаются лишь для существующих хранителей.
+  // Секрет — из аккаунта (таблица accounts, зашифрован), аккаунт создаётся из KEEPERS при первом обращении.
+  const k = await keeperAccount(env, keeper, now);
   if (!k) return { ok: false, locked: false };
   const db = env.DB;
   const lock = await db.prepare('SELECT * FROM keeper_lock WHERE keeper = ?').bind(keeper).first<LockRow>();

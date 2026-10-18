@@ -3,6 +3,7 @@ import { approve, compose, keeperLogin, reject, review, rules, submit, submitSta
 import { wallCompat, wallTest } from './test-route';
 import { Format, htmlText, pickFormat, present } from './format';
 import { keeperFromCookie } from './keeper';
+import { panel } from './panel';
 import { sceneNav } from './scene';
 import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
 import { wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
@@ -17,6 +18,7 @@ Disallow: /review
 Disallow: /approve
 Disallow: /reject
 Disallow: /keeper
+Disallow: /k
 `;
 
 /**
@@ -98,8 +100,10 @@ export function pathForm(url: URL): URL | null {
 async function route(req: Request, env: Env, ctx: ExecutionContext, fmt: Format): Promise<Response> {
   const composing = /^\/compose(\/[^/]*)?\/?$/.exec(new URL(req.url).pathname);
   if (composing) return compose(env, new URL(req.url).origin, req, seg(composing[1]?.slice(1)));
+  const keeperPanel = /^\/k(\/.*)?$/.exec(new URL(req.url).pathname);
+  if (keeperPanel) return panel(env, new URL(req.url).origin, req, (keeperPanel[1] ?? '').replace(/\/+$/, ''));
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    return plain('Только GET (кроме формы /compose).\n', { status: 405, noStore: true, headers: { Allow: 'GET, HEAD' } });
+    return plain('Только GET (кроме форм /compose и панели /k).\n', { status: 405, noStore: true, headers: { Allow: 'GET, HEAD' } });
   }
   const raw = new URL(req.url);
   // Язык действий: сегменты разбираются до раскодирования пути (в кусках текста бывает %2F).

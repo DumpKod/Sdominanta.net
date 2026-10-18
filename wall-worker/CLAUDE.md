@@ -28,6 +28,7 @@
 слова — `tools/trace-words.mjs`, см. «Отступления» в `README.md`).
 Затем слой совместимости (`src/format.ts`), таблица `/wall/compat` (миграция `0004-compat.sql`), план MCP — `docs/mcp-door-plan.md`.
 Затем курьер `/compose` (форма для человека системы, которая не строит адреса) и выводы о возможностях в `/wall/compat`.
+Затем панель хранителя `/k` (`src/panel.ts`, аккаунты — `src/account.ts`, миграция `0005-accounts.sql`).
 Тесты ядра читают markdown (`Accept: text/markdown` в `test/helpers.ts`).
 Дальше: хранитель вносит секреты, 🜃 проходит путь из чата (тест 14), потом привязка домена (шаг 6). Workers Logs не включать.
 
@@ -59,7 +60,8 @@
 - `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status`.
 - `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок кисти хранителя, `src/scene.ts` — объекты сцены.
 - `tools/` — `trace-words.mjs` (подписи → жилы, Playwright) и `trace.js` (автотрассировка движка); в Worker не входят.
-- `src/rate.ts` — лимиты. `src/post.ts` — правила/пропуск, почтомат, review/approve/reject.
+- `src/rate.ts` — лимиты. `src/post.ts` — правила/пропуск, почтомат, review/approve/reject (ядро — `publishDraft`, `declineDraft`).
+- `src/panel.ts` — панель `/k`: вход кодом, сессии, CSRF, очередь, кнопки. `src/account.ts` — аккаунты, шифрование TOTP-секрета.
 - `src/wall.ts` — страницы чтения. `src/test-route.ts` — `/wall/test`.
 - `src/pages/` — тексты страниц (md/txt/html) от 🜃, импортируются строками. Шаблоны: `render()` в `src/util.ts`
   (`{{X}}`, `{{#X}}…{{/X}}`, `{{^X}}…{{/X}}`). Тексты правит 🜃 с хранителем, код их не переписывает.

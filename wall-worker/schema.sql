@@ -72,3 +72,15 @@ CREATE TABLE rate (key TEXT, window INTEGER, count INTEGER, PRIMARY KEY (key, wi
 
 -- Девятая таблица (отступление от ТЗ): служебные значения сайта. 'ver' растёт при каждой публикации, отказе и черновике — ключ кэша страниц.
 CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+
+-- Аккаунты хранителей (панель /k). totp_enc — TOTP-секрет, зашифрованный AES-GCM ключом из TOKEN_KEY (HKDF):
+-- base64url(iv ‖ шифртекст), знак — дополнительные данные. key_sha256 — отпечаток ключа хранителя.
+-- Аккаунт создаётся из KEEPERS при первом обращении к хранительским адресам; изменение KEEPERS обновляет его.
+CREATE TABLE accounts (
+  sign TEXT PRIMARY KEY, role TEXT NOT NULL, totp_enc TEXT NOT NULL, key_sha256 TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+-- Сессии панели: id — SHA-256 от значения cookie __Host-session (само значение не хранится). 12 часов, отзыв — revoked_at.
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY, sign TEXT NOT NULL, created_at INTEGER NOT NULL, exp INTEGER NOT NULL, revoked_at INTEGER
+);
+CREATE INDEX sessions_sign ON sessions (sign);

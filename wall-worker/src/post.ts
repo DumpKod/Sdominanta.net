@@ -207,7 +207,7 @@ export async function submitStatus(env: Env, o: string, url: URL): Promise<Respo
 
 // ---------- /review, /approve, /reject: хранитель ----------
 
-interface DraftRow {
+export interface DraftRow {
   code: string;
   body: string;
   hash: string;
@@ -245,7 +245,7 @@ export async function keeperLogin(env: Env, o: string, req: Request, url: URL): 
   return new Response(null, {
     status: 303,
     headers: {
-      Location: `${o}/wall`,
+      Location: `${o}/k`,
       'Set-Cookie': cookieHeader(await issueKeeperCookie(env, sign, now)),
       'Cache-Control': 'no-store',
       'Referrer-Policy': 'no-referrer',
@@ -284,7 +284,8 @@ export async function review(env: Env, o: string, req: Request, url: URL): Promi
   s += lock.lockedUntil ? `; вход кодами закрыт до ${fmtTime(lock.lockedUntil)}\n` : '\n';
   s += '\n' + wrap(d.code, d.body);
   if (d.state === 'ждёт') {
-    s += '\n## Решение\n\nПодставьте 6 цифр из аутентификатора и откройте ссылку:\n\n';
+    s += `\n## Решение\n\nОсновной путь — панель хранителя: ${o}/k/d/${d.code} (кнопки, без кода в адресе).\n`;
+    s += '\nСовместимый путь: подставьте 6 цифр из аутентификатора и откройте ссылку:\n\n';
     s += '```\n' + `${o}/approve?code=${d.code}&otp=<6 цифр>` + '\n```\n\n';
     s += 'Отказ с публичной причиной:\n\n```\n' + `${o}/reject?code=${d.code}&otp=<6 цифр>&reason=<причина>` + '\n```\n';
   }
@@ -334,18 +335,33 @@ export async function approve(env: Env, o: string, req: Request, url: URL): Prom
   if (!me) return keeperOnly();
   const gate = await totpGate(env, o, req, url, me);
   if (gate instanceof Response) return gate;
-  const { keeper, code } = gate;
-  const now = nowSec();
+  const r = await publishDraft(env, gate.code, gate.keeper, nowSec());
+  if (r.kind === 'unchanged') return unchanged(o, gate.code, r.state);
+  if (r.kind === 'broken') {
+    return md('# Не опубликовано\n\nКарточка больше не проходит разбор:\n\n' + formatErrors(r.errors) + '\n\nОтклоните её с причиной.\n', { status: 409, noStore: true });
+  }
+  if (r.kind === 'busy') return md('# Не опубликовано\n\nСтена занята, повторите с новым кодом из аутентификатора.\n', { status: 503, noStore: true });
+  let s = `# Опубликовано: ${r.id}\n\n- Хеш: ${r.hash} — сверьте с хешем, который модель прислала в чате\n`;
+  if (r.chorus) s += `- Пометка «требует проверки на хор»: совпадение с ${r.chorus}\n`;
+  return md(s + next([['Запись', `${o}/wall/r/${r.id}`], ['Меню стены', `${o}/wall`]]), ns);
+}
+
+export type PublishResult =
+  | { kind: 'ok'; id: string; hash: string; chorus: string | null }
+  | { kind: 'unchanged'; state: string }
+  | { kind: 'broken'; errors: ParseError[] }
+  | { kind: 'busy' };
+
+/** Публикация черновика хранителем, уже прошедшим проверку (код из аутентификатора или сессия панели). */
+export async function publishDraft(env: Env, code: string, keeper: string, now: number): Promise<PublishResult> {
   const d = draftCode(code) === code ? await env.DB.prepare('SELECT * FROM drafts WHERE code = ?').bind(code).first<DraftRow>() : null;
-  if (!d || d.state !== 'ждёт' || d.created_at <= now - DRAFT_TTL) return unchanged(o, code, await currentState(env, code));
+  if (!d || d.state !== 'ждёт' || d.created_at <= now - DRAFT_TTL) return { kind: 'unchanged', state: await currentState(env, code) };
 
   // Разбор заново: текст хранится нормализованным, хеш должен совпасть.
   const parsed = await checkRefs(env.DB, await parseCard(d.body, { tokenSign: d.sign, keepers: Object.keys(keepers(env)) }));
   const hash = await cardHash(parsed.norm);
-  if (!parsed.card || hash !== d.hash) {
-    return md('# Не опубликовано\n\nКарточка больше не проходит разбор:\n\n' + formatErrors(parsed.errors) + '\n\nОтклоните её с причиной.\n', { status: 409, noStore: true });
-  }
-  if (!(await claim(env, code, 'опубликован', keeper, now))) return unchanged(o, code, await currentState(env, code));
+  if (!parsed.card || hash !== d.hash) return { kind: 'broken', errors: parsed.errors };
+  if (!(await claim(env, code, 'опубликован', keeper, now))) return { kind: 'unchanged', state: await currentState(env, code) };
 
   const card = parsed.card;
   const chorus = await chorusMatch(env.DB, card);
@@ -379,12 +395,9 @@ export async function approve(env: Env, o: string, req: Request, url: URL): Prom
   }
   if (!id) {
     await db.prepare(`UPDATE drafts SET state = 'ждёт', decided_by = NULL, decided_at = NULL WHERE code = ?`).bind(code).run();
-    return md('# Не опубликовано\n\nСтена занята, повторите с новым кодом из аутентификатора.\n', { status: 503, noStore: true });
+    return { kind: 'busy' };
   }
-
-  let s = `# Опубликовано: ${id}\n\n- Хеш: ${hash} — сверьте с хешем, который модель прислала в чате\n`;
-  if (chorus) s += `- Пометка «требует проверки на хор»: совпадение с ${chorus}\n`;
-  return md(s + next([['Запись', `${o}/wall/r/${id}`], ['Меню стены', `${o}/wall`]]), ns);
+  return { kind: 'ok', id, hash, chorus };
 }
 
 /**
@@ -413,8 +426,38 @@ export async function reject(env: Env, o: string, req: Request, url: URL): Promi
   }
   const gate = await totpGate(env, o, req, url, me);
   if (gate instanceof Response) return gate;
-  const now = nowSec();
-  if (!(await claim(env, gate.code, 'отклонён', gate.keeper, now, reason))) return unchanged(o, gate.code, await currentState(env, gate.code));
-  await bumpVersion(env.DB).run();
+  const r = await declineDraft(env, gate.code, gate.keeper, nowSec(), reason);
+  if (r) return unchanged(o, gate.code, r);
   return md(`# Отклонено\n\nЧерновик ${gate.code} отклонён. Причина опубликована в статистике.\n` + next([['Статистика', `${o}/wall/stats`]]), ns);
+}
+
+/** Отказ с публичной причиной. null — отклонён; иначе — состояние, из-за которого ничего не изменено. */
+export async function declineDraft(env: Env, code: string, keeper: string, now: number, reason: string): Promise<string | null> {
+  if (!(await claim(env, code, 'отклонён', keeper, now, reason))) return currentState(env, code);
+  await bumpVersion(env.DB).run();
+  return null;
+}
+
+export interface DraftView {
+  d: DraftRow;
+  card: Card | null;
+  errors: ParseError[];
+  chorus: string | null;
+}
+
+/** Черновик для хранителя: строка, разбор заново и совпадение «на хор». */
+export async function draftView(env: Env, code: string, now: number): Promise<DraftView | null> {
+  await expireDrafts(env.DB, now);
+  if (draftCode(code) !== code) return null;
+  const d = await env.DB.prepare('SELECT * FROM drafts WHERE code = ?').bind(code).first<DraftRow>();
+  if (!d) return null;
+  const parsed = await checkRefs(env.DB, await parseCard(d.body, { tokenSign: d.sign, keepers: Object.keys(keepers(env)) }));
+  return { d, card: parsed.card ?? null, errors: parsed.errors, chorus: parsed.card ? await chorusMatch(env.DB, parsed.card) : null };
+}
+
+/** Очередь «ждёт», старые первыми. */
+export async function waitingDrafts(env: Env, now: number, limit = 50): Promise<DraftRow[]> {
+  await expireDrafts(env.DB, now);
+  const r = await env.DB.prepare(`SELECT * FROM drafts WHERE state = 'ждёт' ORDER BY created_at LIMIT ?`).bind(limit).all<DraftRow>();
+  return r.results;
 }
