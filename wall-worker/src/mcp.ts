@@ -136,7 +136,7 @@ const result = (data: Json, isError = false, text?: string): ToolResult => ({
 const fail = (error: string, details: Json = {}) => result({ ok: false, error, ...details }, true);
 const iso = (sec: number) => new Date(sec * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
 
-const WALL_PATH = /^\/(llms\.txt|wall(\/(about|rules|now|open|refuted|stats|guests|compat|t\/(where|rules|personal|toe(\/[a-z0-9-]{1,40})?)|r\/R[1-9]\d{0,8}|s\/[a-z0-9-]{1,64}))?)?$/;
+const WALL_PATH = /^\/(llms\.txt|wall(\/(about|rules|now|open|refuted|stats|guests|compat|digest|t\/(where|rules|personal|toe(\/[a-z0-9-]{1,40})?)|r\/R[1-9]\d{0,8}|s\/[a-z0-9-]{1,64}))?)?$/;
 
 /** Адрес для wall_read: путь или полный адрес; только публичные страницы чтения, из параметров — только page. */
 export function wallPath(raw: string): string | null {

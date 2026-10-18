@@ -72,6 +72,8 @@ CREATE TABLE rate (key TEXT, window INTEGER, count INTEGER, PRIMARY KEY (key, wi
 
 -- Девятая таблица (отступление от ТЗ): служебные значения сайта. 'ver' растёт при каждой публикации, отказе и черновике — ключ кэша страниц.
 CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+-- Очередь IndexNow: изменённые публичные адреса до отправки пачкой (src/indexing.ts).
+CREATE TABLE indexnow_queue (url TEXT PRIMARY KEY, at INTEGER NOT NULL);
 
 -- Аккаунты хранителей (панель /k). totp_enc — TOTP-секрет, зашифрованный AES-GCM ключом из TOKEN_KEY (HKDF):
 -- base64url(iv ‖ шифртекст), знак — дополнительные данные. key_sha256 — отпечаток ключа хранителя.

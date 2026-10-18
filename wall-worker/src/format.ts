@@ -4,6 +4,8 @@
 //   /json/…          те же данные структурой
 // Маршруты отдают markdown или text/plain; форма выбирается здесь, после маршрута, поэтому кэш страниц один на все формы.
 
+import { canonical, INDEXNOW_KEY, PageMeta, takeMeta } from './indexing';
+
 export type Format = 'html' | 'md' | 'json';
 
 const PREFIX: Record<string, Format> = { m: 'md', json: 'json' };
@@ -21,7 +23,7 @@ export function pickFormat(req: Request): { fmt: Format; prefixed: boolean; req:
 }
 
 /** Адреса, которые всегда в своём формате: соглашения llms.txt и robots.txt, витрина и статические файлы. */
-const NATIVE = new Set(['/robots.txt', '/llms.txt']);
+const NATIVE = new Set(['/robots.txt', '/llms.txt', `/${INDEXNOW_KEY}.txt`]);
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -49,11 +51,14 @@ function title(text: string): string {
 /** Текст для <pre>: экранирован, адреса — ссылки. */
 export const htmlText = (text: string) => text.split('\n').map(htmlLine).join('\n');
 
-export function toHtml(text: string): string {
+export function toHtml(text: string, meta: PageMeta & { canonical?: string } = {}): string {
+  let head = `<title>${esc(meta.title ?? title(text))}</title>\n`;
+  if (meta.description) head += `<meta name="description" content="${esc(meta.description)}">\n`;
+  if (meta.canonical) head += `<link rel="canonical" href="${esc(meta.canonical)}">\n`;
   return (
     '<!doctype html>\n<html lang="ru">\n<head>\n<meta charset="utf-8">\n' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
-    `<title>${esc(title(text))}</title>\n</head>\n<body>\n<pre style="white-space: pre-wrap">\n` +
+    head + '</head>\n<body>\n<pre style="white-space: pre-wrap">\n' +
     htmlText(text) +
     '\n</pre>\n</body>\n</html>\n'
   );
@@ -99,12 +104,18 @@ export function toJson(text: string, status: number): string {
 const isText = (res: Response) => /^text\/(markdown|plain)/.test(res.headers.get('Content-Type') ?? '');
 
 /** Ответ маршрута → выбранная форма. Ссылки на свои страницы в /m/ и /json/ сохраняют префикс. */
-export async function present(res: Response, fmt: Format, prefixed: boolean, origin: string, path: string, method: string): Promise<Response> {
+export async function present(res: Response, fmt: Format, prefixed: boolean, origin: string, path: string, method: string, search = ''): Promise<Response> {
   // Ответы панели хранителя /k (в том числе строки OK/ERR редактору) уходят как есть.
   if (!isText(res) || (NATIVE.has(path) && !prefixed) || path === '/k' || path.startsWith('/k/')) return res;
   let text = await res.text();
   if (prefixed) text = text.split(origin + '/').join(`${origin}/${fmt === 'md' ? 'm' : 'json'}/`);
   const h = new Headers(res.headers);
+  const meta: PageMeta & { canonical?: string } = takeMeta(h);
+  // Канонический адрес — у страниц чтения (кэшируемых), для всех трёх форм: HTML в <head>, остальным заголовком Link.
+  if (res.status === 200 && /^public\b/.test(h.get('Cache-Control') ?? '')) {
+    meta.canonical = canonical(path, search);
+    h.set('Link', `<${encodeURI(meta.canonical)}>; rel="canonical"`);
+  }
   if (!/\bAccept\b/.test(h.get('Vary') ?? '')) h.set('Vary', [h.get('Vary'), 'Accept'].filter(Boolean).join(', '));
   let body: string;
   if (fmt === 'md') {
@@ -113,7 +124,7 @@ export async function present(res: Response, fmt: Format, prefixed: boolean, ori
     body = toJson(text, res.status);
     h.set('Content-Type', 'application/json; charset=utf-8');
   } else {
-    body = toHtml(text);
+    body = toHtml(text, meta);
     h.set('Content-Type', 'text/html; charset=utf-8');
     h.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
   }

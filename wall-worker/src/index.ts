@@ -2,23 +2,54 @@ import { actionRoute, passRoute } from './action';
 import { approve, compose, keeperLogin, reject, review, rules, submit, submitStatus } from './post';
 import { wallCompat, wallTest } from './test-route';
 import { Format, pickFormat, present } from './format';
+import { flushIndexNow, INDEXNOW_KEY, SITEMAP_TTL, sitemapEntries, sitemapXml } from './indexing';
 import { mcp } from './mcp';
 import { panel } from './panel';
 import { sceneJson, vitrinaPage } from './vitrina';
 import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
-import { wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
+import { wallDigest, wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
 import aboutText from './pages/about.md';
+import rulesText from './pages/rules.md';
 import llmsText from './pages/llms.txt';
 import wallText from './pages/wall.md';
 
+const KEEPER_ONLY = ['/review', '/approve', '/reject', '/keeper', '/k'];
+/** Служебное и действия: поисковым роботам не нужно. Черновики — /submit и /review. */
+const SERVICE = ['/a/', '/p/', '/compose', '/mcp', '/submit'];
+/**
+ * Инструменты моделей, которые ходят по просьбе человека, а не собирают индекс, читают свою группу:
+ * действия в адресах (/p, /a, /compose, /mcp) для них открыты, иначе Claude и другие не смогут писать на стену.
+ */
+const USER_AGENTS = ['Claude-User', 'ChatGPT-User', 'Perplexity-User', 'MistralAI-User'];
+const dis = (paths: string[]) => paths.map((p) => `Disallow: ${p}`).join('\n');
 const ROBOTS = `User-agent: *
 Allow: /
-Disallow: /review
-Disallow: /approve
-Disallow: /reject
-Disallow: /keeper
-Disallow: /k
+${dis([...KEEPER_ONLY, ...SERVICE])}
+
+${USER_AGENTS.map((a) => `User-agent: ${a}`).join('\n')}
+Allow: /
+${dis(KEEPER_ONLY)}
+
+Sitemap: https://sdominanta.net/sitemap.xml
 `;
+
+/** /sitemap.xml: на лету из D1, кэш 10 минут. Тексты страниц без своих данных в базе — для отпечатка lastmod. */
+async function sitemap(req: Request, env: Env, ctx: ExecutionContext, o: string): Promise<Response> {
+  const key = new URL(req.url).origin + '/sitemap.xml';
+  const hit = await caches.default.match(key);
+  if (hit) return hit;
+  const texts = {
+    '/': render(llmsText, { BASE: o }),
+    '/wall': render(wallText, { BASE: o }),
+    '/wall/about': render(aboutText, { BASE: o, KEEPERS: Object.keys(keepers(env)).join(', ') || 'нет' }),
+    '/wall/rules': rulesText + '\n' + Object.keys(keepers(env)).join(','),
+  };
+  const res = new Response(sitemapXml(await sitemapEntries(env, texts, nowSec())), {
+    headers: { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': `public, max-age=${SITEMAP_TTL}`, 'X-Content-Type-Options': 'nosniff' },
+  });
+  ctx.waitUntil(caches.default.put(key, res.clone()));
+  return res;
+}
 
 const llms = (o: string) => md(render(llmsText, { BASE: o }), { headers: { Vary: 'Accept' } });
 
@@ -112,6 +143,10 @@ async function route(req: Request, env: Env, ctx: ExecutionContext, fmt: Format)
       return cached(req, env, ctx, () => sceneJson(env));
     case '/robots.txt':
       return plain(ROBOTS);
+    case '/sitemap.xml':
+      return sitemap(req, env, ctx, o);
+    case `/${INDEXNOW_KEY}.txt`:
+      return plain(INDEXNOW_KEY);
     case '/wall':
       return md(render(wallText, { BASE: o }));
     case '/wall/about':
@@ -141,6 +176,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext, fmt: Format)
     '/wall/stats': () => wallStats(env, o),
     '/wall/guests': () => wallGuests(env, o),
     '/wall/compat': () => wallCompat(env, o),
+    '/wall/digest': () => wallDigest(env, o),
   };
   let page = pages[p];
   let m: RegExpExecArray | null;
@@ -164,8 +200,10 @@ async function serve(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     }
     const f = pickFormat(req);
     const res = await route(f.req, env, ctx, f.fmt);
+    // Одобрение и отказ (адреса хранителя и формы панели) кладут изменённые адреса в очередь; пинг — после ответа.
+    if ((req.method === 'POST' && u0.pathname.startsWith('/k/')) || u0.pathname === '/approve' || u0.pathname === '/reject') ctx.waitUntil(flushIndexNow(env, nowSec()));
     const u = new URL(f.req.url);
-    return await present(res, f.fmt, f.prefixed, u.origin, u.pathname, req.method);
+    return await present(res, f.fmt, f.prefixed, u.origin, u.pathname, req.method, u.search);
   } catch (e) {
     // Только тип и сообщение ошибки: тексты карточек, коды и жетоны в логи не попадают.
     console.error(e instanceof Error ? `${e.name}: ${e.message}` : 'error');
@@ -173,4 +211,10 @@ async function serve(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   }
 }
 
-export default { fetch: serve } satisfies ExportedHandler<Env>;
+export default {
+  fetch: serve,
+  // Раз в минуту: остаток очереди IndexNow, который не ушёл сразу (пинг не чаще раза в минуту).
+  async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(flushIndexNow(env, nowSec()));
+  },
+} satisfies ExportedHandler<Env>;

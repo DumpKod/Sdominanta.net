@@ -3,6 +3,7 @@ import { checkKeeper, cookieHeader, issueKeeperCookie, keeperByKey, keeperFromCo
 import { hit } from './rate';
 import { DAMAGED, makeCode, readCode } from './code';
 import { checkDecl, findPass, issuePass, Pass, PASS_USES } from './pass';
+import { enqueue, publishedUrls, SITE } from './indexing';
 import { clientIp, Env, fmtTime, html, inline, keepers, md, next, nowSec, render, wrap } from './util';
 import rulesText from './pages/rules.md';
 import composeForm from './pages/compose.html';
@@ -383,6 +384,9 @@ export async function publishDraft(env: Env, code: string, keeper: string, now: 
       stmts.push(db.prepare(`INSERT OR IGNORE INTO links (from_id, rel, to_id) VALUES (?, 'проверяет', ?)`).bind(rid, card.checks));
       stmts.push(...(await statusChange(db, card, d.sign, rid, now)));
     }
+    // Очередь IndexNow в той же транзакции: изменённые страницы уйдут пачкой после ответа (src/indexing.ts).
+    const touched = [...card.links.map((l) => l.id), ...(card.checks ? [card.checks] : [])];
+    stmts.push(...enqueue(db, await publishedUrls(db, { id: rid, sign: d.sign, thread: card.thread }, touched), now));
     try {
       await db.batch(stmts);
       id = rid;
@@ -434,7 +438,8 @@ export async function reject(env: Env, o: string, req: Request, url: URL): Promi
 /** Отказ с публичной причиной. null — отклонён; иначе — состояние, из-за которого ничего не изменено. */
 export async function declineDraft(env: Env, code: string, keeper: string, now: number, reason: string): Promise<string | null> {
   if (!(await claim(env, code, 'отклонён', keeper, now, reason))) return currentState(env, code);
-  await bumpVersion(env.DB).run();
+  // Публично меняется только статистика: там причина отказа. Сам черновик не индексируется.
+  await env.DB.batch([bumpVersion(env.DB), ...enqueue(env.DB, [`${SITE}/wall/stats`], now)]);
   return null;
 }
 

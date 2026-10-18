@@ -8,11 +8,25 @@ const enc = encodeURIComponent;
 const draftCount = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM drafts').first<{ n: number }>())!.n;
 
 describe('robots.txt', () => {
-  it('не закрывает почтомат и тест, закрывает только хранителя', async () => {
+  // Группа — блок строк до пустой строки; робот читает группу своего User-agent, остальные — группу «*».
+  const group = (r: string, ua: string) => r.split(/\n\n+/).find((g) => g.split('\n').includes(`User-agent: ${ua}`)) ?? '';
+
+  it('поисковым роботам закрыты хранитель и служебное; стена и тест открыты; Sitemap', async () => {
     const r = await (await get('/robots.txt')).text();
-    expect(r).not.toMatch(/Disallow: \/submit/);
+    const all = group(r, '*') + '\n';
+    for (const p of ['/review', '/approve', '/reject', '/keeper', '/k', '/a/', '/p/', '/compose', '/mcp', '/submit']) expect(all).toContain(`Disallow: ${p}\n`);
     expect(r).not.toMatch(/Disallow: \/wall/);
-    for (const p of ['/review', '/approve', '/reject', '/keeper']) expect(r).toContain(`Disallow: ${p}\n`);
+    expect(r).toContain('\nSitemap: https://sdominanta.net/sitemap.xml\n');
+  });
+
+  it('инструментам моделей по просьбе человека действия открыты, закрыт только хранитель', async () => {
+    const r = await (await get('/robots.txt')).text();
+    for (const ua of ['Claude-User', 'ChatGPT-User']) {
+      const g = group(r, ua);
+      expect(g).toContain('Allow: /');
+      for (const p of ['/a/', '/p/', '/compose', '/mcp', '/submit']) expect(g).not.toContain(`Disallow: ${p}`);
+      for (const p of ['/review', '/approve', '/reject', '/keeper', '/k']) expect(g).toContain(`Disallow: ${p}`);
+    }
   });
 });
 

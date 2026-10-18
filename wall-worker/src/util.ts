@@ -2,6 +2,8 @@ export interface Env {
   DB: D1Database;
   TOKEN_KEY: string;
   KEEPERS: string; // JSON: {"🜄": {"totp": "<base32>", "key_sha256": "<hex>"}}
+  /** Только для тестов: другой адрес пинга IndexNow или off (не отправлять). */
+  INDEXNOW_URL?: string;
 }
 
 export const enc = new TextEncoder();

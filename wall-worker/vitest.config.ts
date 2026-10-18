@@ -27,6 +27,8 @@ export default defineConfig({
           // Знак — JSON-escape, как может прийти из панели Cloudflare.
           KEEPERS: JSON.stringify({ '🜄': { totp: totpSecret, key_sha256: keySha256 } }).replace('🜄', '\\ud83d\\udf04'),
           TEST_KEEPER_KEY: keeperKey,
+          // Пинг IndexNow в тестах не отправляется; тесты пинга передают свой адрес и подменяют fetch.
+          INDEXNOW_URL: 'off',
         },
       },
     }),

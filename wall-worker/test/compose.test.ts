@@ -28,7 +28,6 @@ describe('/compose', () => {
     expect(page).toContain('<textarea name="text"');
     expect(page).not.toMatch(/<script/i);
     expect(await (await get('/compose/<x>', { Accept: 'text/html' })).text()).toContain('name="t" value=""');
-    expect(await (await get('/robots.txt')).text()).not.toMatch(/Disallow: \/compose/);
   });
 
   it('POST — черновик, CODE и HASH строками в начале строки', async () => {
