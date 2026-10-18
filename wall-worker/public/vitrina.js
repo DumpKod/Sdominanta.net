@@ -965,6 +965,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (key === slotKey) return;
     slotKey = key;
     for (const el of document.querySelectorAll('[data-slot]')) {
+      if (el.dataset.framed) continue; // живёт в раскрытом окне
       const r = seen[el.dataset.slot];
       if (!r) { el.classList.remove('slotted'); el.hidden = false; for (const k of ['left', 'top', 'width', 'height']) el.style[k] = ''; continue; }
       const [x, y, w, h] = r;
@@ -1195,6 +1196,12 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     // гостю колёсико — масштаб; в инструментах правки — сдвиг, а масштаб — с Ctrl/⌘ (щипок трекпада приходит с Ctrl)
     if (tool === 'view' && depthWheel(e.clientX * VK, e.clientY * VK, e.deltaY * k)) return;
     const z0 = cam.zoom;
+    // Внутри алеф-нуля вглубь можно только туда, где есть вход (область окна, страницы, следующего алеф-нуля);
+    // над пустым местом приближение стоит, и колёсико бьёт басовой волной.
+    if (tool === 'view' && SPACE !== 'main' && e.deltaY < 0 && portalAt(e.clientX * VK, e.clientY * VK) < 0) {
+      const fitZ = cam.clone().fit(scene.bounds(), W, H, 0.05, 0, ZOOM_MAX).zoom;
+      if (cam.zoom >= fitZ * 1.15) { wheelPulse(e.clientX * VK, e.clientY * VK, Math.abs(e.deltaY * k)); return; }
+    }
     if (tool === 'view' || e.ctrlKey || e.metaKey) {
       cam.zoomAt(e.clientX * VK, e.clientY * VK, W, H, Math.exp(-e.deltaY * k * (e.ctrlKey ? 0.01 : 0.0015)), 0, ZOOM_MAX);
     } else {
@@ -1589,7 +1596,22 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     return { x, y, w: Math.max(8, Math.min(W, x1) - x), h: Math.max(8, Math.min(H, y1) - y) };
   }
   // Входом служит только объект с областью: окно открывается приближением в неё, иначе — никак.
-  const kindOf = (o) => (!o.area || o.area.length < 3 ? null : o.inner ? 'space' : o.window ? 'window' : o.href && ownPath(o.href) ? 'page' : null);
+  const kindOf = (o) => (!o.area || o.area.length < 3 ? null : o.inner ? 'space' : widgetOk(o.widget) ? 'widget' : o.window ? 'window' : o.href && ownPath(o.href) ? 'page' : null);
+  /** Виджет доступен: разделы панели — только хранителю в сессии, плеер и вход — если их элемент есть на странице. */
+  function widgetOk(w) {
+    if (!w) return false;
+    if (M.KEEPER_WIDGETS[w]) return keeper;
+    return !!document.querySelector(`[data-slot="${w}"]`);
+  }
+  // Живой элемент (плеер, вход хранителя) на время окна переезжает в него, потом — на своё место.
+  let lent = null; // { el, mark }
+  function giveBack() {
+    if (!lent) return;
+    lent.mark.replaceWith(lent.el);
+    delete lent.el.dataset.framed;
+    lent = null;
+    slotKey = '';
+  }
   function areaBounds(o) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const [x, y] of o.area) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
@@ -1646,6 +1668,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (f.k >= 1 && !f.pushed && f.path) { f.pushed = true; pages.length = 0; pages.push(f.path); history.pushState({ page: f.path }, '', f.path); }
   }
   function closeFrameNow() {
+    giveBack();
     rama = null;
     pages.length = 0;
     pageReq++;
@@ -1678,7 +1701,34 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   async function loadFrame() {
     pageBox();
     const f = rama, req = ++pageReq;
+    giveBack();
     pageBody.textContent = '';
+    if (f.kind === 'widget') {
+      const w = f.o.widget, path = M.KEEPER_WIDGETS[w];
+      const h = document.createElement('h2');
+      h.textContent = (f.o.window && f.o.window.title) || f.o.label;
+      pageBody.append(h);
+      if (path) {
+        // раздел панели хранителя целиком: те же формы, CSRF и сессия, что на /k
+        const fr = document.createElement('iframe');
+        fr.className = 'widget-frame';
+        fr.src = path;
+        fr.title = f.o.label;
+        pageBody.append(fr);
+        return;
+      }
+      const el = document.querySelector(`[data-slot="${w}"]`);
+      if (!el) return;
+      const mark = document.createComment('slot ' + w);
+      el.replaceWith(mark);
+      el.dataset.framed = '1';
+      el.classList.remove('slotted');
+      el.hidden = false;
+      for (const k of ['left', 'top', 'width', 'height']) el.style[k] = '';
+      lent = { el, mark };
+      pageBody.append(el);
+      return;
+    }
     if (f.kind === 'window') {
       const w = f.o.window, md = [`# ${w.title || f.o.label}`, '', ...(w.text ? [w.text, ''] : [])];
       if (f.o.href) md.push(`- [${f.o.label}](${f.o.href})`);

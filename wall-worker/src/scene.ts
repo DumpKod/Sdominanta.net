@@ -13,6 +13,7 @@
 //     strokes: [ { r, pts: [[x, y(, r)]…], closed? } ],   жилы в координатах мира
 //     area?: [[x, y]…],                   область попадания в координатах мира (многоугольник)
 //     window?: { title?, text?, links?: [ { label, href } ] }   окно из пустоты по клику
+//     widget?: "player"                   живое управление в окне: player, keeper, queue, music, vitrina (три последних — хранителю)
 //     frame?: { width, aspect, round, ring, far }   рама окна (FRAME в public/vitrina/model.js)
 //     slot?: "player"                     место для живого HTML: player — плеер, keeper — вход хранителя
 //     inner?: "aleph"                     алеф-нуль: колёсико или клик внутрь — пространство aleph (/in/aleph)
@@ -36,6 +37,7 @@ export interface SceneObject {
   window?: { title?: string; text?: string; links?: { label: string; href: string }[] };
   style?: Record<string, number>;
   frame?: Record<string, number>;
+  widget?: (typeof WIDGETS)[number];
   inner?: string;
   slot?: (typeof SLOTS)[number];
 }
@@ -62,6 +64,8 @@ export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], de
 export const SPACE_RE = /^[a-z0-9-]{1,32}$/;
 /** Места для живого HTML в сцене: плеер и вход хранителя. */
 export const SLOTS = ['player', 'keeper'] as const;
+/** Виджеты окна (WIDGETS в public/vitrina/model.js). */
+export const WIDGETS = ['player', 'keeper', 'queue', 'music', 'vitrina'] as const;
 export const EMPTY_SCENE: Scene = { v: 2, objects: [] };
 
 /** Относительный путь своего сайта: «/…», без «//», «..», схемы, строки запроса и пробелов. */
@@ -102,7 +106,8 @@ export function validateScene(raw: string): Check {
   j.objects.forEach((o: unknown, i: number) => {
     const at = `objects[${i}]`;
     if (!isObj(o)) return void errors.push(`${at}: объект`);
-    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'window', 'frame', 'style', 'inner', 'slot'], at);
+    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'window', 'frame', 'widget', 'style', 'inner', 'slot'], at);
+    if (o.widget !== undefined && !(WIDGETS as readonly unknown[]).includes(o.widget)) errors.push(`${at}.widget: ${WIDGETS.join(', ')}`);
     if (o.slot !== undefined && !(SLOTS as readonly unknown[]).includes(o.slot)) errors.push(`${at}.slot: место — ${SLOTS.join(' или ')}`);
     if (o.inner !== undefined && (typeof o.inner !== 'string' || !SPACE_RE.test(o.inner) || o.inner === 'main'))
       errors.push(`${at}.inner: имя пространства — латиница, цифры, дефис, до 32, не main`);

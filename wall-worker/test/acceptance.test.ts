@@ -32,7 +32,7 @@ describe('1. Страницы', () => {
   it('витрина — HTML для людей, текст для моделей', async () => {
     const human = await get('/', { Accept: 'text/html,application/xhtml+xml' });
     expect(human.headers.get('Content-Type')).toContain('text/html');
-    expect(human.headers.get('Content-Security-Policy')).toBe("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'");
+    expect(human.headers.get('Content-Security-Policy')).toBe("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'self'");
     // Сцена — холст с объектами кистью, ссылки объектов — слоем <nav>; картинок нет.
     const page = await human.text();
     expect(page).not.toMatch(/<img/i);

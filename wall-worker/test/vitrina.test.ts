@@ -8,7 +8,7 @@ import { csrfOf, get, keeperCookie, login, O, otp, post } from './helpers';
 // <nav> — из той же сцены. Редактор — /k/editor.js, только в сессии хранителя; версии сцены — в /k/vitrina.
 
 const HTML = { Accept: 'text/html' };
-const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'";
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'self'";
 
 // Файлы витрины из public/ и редактор — строками через vite (?raw), чтобы проверить их без сети.
 import vitrinaJs from '../public/vitrina.js?raw';

@@ -20,7 +20,8 @@ export const SESSION = '__Host-session';
 export const SESSION_TTL = 12 * 3600;
 const FORM_MAX = 4096;
 
-const CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+// frame-ancestors 'self': разделы панели — виджеты в окнах витрины того же сайта; чужие страницы их не встроят
+const CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'";
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function cookieValue(req: Request, name: string): string | null {
@@ -62,7 +63,7 @@ function page(title: string, body: string, o: { status?: number; headers?: Recor
     '.warn{color:#fcd34d}.muted{color:#64748b}textarea{width:100%;box-sizing:border-box}\n' +
     '</style>\n</head>\n<body>\n' + body + '\n</body>\n</html>\n';
   // same-origin, а не no-referrer: при no-referrer браузер шлёт с формы «Origin: null», и проверка своего адреса отказала бы.
-  return html(doc, { status: o.status ?? 200, noStore: true, csp: CSP, headers: { 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'same-origin', ...o.headers } });
+  return html(doc, { status: o.status ?? 200, noStore: true, csp: CSP, headers: { 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'same-origin', ...o.headers } });
 }
 
 /**

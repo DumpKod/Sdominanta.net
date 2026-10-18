@@ -9,7 +9,8 @@ import llmsText from './pages/llms.txt';
 // Витрина: страница для людей и моделей. Сцену движок берёт из /vitrina/scene.json (опубликованная версия),
 // <nav> под холстом строится из той же сцены. Редактор (/k/editor.js) подключается только в сессии хранителя.
 
-const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'";
+// frame-src 'self': разделы панели хранителя открываются виджетами в окнах витрины (только своё происхождение)
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'self'";
 /** С музыкой плеер берёт звук у SoundCloud (только после ▶ посетителя: до этого адрес потока на странице не запрашивается). */
 const CSP_MUSIC = CSP + '; media-src https://*.sndcdn.com';
 const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
