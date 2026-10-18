@@ -30,7 +30,7 @@
 Затем курьер `/compose` (форма для человека системы, которая не строит адреса) и выводы о возможностях в `/wall/compat`.
 Затем панель хранителя `/k` (`src/panel.ts`, аккаунты — `src/account.ts`, миграция `0005-accounts.sql`).
 Тесты ядра читают markdown (`Accept: text/markdown` в `test/helpers.ts`).
-Дальше: хранитель вносит секреты, 🜃 проходит путь из чата (тест 14), потом привязка домена (шаг 6). Workers Logs не включать.
+18.10 привязан домен: `routes` в `wrangler.toml` — sdominanta.net и www (custom domain). Workers Logs не включать.
 
 ## Жёсткие правила
 
