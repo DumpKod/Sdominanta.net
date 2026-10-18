@@ -1,0 +1,22 @@
+name = "sdominanta-wall"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Шаг 6 порядка сборки: хранитель раскомментирует после проверки на *.workers.dev.
+# routes = [
+#   { pattern = "sdominanta.net", custom_domain = true },
+#   { pattern = "www.sdominanta.net", custom_domain = true },
+# ]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sdominanta"
+database_id = "00000000-0000-0000-0000-000000000000" # заменить на id из `wrangler d1 create sdominanta`
+
+# Тексты страниц лежат в src/pages как файлы и импортируются строками.
+[[rules]]
+type = "Text"
+globs = ["**/*.md", "**/*.svg", "**/*.html"]
+fallthrough = true
+
+# Секреты (не в этом файле): TOKEN_KEY, KEEPERS — их вносит хранитель сам (панель Cloudflare или `wrangler secret put`).
