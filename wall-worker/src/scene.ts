@@ -12,10 +12,11 @@
 //     z?: 0,                              слой: -100…100
 //     strokes: [ { r, pts: [[x, y(, r)]…], closed? } ],   жилы в координатах мира
 //     area?: [[x, y]…],                   область попадания в координатах мира (многоугольник)
+//     doors?: [ { area, label?, href?, inner?, widget?, window?, frame? } ]   ещё области объекта — каждая свой вход (до 16)
 //     window?: { title?, text?, links?: [ { label, href } ] }   окно из пустоты по клику
 //     links?: [ { to: "wall", w: 0.8 } ]  связи узла (до 10): при входе внутрь — нити сквозь горизонт к портам
 //     widget?: "player"                   живое управление в окне: player, keeper, queue, music, vitrina (три последних — хранителю)
-//     frame?: { width, aspect, round, ring, far }   рама окна (FRAME в public/vitrina/model.js)
+//     frame?: { width, aspect, round, ring, far, push, depth }   окно: колонка, тишина поля, порог напора, глубина провала (FRAME в public/vitrina/model.js)
 //     slot?: "player"                     место для живого HTML: player — плеер, keeper — вход хранителя
 //     inner?: "aleph"                     алеф-нуль: колёсико или клик внутрь — пространство aleph (/in/aleph)
 //     style?: { tubeR, thick, resonance, tact, flow, wobble, fill, sound }   свои параметры объекта
@@ -28,6 +29,16 @@ export interface Stroke {
   pts: number[][];
   closed?: boolean;
 }
+/** Ещё одна область объекта со своим содержимым: приближение в неё — провал в своё окно, страницу, виджет или алеф-нуль. */
+export interface Door {
+  area: number[][];
+  label?: string;
+  href?: string;
+  inner?: string;
+  widget?: (typeof WIDGETS)[number];
+  window?: { title?: string; text?: string; links?: { label: string; href: string }[] };
+  frame?: Record<string, number>;
+}
 export interface SceneObject {
   id: string;
   label: string;
@@ -35,6 +46,7 @@ export interface SceneObject {
   z?: number;
   strokes: Stroke[];
   area?: number[][];
+  doors?: Door[];
   window?: { title?: string; text?: string; links?: { label: string; href: string }[] };
   style?: Record<string, number>;
   frame?: Record<string, number>;
@@ -52,13 +64,13 @@ export interface Scene {
 export const DEFAULT_SCENE = defaultScene as Scene;
 export const SCENE_MAX = 256 * 1024;
 
-const LIMITS = { objects: 200, strokes: 400, pts: 2000, area: 200, links: 20, label: 200, title: 200, text: 4000, coord: 1e6 };
+const LIMITS = { objects: 200, strokes: 400, pts: 2000, area: 200, doors: 16, links: 20, label: 200, title: 200, text: 4000, coord: 1e6 };
 /** Пределы параметров — те же, что у ползунков редактора (STYLE и SPACE в public/vitrina/model.js). */
 export const STYLE_RANGE: Record<string, [number, number]> = {
   tubeR: [0.5, 200], thick: [0.4, 2.5], resonance: [0, 1], tact: [0, 3], flow: [0, 2], wobble: [0, 1], fill: [0, 1], sound: [0, 2],
 };
 export const FRAME_RANGE: Record<string, [number, number]> = {
-  width: [240, 1400], aspect: [0, 2], round: [0, 1], ring: [4, 160], far: [0, 1],
+  width: [240, 1400], aspect: [0, 2], round: [0, 1], ring: [4, 160], far: [0, 1], push: [60, 4000], depth: [0.05, 1],
 };
 export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], density: [0.5, 1.6], glow: [0, 1.5], haze: [0, 1.5], sound: [0, 2], reach: [0.05, 2], horizon: [0, 1] };
 
@@ -93,6 +105,7 @@ export function validateScene(raw: string): Check {
   const num = (x: unknown, lo: number, hi: number) => typeof x === 'number' && Number.isFinite(x) && x >= lo && x <= hi;
   const str = (x: unknown, max: number) => typeof x === 'string' && x.length <= max;
   const point = (p: unknown, n: number[]) => Array.isArray(p) && n.includes(p.length) && p.every((v) => num(v, -LIMITS.coord, LIMITS.coord));
+  const areaOk = (a: unknown) => Array.isArray(a) && a.length >= 3 && a.length <= LIMITS.area && a.every((p) => point(p, [2]));
   const params = (x: unknown, range: Record<string, [number, number]>, at: string) => {
     if (!isObj(x)) return void errors.push(`${at}: объект параметров`);
     only(x, Object.keys(range), at);
@@ -108,7 +121,7 @@ export function validateScene(raw: string): Check {
   j.objects.forEach((o: unknown, i: number) => {
     const at = `objects[${i}]`;
     if (!isObj(o)) return void errors.push(`${at}: объект`);
-    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'window', 'frame', 'widget', 'links', 'style', 'inner', 'slot'], at);
+    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'doors', 'window', 'frame', 'widget', 'links', 'style', 'inner', 'slot'], at);
     if (o.links !== undefined) {
       if (!Array.isArray(o.links) || o.links.length > 10) errors.push(`${at}.links: массив до 10 связей { to, w }`);
       else
@@ -120,15 +133,24 @@ export function validateScene(raw: string): Check {
           if (l.w !== undefined && !num(l.w, 0, 1)) errors.push(`${la}.w: 0…1`);
         });
     }
-    if (o.widget !== undefined && !(WIDGETS as readonly unknown[]).includes(o.widget)) errors.push(`${at}.widget: ${WIDGETS.join(', ')}`);
+    content(o, at);
+    if (o.doors !== undefined) {
+      if (!Array.isArray(o.doors) || o.doors.length > LIMITS.doors) errors.push(`${at}.doors: массив до ${LIMITS.doors} областей`);
+      else
+        o.doors.forEach((d: unknown, k: number) => {
+          const da = `${at}.doors[${k}]`;
+          if (!isObj(d)) return void errors.push(`${da}: { area, … }`);
+          only(d, ['area', 'label', 'href', 'inner', 'widget', 'window', 'frame'], da);
+          if (!areaOk(d.area)) errors.push(`${da}.area: от 3 до ${LIMITS.area} точек [x, y]`);
+          if (d.label !== undefined && !str(d.label, LIMITS.label)) errors.push(`${da}.label: строка до ${LIMITS.label}`);
+          content(d, da);
+        });
+    }
     if (o.slot !== undefined && !(SLOTS as readonly unknown[]).includes(o.slot)) errors.push(`${at}.slot: место — ${SLOTS.join(' или ')}`);
-    if (o.inner !== undefined && (typeof o.inner !== 'string' || !SPACE_RE.test(o.inner) || o.inner === 'main'))
-      errors.push(`${at}.inner: имя пространства — латиница, цифры, дефис, до 32, не main`);
     if (typeof o.id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(o.id)) errors.push(`${at}.id: латиница, цифры, дефис, до 32`);
     else if (ids.has(o.id)) errors.push(`${at}.id: «${o.id}» повторяется`);
     else ids.add(o.id);
     if (!str(o.label, LIMITS.label) || !(o.label as string).trim()) errors.push(`${at}.label: строка до ${LIMITS.label}`);
-    if (o.href !== undefined && !relPath(o.href)) errors.push(`${at}.href: только относительный путь стены, например /wall`);
     if (o.z !== undefined && !num(o.z, -100, 100)) errors.push(`${at}.z: −100…100`);
     if (!Array.isArray(o.strokes) || o.strokes.length > LIMITS.strokes) errors.push(`${at}.strokes: массив до ${LIMITS.strokes}`);
     else
@@ -141,9 +163,18 @@ export function validateScene(raw: string): Check {
         if (!Array.isArray(s.pts) || !s.pts.length || s.pts.length > LIMITS.pts || !s.pts.every((p) => point(p, [2, 3])))
           errors.push(`${sa}.pts: от 1 до ${LIMITS.pts} точек [x, y] или [x, y, r]`);
       });
-    if (o.area !== undefined && (!Array.isArray(o.area) || o.area.length < 3 || o.area.length > LIMITS.area || !o.area.every((p) => point(p, [2]))))
-      errors.push(`${at}.area: от 3 до ${LIMITS.area} точек [x, y]`);
+    if (o.area !== undefined && !areaOk(o.area)) errors.push(`${at}.area: от 3 до ${LIMITS.area} точек [x, y]`);
     if (o.style !== undefined) params(o.style, STYLE_RANGE, `${at}.style`);
+  });
+  if (errors.length) return { ok: false, errors: errors.slice(0, 20) };
+  return { ok: true, scene: j as unknown as Scene };
+
+  /** Содержимое входа — у объекта и у каждой его области: адрес, алеф-нуль, виджет, окно, рама. */
+  function content(o: Record<string, unknown>, at: string) {
+    if (o.widget !== undefined && !(WIDGETS as readonly unknown[]).includes(o.widget)) errors.push(`${at}.widget: ${WIDGETS.join(', ')}`);
+    if (o.inner !== undefined && (typeof o.inner !== 'string' || !SPACE_RE.test(o.inner) || o.inner === 'main'))
+      errors.push(`${at}.inner: имя пространства — латиница, цифры, дефис, до 32, не main`);
+    if (o.href !== undefined && !relPath(o.href)) errors.push(`${at}.href: только относительный путь стены, например /wall`);
     if (o.frame !== undefined) params(o.frame, FRAME_RANGE, `${at}.frame`);
     if (o.window !== undefined) {
       const w = o.window;
@@ -165,9 +196,7 @@ export function validateScene(raw: string): Check {
         }
       }
     }
-  });
-  if (errors.length) return { ok: false, errors: errors.slice(0, 20) };
-  return { ok: true, scene: j as unknown as Scene };
+  }
 }
 
 export interface SceneRow {
@@ -227,6 +256,15 @@ export function sceneNav(o: string, scene: Scene, back?: string): string {
         if (w.text) li += `\n<p>${esc(w.text)}</p>`;
         if (w.links?.length) li += `\n<ul>${w.links.map((l) => `<li><a href="${esc(o + l.href)}">${esc(l.label)}</a></li>`).join('')}</ul>`;
       }
+      // области-входы объекта: каждая своей ссылкой (и текстом окна) — моделям и чтецам без камеры
+      const doors = (x.doors ?? []).map((d) => {
+        const dh = d.inner ? `${o}/in/${d.inner}` : d.href ? o + d.href : null, label = d.label || d.window?.title || x.label;
+        let di = dh ? `<li><a href="${esc(dh)}">${esc(label)}</a>` : `<li>${esc(label)}`;
+        if (d.window?.text) di += `\n<p>${esc(d.window.text)}</p>`;
+        if (d.window?.links?.length) di += `\n<ul>${d.window.links.map((l) => `<li><a href="${esc(o + l.href)}">${esc(l.label)}</a></li>`).join('')}</ul>`;
+        return di + '</li>';
+      });
+      if (doors.length) li += `\n<ul>${doors.join('')}</ul>`;
       return li + '</li>';
     });
   if (back !== undefined) items.unshift(`<li><a data-back="1" href="${esc(o + back)}">Наружу</a></li>`);

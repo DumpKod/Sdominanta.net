@@ -635,6 +635,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   }
 
   let marks = []; // области, отмеченные редактором: узлы внутри светятся
+  let hoverEntry = null; // вход (объект или его область) под курсором — раз в несколько кадров
   function litOf(poly, b) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const p of poly) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
@@ -709,7 +710,12 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (win) win.k += (1 - win.k) * (reduce.matches ? 1 : 0.1);
     // подсвеченные области: под курсором и отмеченные редактором; рамка многоугольника — дешёвая проверка до inPoly
     const lit = [];
-    if (hl >= 0 && objs[hl] && objs[hl].area && objs[hl].area.length >= 3 && objs[hl].$lift > 0.02) lit.push(litOf(objs[hl].area, 0.6 * objs[hl].$lift));
+    // светится та область объекта, над которой курсор: основная или область-вход
+    if (hl >= 0 && objs[hl] && objs[hl].$lift > 0.02) {
+      const he = hoverEntry && (hoverEntry === objs[hl] || hoverEntry.parent === objs[hl]) ? hoverEntry : null;
+      const a = he ? he.area : objs[hl].area;
+      if (a && a.length >= 3) lit.push(litOf(a, 0.6 * objs[hl].$lift));
+    }
     for (const m of marks) if (m && m.length >= 3) lit.push(litOf(m, 0.55));
     // рама: узлы области растекаются в рамку окна, фон уходит вдаль
     const R = rama && !rama.dive && rama.o && rama.o.area && rama.o.area.length >= 3 ? rama : null;
@@ -723,7 +729,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     // провал: узлы области — основа нового континуума, светятся ярче по мере падения; остальное поле гаснет
     const D = rama && rama.dive && rama.o && rama.o.area && rama.o.area.length >= 3 ? rama : null;
     let dk = 0;
-    if (D) { if (D.gen !== fieldGen) capture(D); dk = ease(Math.min(1, D.k)); }
+    if (D) { if (D.gen !== fieldGen) capture(D); dk = Math.max(0, Math.min(1, D.k)); if (D.charge) dk = Math.max(dk, 0.6 * D.q); }
+    diveK = rama && rama.dive ? Math.max(0, Math.min(1, rama.k)) : 0;
     const ax0 = act.x0, ay0 = act.y0, ax1 = act.x1, ay1 = act.y1;
     const hole = win || (rama && rama.hole);
     const morph = T < morphUntil; // после входа узлы летят с ободка: в пути не замирают и не спят
@@ -863,7 +870,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       const v = veins[ch.v];
       if (v.obj !== lastObj) {
         if (lastObj > -2) ctx.stroke();
-        ctx.strokeStyle = `rgba(0, 242, 254, ${(0.16 + 0.12 * (objs[v.obj].$lift || 0) + (v.lod ? 0 : 0.3)).toFixed(3)})`;
+        ctx.strokeStyle = `rgba(0, 242, 254, ${((0.16 + 0.12 * (objs[v.obj].$lift || 0) + (v.lod ? 0 : 0.3)) * (1 - 0.85 * diveK)).toFixed(3)})`;
         ctx.beginPath();
         lastObj = v.obj;
       }
@@ -873,10 +880,10 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (lastObj > -2) ctx.stroke();
     linkNodes(sfx, sfy, fb, NF, fieldSp * 1.6 * z, 1, 0.1, fsc, z, fcode);
     flush(0.35);
-    if (NM) {
+    if (NM && diveK < 0.97) {
       const R0 = (veins.find((v) => v.lod) || { R: 8 * u }).R * z;
       const L = Math.max(5, R0 * 0.42 * 1.75);
-      linkNodes(smx, smy, mb, NM, L, 0.6, 0.2);
+      linkNodes(smx, smy, mb, NM, L, 0.6 * (1 - diveK), 0.2);
       flush(0.3);
     }
     drawThreads();
@@ -894,7 +901,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     ctx.fill();
     ctx.fillStyle = 'rgba(220, 255, 255, 0.54)';
     ctx.beginPath();
-    for (let i = 0; i < NM; i += 3) {
+    for (let i = 0; diveK < 0.6 && i < NM; i += 3) {
       if (mb[i] < 0.05) continue;
       const tw = Math.sin(T * 2.2 + mph[i] * 7);
       if (tw < 0.55) continue;
@@ -948,6 +955,17 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
     if (overlay) { ctx.setTransform(DPR * VK, 0, 0, DPR * VK, 0, 0); overlay(ctx); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
+    if (flash > 0.003) {
+      // вспышка взрыва: свет из середины области, кольцом расходится и гаснет
+      const r = Math.max(W, H) * (0.25 + 0.9 * (1 - flash)), g = ctx.createRadialGradient(flashX, flashY, 0, flashX, flashY, r);
+      g.addColorStop(0, `rgba(200, 255, 255, ${(0.55 * flash).toFixed(3)})`);
+      g.addColorStop(0.35, `rgba(0, 242, 254, ${(0.28 * flash).toFixed(3)})`);
+      g.addColorStop(1, 'rgba(0, 242, 254, 0)');
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = 'source-over';
+    }
     if (fade.veil > 0.001) { ctx.fillStyle = `rgba(1, 3, 6, ${Math.min(1, fade.veil).toFixed(3)})`; ctx.fillRect(0, 0, W, H); }
     placeSlots();
   }
@@ -1002,12 +1020,13 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     T += dt;
     snd = hearFn ? hearFn(dt) || SILENT : SILENT;
     stepFade(dt);
+    flash = flash > 0.003 ? flash * Math.exp(-dt * 3.2) : 0;
     if (tween) stepTween(dt);
     if (rama) stepFrame(dt);
     touchFocus();
     if (++hoverTick % 4 === 0) {
-      const i = mouse.in && tool === 'view' && !rama ? portalAt(mouse.x, mouse.y) : -1;
-      portalHover = i >= 0 && !!scene.objects[i].inner;
+      hoverEntry = mouse.in && tool === 'view' && !rama ? portalAt(mouse.x, mouse.y) : null;
+      portalHover = !!(hoverEntry && hoverEntry.inner);
     }
     hear(dt);
     stepWaves();
@@ -1143,8 +1162,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
         clampCam();
         // щипок в пределе — как колёсико в пределе: центр экрана (курсор телефона) над областью — окно, иначе волна
         if (cam.zoom <= z0 * 1.002) {
-          const i = portalAt(W / 2, H / 2);
-          if (i >= 0) openFrame(i, true);
+          const en = portalAt(W / 2, H / 2);
+          if (en) openFrame(en, false); // дальше щипок копит напор, как колёсико
           else if (T - lastPinchPulse > 0.6) { lastPinchPulse = T; pulse(W / 2, H / 2, 0.9); }
         }
       }
@@ -1215,7 +1234,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     const z0 = cam.zoom;
     // Внутри алеф-нуля вглубь можно только туда, где есть вход (область окна, страницы, следующего алеф-нуля);
     // над пустым местом приближение стоит, и колёсико бьёт басовой волной.
-    if (tool === 'view' && SPACE !== 'main' && e.deltaY < 0 && portalAt(e.clientX * VK, e.clientY * VK) < 0) {
+    if (tool === 'view' && SPACE !== 'main' && e.deltaY < 0 && !portalAt(e.clientX * VK, e.clientY * VK)) {
       const fitZ = cam.clone().fit(scene.bounds(), W, H, 0.05, 0, ZOOM_MAX).zoom;
       if (cam.zoom >= fitZ * 1.15) { wheelPulse(e.clientX * VK, e.clientY * VK, Math.abs(e.deltaY * k)); return; }
     }
@@ -1228,8 +1247,9 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     cameraChanged();
     // приближать дальше некуда: над областью-входом — объект фиксируется в раму, иначе пространство вздрагивает
     if (tool === 'view' && e.deltaY < 0 && cam.zoom <= z0 * 1.002) {
-      const i = portalAt(e.clientX * VK, e.clientY * VK);
-      if (i >= 0) openFrame(i, false);
+      // переход играет сам, своей скоростью: колёсико его только запускает (см. stepFrame)
+      const en = portalAt(e.clientX * VK, e.clientY * VK);
+      if (en) { openFrame(en, false); if (rama) frameWheel(e.deltaY * k); }
       else wheelPulse(e.clientX * VK, e.clientY * VK, Math.abs(e.deltaY * k)); // упор в пределе над пустым местом — басовая волна по сети
     }
   }, { passive: false });
@@ -1281,6 +1301,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     for (let k = order.length - 1; k >= 0; k--) {
       const o = scene.objects[order[k]];
       if (o.area && o.area.length >= 3 && inPoly(o.area, wx, wy)) return order[k];
+      if (o.doors && o.doors.some((d) => d && d.area && d.area.length >= 3 && inPoly(d.area, wx, wy))) return order[k];
     }
     return -1;
   }
@@ -1376,12 +1397,12 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   /** Вход под точкой экрана: объект, в чью область (многоугольник узлов) смотрит курсор; из нескольких — меньший. */
   function portalAt(sx, sy) {
     const [wx, wy] = cam.toWorld(sx, sy, W, H);
-    let best = -1, area = Infinity;
-    scene.objects.forEach((o, j) => {
-      if (!kindOf(o) || !inPoly(o.area, wx, wy)) return;
+    let best = null, area = Infinity;
+    for (const o of entriesOf(scene)) {
+      if (!kindOf(o) || !inPoly(o.area, wx, wy)) continue;
       const b = areaBounds(o), a = (b.x1 - b.x0) * (b.y1 - b.y0);
-      if (a < area) { best = j; area = a; }
-    });
+      if (a < area) { best = o; area = a; }
+    }
     return best;
   }
 
@@ -1434,6 +1455,16 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
           for (const l of w.links) { const x = el('a', l.label); x.href = l.href; const i = el('li'); i.append(x); sub.append(i); }
           li.append(sub);
         }
+      }
+      if (o.doors && o.doors.length) {
+        const sub = el('ul');
+        for (const d of o.doors) {
+          const i = el('li'), label = d.label || (d.window && d.window.title) || o.label, h = d.inner ? spaceUrl(d.inner) : d.href;
+          if (h) { const x = el('a', label); x.href = h; i.append(x); } else i.append(label);
+          if (d.window && d.window.text) i.append(el('p', d.window.text));
+          sub.append(i);
+        }
+        li.append(sub);
       }
       ul.append(li);
     }
@@ -1665,7 +1696,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   /** Войти в алеф-нуль объекта i: раздуть объект до экрана, затемнить, сменить сцену, проявить её изнутри. */
   function goIn(i, fromHistory) {
-    const o = scene.objects[i];
+    const o = entryOf(i);
     if (!o || !o.inner || going) return;
     const target = o.inner, from = SPACE, id = o.id;
     if (win) closeWindow();
@@ -1718,7 +1749,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     loadScene(target).catch(() => null).then((j) => {
       if (!j) { going = null; fade.veilTo = 0; return; }
       if (!fromHistory) history.pushState({ space: target }, '', spaceUrl(target));
-      const back = Scene.from(j).objects.find((o) => o.inner === was);
+      const sc = Scene.from(j), back = entriesOf(sc).find((o) => o.inner === was) || sc.objects.find((o) => o.inner === was);
       const came = ups[0] && back && ups[0].from === back.id ? ups[0].cam : null;
       // родитель родителя неизвестен без сервера: страница пространства отдаёт его в data-parent при прямом заходе
       swapScene(j, target, target === 'main' ? null : 'main', null);
@@ -1746,8 +1777,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     const m = /^\/in\/([a-z0-9-]{1,32})\/?$/.exec(location.pathname);
     const target = m ? m[1] : 'main';
     if (target === SPACE) return;
-    const i = scene.objects.findIndex((o) => o.inner === target);
-    if (i >= 0) goIn(i, true);
+    const en = entriesOf(scene).find((o) => o.inner === target) || scene.objects.find((o) => o.inner === target);
+    if (en) goIn(en, true);
     else goOut(true, target);
   });
 
@@ -1765,9 +1796,16 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     try { const u = new URL(href, location.origin); return u.origin === location.origin && !/^\/(k|in)(\/|$)/.test(u.pathname) ? u.pathname : null; }
     catch { return null; }
   };
-  const FRAME_WHEEL = 0.0012; // доля раскрытия на пиксель колёсика
   let rama = null; // { o, kind: page|window|widget|space, path, from, k, want, x, y, w, h, pushed, dive, base }
-  const DIVE_MIN = 2.2, DIVE_MAX = 14; // во сколько раз камера уходит вглубь области при провале
+  // во сколько раз камера уходит вглубь области при провале: до пустого континуума — соседние узлы поля
+  // расходятся на DIVE_EMPTY меньшей стороны экрана, между ними пустота (там потом и рисовать)
+  const DIVE_MIN = 2.2, DIVE_MAX = 80;
+  // Переход играет сам — взрывом, одной скоростью: колёсико (щипок) только копит напор в пределе над областью.
+  // Напор затухает: медленная прокрутка его не набирает, сильная — набирает; за порогом окна (frame.push) — взрыв.
+  // До порога область натягивается (камера чуть отходит, узлы области светятся); отпустили — напор стекает, всё как было.
+  const BURST_IN = 1.25, BURST_OUT = 0.8, BOOM_AT = 0.2, PRESS_DECAY = 2.2;
+  let flash = 0, flashX = 0, flashY = 0; // вспышка взрыва: мягкий свет из точки, гаснет сам
+  let diveK = 0; // насколько глубоко провал (0…1): жилы и плазма тают, остаются растянутые узлы
   const pages = []; // стопка страниц внутри рамы
   let pageEl = null, pageBody = null, pageBack = null, pageReq = 0;
   const lerp = (a, b, t) => a + (b - a) * t;
@@ -1790,11 +1828,16 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     pageBody.className = 'page-body';
     pageEl.append(bar, pageBody);
     // колёсико над блоками: текст прокручивается, пока есть куда; дальше «назад» сводит раму
+    // докрутили текст до конца и давят дальше — тот же напор, что на входе: за порогом окно схлопывается
+    let over = 0, overT = 0;
     pageEl.addEventListener('wheel', (e) => {
       if (!rama || e.deltaY <= 0) return;
-      if (pageEl.scrollTop + pageEl.clientHeight < pageEl.scrollHeight - 2) return;
+      if (pageEl.scrollTop + pageEl.clientHeight < pageEl.scrollHeight - 2) { over = 0; return; }
       e.preventDefault();
-      frameWheel(e.deltaY * (e.deltaMode === 1 ? 16 : 1));
+      const now = performance.now();
+      over = over * Math.exp(-(now - overT) / 450) + e.deltaY * (e.deltaMode === 1 ? 16 : 1);
+      overT = now;
+      if (over > 420) { over = 0; frameWheel(1); }
     }, { passive: false });
     pageEl.addEventListener('click', (e) => {
       const a = e.target.closest && e.target.closest('a[href]');
@@ -1822,6 +1865,37 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     const x = Math.max(0, x0), y = Math.max(0, y0);
     return { x, y, w: Math.max(8, Math.min(W, x1) - x), h: Math.max(8, Math.min(H, y1) - y) };
   }
+  /*
+   * Входы сцены: объект с областью и каждая его область-вход (doors) — у области своё содержимое, а жилы, такт и связи
+   * — объекта. Вход области — лёгкая обёртка с тем же видом, что у объекта (area, href, inner, widget, window, frameGet).
+   */
+  const doorCache = new WeakMap();
+  function doorOf(o, k) {
+    const d = o.doors[k];
+    let m = doorCache.get(d);
+    if (!m) {
+      m = {
+        id: `${o.id}.${k + 1}`, parent: o, door: d,
+        get label() { return d.label || (d.window && d.window.title) || o.label; },
+        get area() { return d.area; }, get href() { return d.href; }, get inner() { return d.inner; },
+        get widget() { return d.widget; }, get window() { return d.window; }, get links() { return o.links; },
+        frameGet: (key) => (d.frame && typeof d.frame[key] === 'number' ? d.frame[key] : M.FRAME_DEFAULTS[key]),
+        bounds: () => { const b = areaBounds(m); return b.x1 >= b.x0 ? b : { ...M.EMPTY }; },
+        get: (key) => o.get(key),
+      };
+      doorCache.set(d, m);
+    }
+    return m;
+  }
+  function entriesOf(sc) {
+    const out = [];
+    for (const o of sc.objects) {
+      if (o.area && o.area.length >= 3) out.push(o);
+      if (o.doors) o.doors.forEach((d, k) => { if (d && d.area && d.area.length >= 3) out.push(doorOf(o, k)); });
+    }
+    return out;
+  }
+  const entryOf = (i) => (typeof i === 'number' ? scene.objects[i] : i);
   // Входом служит только объект с областью: окно открывается приближением в неё, иначе — никак.
   const kindOf = (o) => (!o.area || o.area.length < 3 ? null : o.inner ? 'space' : widgetOk(o.widget) ? 'widget' : o.window ? 'window' : o.href && ownPath(o.href) ? 'page' : null);
   /** Виджет доступен: разделы панели — только хранителю в сессии, плеер и вход — если их элемент есть на странице. */
@@ -1847,7 +1921,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   /** Начать раму у объекта i. auto — раскрыть до конца само (клик); иначе раскрытие ведёт колёсико. */
   function openFrame(i, auto) {
-    const o = scene.objects[i], kind = o && kindOf(o);
+    const o = entryOf(i), kind = o && kindOf(o);
     if (!kind || going) return;
     if (win) closeWindow();
     highlight(-1);
@@ -1855,6 +1929,9 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     rama = { o, kind, path: kind === 'page' ? ownPath(o.href) : null, from: objRect(o), k: 0, want: auto ? 1 : null, pushed: false, gen: -1, ...frameParams(o) };
     if (kind === 'space') openPortal(rama);
     else { rama.dive = true; rama.base = cam.clone(); }
+    // auto (клик, клавиатура, редактор, щипок) — взрыв сразу; иначе колёсико копит напор до порога
+    if (auto) burst(rama);
+    else { rama.charge = true; rama.v = 0; rama.q = 0; rama.idle = 0; }
     placeFrame();
     if (kind !== 'space') loadFrame();
     loop();
@@ -1871,16 +1948,20 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   /** Камера в конце провала: середина области — в середине экрана, рамка области накрывает экран. */
   function diveCam(f) {
     const b = f.base, to = b.clone();
+    const depth = f.o && f.o.frameGet ? f.o.frameGet('depth') : M.FRAME_DEFAULTS.depth;
+    const empty = (depth * Math.min(W, H)) / Math.max(1e-6, fieldSp * b.zoom);
+    let cover = 0;
     if (f.o && f.o.area && f.o.area.length >= 3) {
       const a = areaBounds(f.o), aw = Math.max(1e-6, (a.x1 - a.x0) * b.zoom), ah = Math.max(1e-6, (a.y1 - a.y0) * b.zoom);
       to.x = (a.x0 + a.x1) / 2; to.y = (a.y0 + a.y1) / 2;
-      to.zoom = b.zoom * Math.max(DIVE_MIN, Math.min(DIVE_MAX, Math.max(W / aw, H / ah)));
-    } else to.zoom = b.zoom * DIVE_MIN;
+      cover = Math.max(W / aw, H / ah);
+    }
+    to.zoom = b.zoom * Math.max(DIVE_MIN, Math.min(DIVE_MAX, Math.max(cover, empty)));
     return to;
   }
   /** Провал: масштаб растёт по экспоненте, а середина области идёт к середине экрана по прямой — падаем прямо в неё. */
   function placeDive(f) {
-    const b = f.base, to = diveCam(f), e = ease(f.k), z = Math.exp(Math.log(b.zoom) + (Math.log(to.zoom) - Math.log(b.zoom)) * e);
+    const b = f.base, to = diveCam(f), e = f.k, z = Math.exp(Math.log(b.zoom) + (Math.log(to.zoom) - Math.log(b.zoom)) * e);
     const q = ((1 - e) * b.zoom) / z;
     cam.zoom = z; cam.x = to.x - (to.x - b.x) * q; cam.y = to.y - (to.y - b.y) * q;
     f.x = 0; f.y = 0; f.w = W; f.h = H; f.hole = null;
@@ -1915,12 +1996,63 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   }
 
   /** Кадр рамы: раскрытие к цели (клик, «назад»), пересчёт прямоугольника, вход в пространство, закрытие. */
+  /** Кривая взрыва: вдох (камера чуть отходит), затем рывок с мягкой посадкой. k0 — откуда (после напора). */
+  function burstK(u, k0, dive) {
+    if (u < BOOM_AT) return k0 - (dive ? 0.06 : 0) * Math.sin((Math.PI / 2) * (u / BOOM_AT)) - (dive ? 0 : 0.04 * k0 * (u / BOOM_AT));
+    const v = (u - BOOM_AT) / (1 - BOOM_AT), from = k0 - (dive ? 0.06 : 0);
+    return from + (1 - from) * (1 - Math.pow(1 - v, 4));
+  }
+  function burst(f) {
+    f.charge = false;
+    f.want = null;
+    f.anim = { dir: 1, t: 0, dur: BURST_IN, k0: f.k, boomed: false };
+    if (reduce.matches) { f.anim = null; f.k = 1; }
+    loop();
+  }
+  function implode(f) {
+    f.charge = false;
+    f.want = null;
+    f.anim = { dir: -1, t: 0, dur: BURST_OUT, k0: f.k };
+    if (reduce.matches) { f.anim = null; f.k = 0; }
+    loop();
+  }
+  /** Взрыв: басовая волна и вспышка из середины области на экране. */
+  function boom(f) {
+    let x = W / 2, y = H / 2;
+    if (f.dive) { const to = diveCam(f); [x, y] = cam.toScreen(to.x, to.y, W, H); }
+    pulse(x, y, 1.7, 2200);
+    flash = 1; flashX = x; flashY = y;
+  }
   function stepFrame(dt) {
     const f = rama;
+    // «назад»/«вперёд», Esc, «Наружу» ставят want — переход всё равно играет сам
     if (f.want !== null) {
-      const d = f.want - f.k, sp = dt * 2.4;
-      f.k = Math.abs(d) <= sp || reduce.matches ? f.want : f.k + Math.sign(d) * sp;
-      if (f.k === f.want) { if (f.want === 0) { closeFrameNow(); return; } f.want = null; }
+      const w = f.want;
+      f.want = null;
+      if (w >= 1 && f.k < 1 && !(f.anim && f.anim.dir > 0)) burst(f);
+      else if (w <= 0 && !(f.anim && f.anim.dir < 0)) implode(f);
+    }
+    if (f.charge) {
+      f.v *= Math.exp(-dt * PRESS_DECAY);
+      f.idle += dt;
+      const push = f.o && f.o.frameGet ? f.o.frameGet('push') : M.FRAME_DEFAULTS.push;
+      f.q = Math.min(1, f.v / push);
+      f.k = f.dive ? -0.05 * f.q : 0.14 * f.q; // натяжение: камера отходит / дыра приоткрывается
+      if (f.v >= push) { boom(f); burst(f); f.anim.t = BOOM_AT; f.anim.boomed = true; }
+      else if (f.idle > 0.25 && f.v < push * 0.02) { closeFrameNow(); return; }
+    }
+    if (f.anim) {
+      const a = f.anim;
+      a.t = Math.min(1, a.t + dt / a.dur);
+      if (a.dir > 0) {
+        f.k = burstK(a.t, a.k0, f.dive);
+        if (!a.boomed && a.t >= BOOM_AT) { a.boomed = true; boom(f); }
+      } else f.k = a.k0 * (1 - ease(a.t));
+      if (a.t >= 1) {
+        f.anim = null;
+        if (a.dir < 0) { if (f.pushed) history.replaceState(baseState(), '', baseUrl()); closeFrameNow(); pulse(W / 2, H / 2, 0.5, 900); return; }
+        f.k = 1;
+      }
     }
     placeFrame();
     if (f.k >= 1 && f.kind === 'space') {
@@ -1946,11 +2078,13 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   /** Колёсико при раме: вглубь — раскрыть, назад — свести (до нуля — рама закрыта, холст снова масштабируется). */
   function frameWheel(dy) {
     const f = rama;
-    f.want = null;
-    f.k = Math.max(0, Math.min(1, f.k - dy * FRAME_WHEEL));
-    if (f.k <= 0) { if (f.pushed) history.replaceState(baseState(), '', baseUrl()); closeFrameNow(); return; }
-    if (f.k < 1 && f.pushed) { f.pushed = false; history.replaceState(baseState(), '', baseUrl()); }
-    loop();
+    if (f.anim) return; // взрыв и обратное схлопывание не ускорить и не остановить
+    if (f.charge) {
+      if (dy < 0) { f.v += -dy; f.idle = 0; } else f.v = Math.max(0, f.v - dy * 2);
+      loop();
+      return;
+    }
+    if (dy > 0 && f.k >= 1) implode(f); // открытое окно: колёсико назад — схлопнуться обратно
   }
   const baseUrl = () => spaceUrl(SPACE), baseState = () => ({ space: SPACE });
 
@@ -2281,7 +2415,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     get space() { return SPACE; },
     /** Нити входа на экране (пиксели CSS): куда ведут и середина кривой. */
     get threads() { return threads.map((t, i) => { const q = threadPath(t, i); return { id: t.id, w: t.w, x: (0.25 * q[0] + 0.5 * q[2] + 0.25 * q[4]) / VK, y: (0.25 * q[1] + 0.5 * q[3] + 0.25 * q[5]) / VK }; }); },
-    get rama() { return rama && { kind: rama.kind, k: rama.k, want: rama.want, path: rama.path }; },
+    get rama() { return rama && { kind: rama.kind, k: rama.k, want: rama.want, path: rama.path, charge: !!rama.charge, q: rama.q || 0, anim: !!rama.anim }; },
     goIn, goOut,
     /** Редактор: области, чьи узлы светятся (многоугольники мира). */
     set marks(list) { marks = list || []; },
@@ -2289,11 +2423,11 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     pulse(sx, sy, amp) { pulse(sx * VK, sy * VK, amp == null ? 1 : amp); },
     /** Редактор: долететь к области объекта и раскрыть его окно. */
     openFrameOf(id) {
-      const i = scene.objects.findIndex((o) => o.id === id), o = scene.objects[i];
-      if (i < 0 || !kindOf(o)) return false;
+      const o = entriesOf(scene).find((x) => x.id === id);
+      if (!o || !kindOf(o)) return false;
       if (rama) closeFrameNow();
       flyTo(areaBounds(o));
-      if (tween) tween.done = () => openFrame(i, true); else openFrame(i, true);
+      if (tween) tween.done = () => openFrame(o, true); else openFrame(o, true);
       return true;
     },
     /** Слух холста: f(dt) → { bands, low, mid, high, level, beat } (music.js). null — тишина. */

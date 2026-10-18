@@ -57,8 +57,15 @@ export const FRAME = {
   round: [0, 1, 0.25],
   ring: [4, 160, 36],
   far: [0, 1, 0.75],
+  /** Порог напора: сколько пикселей колёсика (с затуханием — по силе, а не по счёту) нужно, чтобы область взорвалась внутрь. */
+  push: [60, 4000, 700],
+  /** Глубина провала: на какую долю экрана расходятся соседние узлы поля в конце (больше — пустее континуум). */
+  depth: [0.05, 1, 0.3],
 };
 export const FRAME_DEFAULTS = defaults(FRAME);
+/** Области-входы объекта: сколько и какие поля у каждой (то же содержимое окна, что у объекта). */
+export const DOORS_MAX = 16;
+export const DOOR_KEYS = ['area', 'label', 'href', 'inner', 'widget', 'window', 'frame'];
 export const STYLE_DEFAULTS = defaults(STYLE);
 export const SPACE_DEFAULTS = defaults(SPACE);
 
@@ -164,6 +171,8 @@ export class SceneObject {
     this.z = typeof src.z === 'number' ? src.z : 0;
     this.strokes = clone(src.strokes || []);
     this.area = src.area ? clone(src.area) : null;
+    /** Ещё области объекта — свои входы: { area, label?, href?, inner?, widget?, window?, frame? } (до DOORS_MAX). */
+    this.doors = src.doors ? clone(src.doors) : null;
     this.window = src.window ? clone(src.window) : null;
     this.frame = src.frame ? clone(src.frame) : null;
     /** Виджет в окне: открывается приближением в область, как окно. */
@@ -194,12 +203,19 @@ export class SceneObject {
         const r = p[2] || s.r;
         b = union(b, { x0: p[0] - r, y0: p[1] - r, x1: p[0] + r, y1: p[1] + r });
       }
-    for (const [x, y] of this.area || []) b = union(b, { x0: x, y0: y, x1: x, y1: y });
+    for (const pts of this.areas()) for (const [x, y] of pts) b = union(b, { x0: x, y0: y, x1: x, y1: y });
     return b;
+  }
+  /** Все многоугольники областей объекта: основная и области входов. */
+  areas() {
+    const out = [];
+    if (this.area) out.push(this.area);
+    for (const d of this.doors || []) if (d.area) out.push(d.area);
+    return out;
   }
   translate(dx, dy) {
     for (const s of this.strokes) for (const p of s.pts) { p[0] = r1(p[0] + dx); p[1] = r1(p[1] + dy); }
-    if (this.area) for (const p of this.area) { p[0] = r1(p[0] + dx); p[1] = r1(p[1] + dy); }
+    for (const a of this.areas()) for (const p of a) { p[0] = r1(p[0] + dx); p[1] = r1(p[1] + dy); }
     return this;
   }
   /** Масштаб вокруг точки мира: жилы, их радиусы и область. */
@@ -211,7 +227,7 @@ export class SceneObject {
         if (p.length > 2) p[2] = r2(Math.max(0.1, p[2] * k));
       }
     }
-    if (this.area) for (const p of this.area) { p[0] = r1(cx + (p[0] - cx) * k); p[1] = r1(cy + (p[1] - cy) * k); }
+    for (const a of this.areas()) for (const p of a) { p[0] = r1(cx + (p[0] - cx) * k); p[1] = r1(cy + (p[1] - cy) * k); }
     return this;
   }
   /**
@@ -227,7 +243,7 @@ export class SceneObject {
         if (p.length > 2) p[2] = r2(Math.min(5000, Math.max(0.1, p[2] * k)));
       }
     }
-    if (this.area) for (const p of this.area) { p[0] = r1(cx + (p[0] - cx) * sx); p[1] = r1(cy + (p[1] - cy) * sy); }
+    for (const a of this.areas()) for (const p of a) { p[0] = r1(cx + (p[0] - cx) * sx); p[1] = r1(cy + (p[1] - cy) * sy); }
     return this;
   }
   /** Поворот вокруг точки мира на a радиан (по часовой на экране: ось y вниз). */
@@ -235,7 +251,7 @@ export class SceneObject {
     const c = Math.cos(a), s = Math.sin(a);
     const turn = (p) => { const x = p[0] - cx, y = p[1] - cy; p[0] = r1(cx + x * c - y * s); p[1] = r1(cy + x * s + y * c); };
     for (const st of this.strokes) for (const p of st.pts) turn(p);
-    if (this.area) for (const p of this.area) turn(p);
+    for (const a of this.areas()) for (const p of a) turn(p);
     return this;
   }
   toJSON() {
@@ -246,6 +262,12 @@ export class SceneObject {
     if (this.z) o.z = this.z;
     o.strokes = this.strokes;
     if (this.area && this.area.length >= 3) o.area = this.area;
+    const doors = (this.doors || []).filter((d) => d.area && d.area.length >= 3).map((d) => {
+      const x = {};
+      for (const k of DOOR_KEYS) if (d[k] != null && !(typeof d[k] === 'object' && !Array.isArray(d[k]) && !Object.keys(d[k]).length)) x[k] = d[k];
+      return x;
+    });
+    if (doors.length) o.doors = doors;
     if (this.window && Object.keys(this.window).length) o.window = this.window;
     if (this.frame && Object.keys(this.frame).length) o.frame = this.frame;
     if (this.widget) o.widget = this.widget;

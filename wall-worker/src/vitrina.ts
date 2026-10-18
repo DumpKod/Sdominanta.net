@@ -102,6 +102,11 @@ export async function spacePage(req: Request, env: Env, o: string, space: string
     if (w?.title) s += `\n  ${inline(w.title)}`;
     if (w?.text) s += `\n  ${inline(w.text, 4000)}`;
     for (const l of w?.links ?? []) s += `\n  - [${inline(l.label)}](${o}${l.href})`;
+    for (const d of x.doors ?? []) {
+      const dh = d.inner ? `/in/${d.inner}` : d.href, label = inline(d.label || d.window?.title || x.label);
+      s += dh ? `\n  - [${label}](${o}${dh})` : `\n  - ${label}`;
+      if (d.window?.text) s += `\n    ${inline(d.window.text, 4000)}`;
+    }
     return s;
   });
   const title = `Пространство ${space}`;

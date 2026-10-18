@@ -544,6 +544,25 @@ describe('Окно объекта: рама из узлов области', () 
     for (const s of ['function placeDive(', 'function diveCam(', 'if (!force && rama && rama.dive) return false;', 'cam.x = base.x; cam.y = base.y; cam.zoom = base.zoom', "classList.add('dive')"])
       expect(vitrinaJs, s).toContain(s);
   });
+  it('doors — ещё области объекта со своим содержимым; модель двигает их вместе с объектом и не сохраняет пустые', () => {
+    const area = [[0, 0], [10, 0], [10, 10]];
+    expect(validateScene(tiny({ doors: [{ area, href: '/wall/rules', label: 'Правила', frame: { push: 300, depth: 0.5 } }, { area, inner: 'net' }] })).ok).toBe(true);
+    expect(validateScene(tiny({ doors: [{ href: '/wall' }] })).ok).toBe(false);
+    expect(validateScene(tiny({ doors: [{ area, href: 'https://x.y' }] })).ok).toBe(false);
+    expect(validateScene(tiny({ doors: [{ area, color: 1 }] })).ok).toBe(false);
+    expect(validateScene(tiny({ doors: Array.from({ length: 17 }, () => ({ area })) })).ok).toBe(false);
+    const o = new M.SceneObject({ id: 'a', label: 'A', strokes: [], doors: [{ area: area.map((p) => [...p]), window: { title: 'T' } }, {}] });
+    o.translate(5, 0);
+    const j = o.toJSON();
+    expect(j.doors).toHaveLength(1);
+    expect(j.doors[0].area[0]).toEqual([5, 0]);
+    expect(o.bounds().x1).toBe(15);
+  });
+  it('переход играет сам: напор колёсика до порога frame.push, затем взрыв; колёсико не ускоряет и не останавливает', () => {
+    for (const s of ['function burst(', 'function implode(', 'function boom(', 'PRESS_DECAY', "frameGet('push')", 'if (f.anim) return;', 'entriesOf(scene)'])
+      expect(vitrinaJs, s).toContain(s);
+    expect(vitrinaJs).not.toContain('FRAME_WHEEL');
+  });
   it('выход из алеф-нуля — в ту же точку экрана, откуда вошли', () => {
     expect(vitrinaJs).toContain('cam: cam.clone() };');
     expect(vitrinaJs).toContain('came ? came.clone()');

@@ -108,39 +108,92 @@
       for (const s of o.strokes) { s.r = r; for (const p of s.pts) p.length = 2; }
       changed(true);
     });
-    // Окно объекта, по шагам: 1) область — кистью «Область» по узлам; 2) что внутри; 3) рама; 4) проверить.
-    // Окно раскрывается в конце приближения над областью: узлы области растекаются в рамку, середина пустеет под содержимое.
-    const winBox = section('Окно (приближение в область)', true);
+    // Входы объекта, по шагам: 1) выбрать область (основная или ещё одна — у объекта их может быть много);
+    // 2) закрасить её кистью «Область» по узлам; 3) что внутри; 4) как взрывается и раскрывается; 5) проверить.
+    // Вход срабатывает в пределе приближения над областью: колёсико копит напор, за порогом — взрыв внутрь.
+    const winBox = section('Входы: области и окна', true);
+    const fDoor = input('select'), dLabel = input(), dHref = input(), dInner = input();
     const winState = el('p', 'kp-note', '');
     const winRow = el('div', 'kp-row');
     button(winRow, 'Закрасить область', () => setTool('area'), '', 'Инструмент «Область»: кистью по узлам, Alt — стереть');
     button(winRow, 'Убрать область', () => {
-      for (const o of selected()) o.area = null;
+      const o = first();
+      if (!o) return;
+      if (doorIx >= 0) { o.doors.splice(doorIx, 1); if (!o.doors.length) o.doors = null; doorIx = -1; }
+      else o.area = null;
       changed(true);
       showFields();
-    });
-    button(winRow, 'Проверить окно', () => {
+    }, '', 'Выбранную в списке: основную — только контур, область-вход — целиком');
+    button(winRow, 'Проверить вход', () => {
       const o = first();
       if (!o) return;
       readFields();
       setPreview(true);
-      if (!E.openFrameOf(o.id)) note.textContent = 'Окну нужны область и содержимое: текст, адрес страницы или алеф-нуль.';
-    }, '', 'Предпросмотр: долететь к области и раскрыть окно');
-    winBox.append(winState, winRow, el('p', 'kp-note', 'Внутри окна — виджет, или текст ниже, или страница из поля «Адрес», или алеф-нуль из поля «Алеф-нуль».'));
-    winBox.append(wrap(fWidget, 'Виджет в окне: живое управление (разделы хранителя видит только хранитель)'));
-    winBox.append(wrap(fTitle, 'Заголовок'), wrap(fText, 'Текст'), wrap(fLinks, 'Ссылки, по строке «подпись | /путь»'));
-    const FRAME_NAMES = { width: 'Ширина колонки текста, px', aspect: 'Высота к ширине (только старая рамка)', round: 'Форма: 0 прямоугольник — 1 овал (портал)', ring: 'Рамка из узлов, px (портал)', far: 'Поле под текстом тише' };
+      if (!E.openFrameOf(doorIx >= 0 ? `${o.id}.${doorIx + 1}` : o.id)) note.textContent = 'Входу нужны область и содержимое: текст, адрес, виджет или алеф-нуль.';
+    }, '', 'Предпросмотр: долететь к области и взорваться внутрь');
+    const doorOnly = el('div', '');
+    doorOnly.append(
+      wrap(dLabel, 'Подпись входа (видят модели в <nav>); пусто — заголовок окна или подпись объекта'),
+      wrap(dHref, 'Адрес страницы внутри: относительный путь, например /wall/rules'),
+      wrap(dInner, 'Алеф-нуль внутри: имя пространства, пусто — не портал'),
+    );
+    const mainNote = el('p', 'kp-note', 'У основной области адрес и алеф-нуль — поля объекта выше.');
+    winBox.append(
+      wrap(fDoor, 'Область объекта: основная или ещё одна (до 16), у каждой своё содержимое'),
+      winState, winRow, mainNote, doorOnly,
+      wrap(fWidget, 'Виджет: живое управление (разделы хранителя видит только хранитель)'),
+      wrap(fTitle, 'Заголовок окна'), wrap(fText, 'Текст окна: по абзацу на строку'), wrap(fLinks, 'Ссылки, по строке «подпись | /путь»'),
+      el('p', 'kp-note', 'Порядок содержимого: алеф-нуль, виджет, текст окна, страница по адресу.'),
+    );
+    const FRAME_NAMES = {
+      push: 'Порог напора: сила колёсика до взрыва', depth: 'Глубина провала (пустота континуума)', width: 'Ширина колонки текста, px',
+      far: 'Поле под текстом тише', aspect: 'Высота к ширине (старая рамка)', round: 'Форма портала: 0 прямоугольник — 1 овал', ring: 'Кольцо узлов портала, px',
+    };
     const frameSliders = {};
-    for (const [k, [lo, hi]] of Object.entries(M.FRAME)) frameSliders[k] = slider(winBox, k, FRAME_NAMES[k], lo, hi, 'frame');
-    /** Что раскроется: та же очерёдность, что у движка (алеф-нуль, окно, страница). */
-    function winKind(o) {
-      if (!o) return 'Выберите объект.';
-      const has = o.area && o.area.length >= 3;
-      const what = o.inner ? `алеф-нуль «${o.inner}»` : o.widget ? `виджет «${WIDGET_NAMES[o.widget] || o.widget}»` : o.window ? 'окно с текстом' : o.href && /^\/(?!\/)/.test(o.href) && !/^\/(k|in)(\/|$)/.test(o.href) ? `страница ${o.href}` : null;
-      if (!has && !what) return 'Окна нет: закрасьте область и задайте содержимое.';
+    for (const k of ['push', 'depth', 'width', 'far', 'round', 'ring', 'aspect']) {
+      const [lo, hi] = M.FRAME[k];
+      frameSliders[k] = slider(winBox, k, FRAME_NAMES[k], lo, hi, 'frame');
+    }
+    let doorIx = -1; // -1 — основная область объекта, иначе номер в o.doors
+    /** Что правят поля окна: основная область — сам объект, область-вход — её запись в o.doors. */
+    function tgt() {
+      const o = first();
+      if (!o) return null;
+      if (doorIx >= 0 && o.doors && o.doors[doorIx]) return o.doors[doorIx];
+      doorIx = -1;
+      return o;
+    }
+    const frameOf = (t, k) => (t && t.frame && typeof t.frame[k] === 'number' ? t.frame[k] : M.FRAME[k][2]);
+    function fillDoors(o) {
+      fDoor.textContent = '';
+      fDoor.append(new Option('Основная область' + (o && o.area ? '' : ' (не закрашена)'), '-1'));
+      ((o && o.doors) || []).forEach((d, k) => fDoor.append(new Option(`Область ${k + 2}${d.label ? ' — ' + d.label : ''}${d.area ? '' : ' (не закрашена)'}`, String(k))));
+      fDoor.append(new Option('+ новая область', 'new'));
+      fDoor.value = String(doorIx);
+      fDoor.disabled = !o;
+    }
+    fDoor.addEventListener('change', () => {
+      const o = first();
+      if (!o) return;
+      if (fDoor.value === 'new') {
+        if ((o.doors || []).length >= M.DOORS_MAX) { note.textContent = `У объекта до ${M.DOORS_MAX} областей-входов.`; fDoor.value = String(doorIx); return; }
+        o.doors = o.doors || [];
+        o.doors.push({});
+        doorIx = o.doors.length - 1;
+        setTool('area');
+        note.textContent = 'Новая область: закрасьте её кистью по узлам, затем задайте, что внутри.';
+      } else doorIx = +fDoor.value;
+      showFields();
+    });
+    /** Что раскроется: та же очерёдность, что у движка (алеф-нуль, виджет, окно, страница). */
+    function winKind(t) {
+      if (!t) return 'Выберите объект.';
+      const has = t.area && t.area.length >= 3;
+      const what = t.inner ? `алеф-нуль «${t.inner}»` : t.widget ? `виджет «${WIDGET_NAMES[t.widget] || t.widget}»` : t.window ? 'окно с текстом' : t.href && /^\/(?!\/)/.test(t.href) && !/^\/(k|in)(\/|$)/.test(t.href) ? `страница ${t.href}` : null;
+      if (!has && !what) return 'Входа нет: закрасьте область и задайте содержимое.';
       if (!has) return `Внутри будет ${what}, но области нет: закрасьте её инструментом «Область».`;
-      if (!what) return 'Область есть, содержимого нет: текст, адрес или алеф-нуль.';
-      return `Готово: в конце приближения над областью раскроется ${what}.`;
+      if (!what) return 'Область есть, содержимого нет: текст, адрес, виджет или алеф-нуль.';
+      return `Готово: напор колёсика над областью взорвёт её внутрь — ${what}.`;
     }
     const SPACE_NAMES = { drift: 'Дрейф поля', density: 'Плотность', glow: 'Свечение', haze: 'Дымка (мягкий слой под линиями)', sound: 'Реакция поля на звук (0 — нет)', reach: 'Радиус музыки вокруг плеера (доля сцены)', horizon: 'Горизонт уровня выше (0 — чистый холст)' };
     const spaceBox = section('Пространство сцены');
@@ -185,7 +238,7 @@
       r.type = 'range'; r.min = String(lo); r.max = String(hi); r.step = String((hi - lo) / 100);
       row.append(top, r);
       parent.append(row);
-      const target = () => (kind === 'space' ? E.scene : first());
+      const target = () => (kind === 'space' ? E.scene : kind === 'frame' ? tgt() : first());
       r.addEventListener('input', () => {
         const t = target();
         if (!t) return;
@@ -227,7 +280,9 @@
     const selected = () => selIds.map(byId).filter(Boolean);
     const first = () => selected()[0] || null;
     function select(ids) {
+      const was = selIds[0];
       selIds = ids.filter((id, i) => ids.indexOf(id) === i && byId(id));
+      if (selIds[0] !== was) doorIx = -1;
       fillPick();
       showFields();
       E.rebuild(1);
@@ -273,8 +328,14 @@
     }
     function showFields() {
       const o = first();
-      for (const f of [fId, fLabel, fHref, fInner, fSlot, fWidget, fZ, fTitle, fText, fLinks]) f.disabled = !o;
-      fWidget.value = (o && o.widget) || '';
+      for (const f of [fId, fLabel, fHref, fInner, fSlot, fWidget, fZ, fTitle, fText, fLinks, dLabel, dHref, dInner]) f.disabled = !o;
+      const t = tgt();
+      fillDoors(o);
+      doorOnly.hidden = doorIx < 0; mainNote.hidden = doorIx >= 0;
+      dLabel.value = (doorIx >= 0 && t.label) || '';
+      dHref.value = (doorIx >= 0 && t.href) || '';
+      dInner.value = (doorIx >= 0 && t.inner) || '';
+      fWidget.value = (t && t.widget) || '';
       fRel.value = ((o && o.links) || []).map((l) => `${l.to} ${l.w ?? 0.5}`).join('\n');
       fRel.disabled = !o;
       for (const s of [...Object.values(sliders), ...Object.values(frameSliders)]) s.r.disabled = !o;
@@ -284,9 +345,9 @@
       fInner.value = (o && o.inner) || '';
       fSlot.value = (o && o.slot) || '';
       fZ.value = o ? String(o.z || 0) : '';
-      fTitle.value = (o && o.window && o.window.title) || '';
-      fText.value = (o && o.window && o.window.text) || '';
-      fLinks.value = ((o && o.window && o.window.links) || []).map((l) => `${l.label} | ${l.href}`).join('\n');
+      fTitle.value = (t && t.window && t.window.title) || '';
+      fText.value = (t && t.window && t.window.text) || '';
+      fLinks.value = ((t && t.window && t.window.links) || []).map((l) => `${l.label} | ${l.href}`).join('\n');
       for (const s of Object.values(sliders)) {
         const own = !!(o && o.style && typeof o.style[s.k] === 'number');
         const v = o ? (s.k === 'tubeR' ? o.tubeR() : o.get(s.k)) : M.STYLE[s.k][2];
@@ -295,13 +356,13 @@
         s.reset.hidden = !own;
       }
       for (const s of Object.values(frameSliders)) {
-        const own = !!(o && o.frame && typeof o.frame[s.k] === 'number');
-        const v = o ? o.frameGet(s.k) : M.FRAME[s.k][2];
+        const own = !!(t && t.frame && typeof t.frame[s.k] === 'number');
+        const v = frameOf(t, s.k);
         s.r.value = String(v);
         s.out.textContent = String(Math.round(v * 1000) / 1000) + (own ? '' : ' (общий)');
         s.reset.hidden = !own;
       }
-      winState.textContent = winKind(o);
+      winState.textContent = winKind(t);
       for (const s of Object.values(spaceSliders)) {
         const own = !!(E.scene.space && typeof E.scene.space[s.k] === 'number');
         const v = E.scene.get(s.k);
@@ -318,7 +379,13 @@
       o.href = fHref.value.trim() || null;
       o.inner = fInner.value.trim().toLowerCase() || null;
       o.slot = fSlot.value || null;
-      o.widget = fWidget.value || null;
+      const t = tgt();
+      t.widget = fWidget.value || null;
+      if (doorIx >= 0) {
+        t.label = dLabel.value.trim() || null;
+        t.href = dHref.value.trim() || null;
+        t.inner = dInner.value.trim().toLowerCase() || null;
+      }
       const rel = fRel.value.split('\n').map((l) => l.trim().split(/\s+/)).filter((l) => /^[a-z0-9-]{1,32}$/.test(l[0] || ''))
         .slice(0, 10).map(([to, w]) => ({ to, w: Math.max(0, Math.min(1, Number.isFinite(+w) ? +w : 0.5)) }));
       o.links = rel.length ? rel : null;
@@ -332,13 +399,13 @@
       if (fTitle.value.trim()) w.title = fTitle.value.trim();
       if (fText.value.trim()) w.text = fText.value.trim();
       if (links.length) w.links = links;
-      o.window = Object.keys(w).length ? w : null;
-      winState.textContent = winKind(o);
+      t.window = Object.keys(w).length ? w : null;
+      winState.textContent = winKind(t);
       const opt = [...pick.options].find((x) => x.value === o.id);
       if (opt) opt.textContent = `${o.id} — ${o.label}`;
     }
     pick.addEventListener('change', () => select(pick.value ? [pick.value] : []));
-    for (const f of [fLabel, fHref, fInner, fSlot, fWidget, fRel, fZ, fTitle, fText, fLinks]) {
+    for (const f of [fLabel, fHref, fInner, fSlot, fWidget, fRel, fZ, fTitle, fText, fLinks, dLabel, dHref, dInner]) {
       f.addEventListener('input', readFields);
       f.addEventListener('change', () => changed(f === fZ));
     }
@@ -491,12 +558,12 @@
     /** Начало правки ручкой: снимок жил и областей, чтобы каждый шаг считался от исходного вида без накопления округлений. */
     function startHandle(h, wx, wy) {
       const b = selected().reduce((a, o) => M.union(a, o.bounds()), { ...M.EMPTY });
-      const orig = selected().map((o) => ({ o, strokes: JSON.stringify(o.strokes), area: o.area ? JSON.stringify(o.area) : null }));
+      const orig = selected().map((o) => ({ o, strokes: JSON.stringify(o.strokes), area: o.area ? JSON.stringify(o.area) : null, doors: o.doors ? JSON.stringify(o.doors) : null }));
       drag = { kind: h.rot ? 'rotate' : 'stretch', h, b, orig, start: [wx, wy], moved: false };
     }
     function applyHandle(e, wx, wy) {
       const { h, b, orig } = drag;
-      for (const r of orig) { r.o.strokes = JSON.parse(r.strokes); r.o.area = r.area ? JSON.parse(r.area) : null; }
+      for (const r of orig) { r.o.strokes = JSON.parse(r.strokes); r.o.area = r.area ? JSON.parse(r.area) : null; r.o.doors = r.doors ? JSON.parse(r.doors) : null; }
       const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
       if (drag.kind === 'rotate') {
         let a = Math.atan2(wy - cy, wx - cx) - Math.atan2(drag.start[1] - cy, drag.start[0] - cx);
@@ -651,7 +718,7 @@
         }
       },
       cancel() {
-        if (drag && drag.orig) { for (const r of drag.orig) { r.o.strokes = JSON.parse(r.strokes); r.o.area = r.area ? JSON.parse(r.area) : null; } E.rebuild(2); }
+        if (drag && drag.orig) { for (const r of drag.orig) { r.o.strokes = JSON.parse(r.strokes); r.o.area = r.area ? JSON.parse(r.area) : null; r.o.doors = r.doors ? JSON.parse(r.doors) : null; } E.rebuild(2); }
         drag = null; band = null; paint = null;
         if (raw.length) { raw = []; E.setLive(null); }
       },
@@ -678,9 +745,10 @@
         if (!o) { note.textContent = 'Выберите объект или ведите кистью области по его жилам.'; return; }
         select([o.id]);
       }
-      const area = paintArea(o.area, p.pts, p.r, p.sub);
-      o.area = area;
-      note.textContent = area ? `Область: ${area.length} точек контура.` : 'Область стёрта.';
+      const t = doorIx >= 0 && o.doors && o.doors[doorIx] ? o.doors[doorIx] : o;
+      const area = paintArea(t.area, p.pts, p.r, p.sub);
+      t.area = area;
+      note.textContent = (doorIx >= 0 ? `Область ${doorIx + 2}: ` : 'Основная область: ') + (area ? `${area.length} точек контура.` : 'стёрта.');
       changed(true);
       showFields();
     }
@@ -709,7 +777,7 @@
     /* ---------- поверх кадра: выделение, точки, область, рамка выбора, мини-карта ---------- */
     E.setOverlay((c) => {
       // узлы в областях выделенных объектов светятся (в предпросмотре — нет: как у гостя)
-      E.marks = preview || tool === 'view' ? [] : selected().filter((o) => o.area).map((o) => o.area);
+      E.marks = preview || tool === 'view' ? [] : selected().flatMap((o) => o.areas());
       if (preview) return;
       const W = E.W, H = E.H;
       c.lineWidth = 1;
@@ -721,14 +789,22 @@
           const [x0, y0] = E.toScreen(b.x0, b.y0), [x1, y1] = E.toScreen(b.x1, b.y1);
           c.strokeStyle = 'rgba(0, 242, 254, 0.6)';
           c.strokeRect(x0 - 3, y0 - 3, x1 - x0 + 6, y1 - y0 + 6);
-          if (o.area) {
-            c.strokeStyle = 'rgba(250, 204, 21, 0.7)';
-            c.fillStyle = 'rgba(250, 204, 21, 0.05)';
+          // области объекта: выбранная в списке — ярче, у каждой номер
+          const list = [[o.area, -1], ...(o.doors || []).map((d, k) => [d.area, k])];
+          for (const [a, k] of list) {
+            if (!a || a.length < 3) continue;
+            const on = o === first() && k === doorIx;
+            c.strokeStyle = on ? 'rgba(250, 204, 21, 0.95)' : 'rgba(250, 204, 21, 0.45)';
+            c.fillStyle = on ? 'rgba(250, 204, 21, 0.09)' : 'rgba(250, 204, 21, 0.03)';
             c.beginPath();
-            o.area.forEach(([x, y], j) => { const [sx, sy] = E.toScreen(x, y); j ? c.lineTo(sx, sy) : c.moveTo(sx, sy); });
+            a.forEach(([x, y], j) => { const [sx, sy] = E.toScreen(x, y); j ? c.lineTo(sx, sy) : c.moveTo(sx, sy); });
             c.closePath();
             c.fill();
             c.stroke();
+            const [lx, ly] = E.toScreen(a[0][0], a[0][1]);
+            c.fillStyle = 'rgba(250, 204, 21, 0.9)';
+            c.font = '11px ui-monospace, monospace';
+            c.fillText(k < 0 ? '1' : String(k + 2), lx + 4, ly - 4);
           }
         }
         if (tool === 'select' && selIds.length) {
