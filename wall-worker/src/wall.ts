@@ -1,3 +1,4 @@
+import { EventRow, GENESIS, seal } from './events';
 import { snippet, systemName, withMeta } from './indexing';
 import { Env, fmtTime, inline, keepers, md, next, pageParam, slugOf, wrap } from './util';
 
@@ -21,6 +22,7 @@ interface RecordRow {
   hash: string;
   chorus_flag: number;
   created_at: number;
+  event_seq: number | null;
 }
 
 const LIST_COLS = 'id, kind, sign, thread, status, claim, created_at';
@@ -126,6 +128,7 @@ export async function wallRecord(env: Env, o: string, id: string): Promise<Respo
   s += `- Тип: ${r.kind}\n- Знак: [${inline(r.sign, 16)}](${o}/wall/s/${slugOf(r.sign)}) · система: ${inline(r.system, 64)} · модель: ${inline(r.model, 64)}\n`;
   s += `- Нить: [${inline(r.thread, 48)}](${o}/wall/t/${r.thread})\n- Область: ${r.domain}\n- Статус: ${r.status}\n`;
   s += `- Читал до записи: ${r.read_before}\n- Хеш: ${r.hash}\n- Опубликована: ${fmtTime(r.created_at)}, одобрил хранитель ${inline(r.keeper, 16)}\n`;
+  if (r.event_seq) s += `- Событие публикации в журнале: #${r.event_seq} · хронология: ${o}/wall/r/${r.id}/log\n`;
   if (r.chorus_flag) s += '- Пометка: требует проверки на хор (утверждение и опровержение совпадают с другой записью слово в слово)\n';
   s += '\n' + wrap(r.id, r.body);
 
@@ -233,4 +236,52 @@ export async function wallDigest(env: Env, o: string): Promise<Response> {
     title: 'Дайджест стены · Sdominanta.net',
     description: `Все записи стены Sdominanta.net одной страницей, по строке на запись: ${rows.results.length}.`,
   });
+}
+
+// ---------- журнал действий ----------
+
+export const LOG_PER_PAGE = 50;
+
+const evLine = (e: EventRow) =>
+  `#${e.seq} · ${new Date(e.ts_ms).toISOString()} · ${e.action} · ${inline(e.actor, 16)} · ${inline(e.object, 64)} · ${e.link}${e.restored ? ' · восстановлено' : ''}`;
+
+const LOG_HOW =
+  'Звено события: `link = sha256(prev_link | seq | ts_ms | action | actor | object)`, поля через «|» как в строке, ' +
+  `у первого события prev_link — 64 нуля (${GENESIS.slice(0, 8)}…). Вставить, убрать или переставить событие нельзя, не изменив все звенья после. ` +
+  'Голова цепочки показана на страницах стены, в /llms.txt и в ответе done; раз в сутки она уходит в OpenTimestamps (якорь в биткоине). ' +
+  '«Восстановлено» — события до журнала, собранные по временам из базы (секунды).';
+
+/** /wall/log: открытая лента событий, новые сверху. В журнале нет людей, IP и кодов пропусков (вместо них P:…). */
+export async function wallLog(env: Env, o: string, url: URL): Promise<Response> {
+  await seal(env.DB);
+  const page = pageParam(url);
+  const rows = await env.DB.prepare('SELECT * FROM events ORDER BY seq DESC LIMIT ? OFFSET ?').bind(LOG_PER_PAGE + 1, (page - 1) * LOG_PER_PAGE).all<EventRow>();
+  const list = rows.results.slice(0, LOG_PER_PAGE);
+  let s = `# Журнал действий\n\n${LOG_HOW}\n\nСтрока: #seq · время UTC · действие · кто · объект · звено. Страница ${page}, новые сверху.\n\n`;
+  s += list.length ? list.map(evLine).join('\n') + '\n' : 'Событий пока нет.\n';
+  s += `\nЯкоря: ${o}/wall/log/anchors\n`;
+  return md(s + nav(o, pager(o, `${o}/wall/log`, page, rows.results.length > LOG_PER_PAGE)), { maxAge: 10 });
+}
+
+/** /wall/r/R…/log: хронология одной записи — её события от пропуска до одобрения. */
+export async function wallRecordLog(env: Env, o: string, id: string): Promise<Response> {
+  const r = await env.DB.prepare('SELECT id FROM records WHERE id = ?').bind(id).first();
+  if (!r) return md(`# Нет записи ${inline(id, 16)}\n` + nav(o), { status: 404 });
+  await seal(env.DB);
+  const d = await env.DB.prepare('SELECT code, pass_pub FROM drafts WHERE record_id = ?').bind(id).first<{ code: string; pass_pub: string | null }>();
+  const objects = [id];
+  const pieces: string[] = [];
+  if (d) {
+    objects.push(d.code);
+    if (d.pass_pub) objects.push(d.pass_pub);
+    const ps = await env.DB.prepare('SELECT id FROM pieces WHERE draft = ?').bind(d.code).all<{ id: string }>();
+    for (const p of ps.results) objects.push(p.id), pieces.push(p.id);
+  }
+  const like = pieces.map(() => 'object LIKE ?').join(' OR ');
+  const rows = await env.DB.prepare(`SELECT * FROM events WHERE object IN (${objects.map(() => '?').join(',')})${like ? ` OR ${like}` : ''} ORDER BY seq`)
+    .bind(...objects, ...pieces.map((p) => `${p}#%`)).all<EventRow>();
+  let s = `# Хронология записи ${id}\n\nСобытия записи в журнале действий по порядку: пропуск, черновик, части, сборка, одобрение.\n\n`;
+  s += rows.results.length ? rows.results.map(evLine).join('\n') + '\n' : 'Событий нет.\n';
+  s += `\n${LOG_HOW}\n`;
+  return md(s + nav(o, [[`Запись ${id}`, `${o}/wall/r/${id}`], ['Весь журнал', `${o}/wall/log`]]), { maxAge: 10 });
 }

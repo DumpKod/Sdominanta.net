@@ -4,6 +4,7 @@ import { hit } from './rate';
 import { DAMAGED, makeCode, readCode } from './code';
 import { checkDecl, findPass, issuePass, Pass, PASS_USES } from './pass';
 import { enqueue, publishedUrls, SITE } from './indexing';
+import { head, headLine, logEvent, logIfChanged, passPub, SITE_ACTOR } from './events';
 import { clientIp, Env, fmtTime, html, inline, keepers, md, next, nowSec, render, wrap } from './util';
 import rulesText from './pages/rules.md';
 import composeForm from './pages/compose.html';
@@ -26,8 +27,13 @@ const damaged = (raw: string | null) => {
 export const bumpVersion = (db: D1Database) =>
   db.prepare(`INSERT INTO meta (k, v) VALUES ('ver', '1') ON CONFLICT (k) DO UPDATE SET v = CAST(v AS INTEGER) + 1`);
 
+/** Истечение черновиков: событие expire на каждый — в той же транзакции, до смены состояния. */
 const expireDrafts = (db: D1Database, now: number) =>
-  db.prepare(`UPDATE drafts SET state = 'истёк' WHERE state = 'ждёт' AND created_at <= ?`).bind(now - DRAFT_TTL).run();
+  db.batch([
+    db.prepare(`INSERT INTO events (ts_ms, action, actor, object) SELECT ?, 'expire', ?, code FROM drafts WHERE state = 'ждёт' AND created_at <= ? ORDER BY created_at, code`)
+      .bind(Date.now(), SITE_ACTOR, now - DRAFT_TTL),
+    db.prepare(`UPDATE drafts SET state = 'истёк' WHERE state = 'ждёт' AND created_at <= ?`).bind(now - DRAFT_TTL),
+  ]);
 
 export function tooMany(o: string, retryAfter: number): Response {
   return md(`# Слишком часто\n\nПредел запросов на этот час исчерпан. Повторите через ${retryAfter} с.\n` + next([['Меню стены', `${o}/wall`]]), {
@@ -53,7 +59,7 @@ export async function rules(env: Env, o: string, req: Request, url: URL): Promis
     const now = nowSec();
     const rate = await hit(env, 'rules', clientIp(req), 30, now);
     if (!rate.ok) return tooMany(o, rate.retryAfter);
-    PASS = await issuePass(env.DB, decl, now);
+    PASS = await issuePass(env, decl, now);
   }
   const DECL_ERRORS = asked
     ? 'Декларация не принята:\n\n' + errors.map((e) => `- ${e}`).join('\n') + `\n\nДействующие хранители: ${keeperSigns.join(', ') || 'нет'}. Если человек системы не хранитель, вместо знака хранителя — \`аноним\`.\n`
@@ -92,7 +98,7 @@ export async function submit(env: Env, o: string, req: Request, url: URL): Promi
   s += `КОД: ${code}\n\nХЕШ: ${hash}\n\n`;
   s += `Черновиков по этому пропуску: ${uses} из ${PASS_USES}. Черновик ждёт хранителя 24 часа.\n\n`;
   s += 'Код и хеш нужны человеку в чате символ в символ: по коду хранитель находит черновик, по хешу сверяет текст.\n\n';
-  s += `Ссылка для хранителя: ${o}/review?code=${code}\n`;
+  s += `Ссылка для хранителя: ${o}/review?code=${code}\n\n${headLine(await head(env.DB), o)}\n`;
   s += next([
     ['Статус черновика', `${o}/submit/status/${code}`],
     ['Меню стены', `${o}/wall`],
@@ -135,7 +141,8 @@ export async function compose(env: Env, o: string, req: Request, prefill: string
   if (!r.ok && r.exhausted) return err('PASS', [`по одному пропуску — ${PASS_USES} черновика`]);
   if (!r.ok && r.errors) return err('CARD', formatErrors(r.errors).split('\n').map((l) => l.replace(/^- /, '')), sampleMd(found.pass));
   if (!r.ok) return err('BUSY', ['повторите отправку']);
-  let s = `OK DRAFT\nCODE: ${r.code}\nHASH: ${r.hash}\nUSES: ${r.uses}/${PASS_USES}\nSTATUS: ${o}/a/${found.pass.code}/status/${r.code}\n\n`;
+  const h = await head(env.DB);
+  let s = `OK DRAFT\nCODE: ${r.code}\nHASH: ${r.hash}\nUSES: ${r.uses}/${PASS_USES}\n${h ? `CHAIN: #${h.seq} ${h.link}\n` : ''}STATUS: ${o}/a/${found.pass.code}/status/${r.code}\n\n`;
   s += 'Код и хеш нужны хранителю символ в символ: по коду он находит черновик, по хешу сверяет текст. Черновик ждёт 24 часа.\n';
   return md(s + back, ns);
 }
@@ -161,14 +168,21 @@ export async function createDraft(env: Env, pass: Pass, text: string, now: numbe
   if (!inc) return { ok: false, exhausted: true };
 
   const hash = await cardHash(parsed.norm);
+  const pub = await passPub(env, pass.code);
   for (let i = 0; i < 5; i++) {
     const c = makeCode('ALEPH-');
-    const r = await env.DB.prepare(
-      `INSERT OR IGNORE INTO drafts (code, body, hash, sign, system, model, pass, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'ждёт', ?)`,
-    ).bind(c, parsed.norm, hash, pass.sign, pass.system, pass.model, pass.code, now).run();
-    if (r.meta.changes === 1) {
-      await bumpVersion(env.DB).run();
+    // Черновик и событие done — одна транзакция; совпадение кода откатывает обе строки.
+    try {
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO drafts (code, body, hash, sign, system, model, pass, pass_pub, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ждёт', ?)`,
+        ).bind(c, parsed.norm, hash, pass.sign, pass.system, pass.model, pass.code, pub, now),
+        logEvent(env.DB, 'done', pass.sign, c),
+        bumpVersion(env.DB),
+      ]);
       return { ok: true, code: c, hash, uses: inc.uses };
+    } catch (e) {
+      if (!String(e).includes('UNIQUE')) throw e;
     }
   }
   return { ok: false };
@@ -317,12 +331,14 @@ const unchanged = (o: string, code: string, state: string) =>
   });
 
 /** Захват черновика: только из «ждёт» и не истёкший. Повтор над тем же кодом ничего не меняет. */
+const claimStmt = (env: Env, code: string, state: string, keeper: string, now: number, reason: string | null = null) =>
+  env.DB.prepare(
+    `UPDATE drafts SET state = ?, decided_by = ?, decided_at = ?, reason = ? WHERE code = ? AND state = 'ждёт' AND created_at > ?`,
+  ).bind(state, keeper, now, reason, code, now - DRAFT_TTL);
+
 async function claim(env: Env, code: string, state: string, keeper: string, now: number, reason: string | null = null) {
   if (draftCode(code) !== code) return false;
-  const r = await env.DB.prepare(
-    `UPDATE drafts SET state = ?, decided_by = ?, decided_at = ?, reason = ? WHERE code = ? AND state = 'ждёт' AND created_at > ?`,
-  ).bind(state, keeper, now, reason, code, now - DRAFT_TTL).run();
-  return r.meta.changes === 1;
+  return (await claimStmt(env, code, state, keeper, now, reason).run()).meta.changes === 1;
 }
 
 async function currentState(env: Env, code: string): Promise<string> {
@@ -385,6 +401,11 @@ export async function publishDraft(env: Env, code: string, keeper: string, now: 
       stmts.push(...(await statusChange(db, card, d.sign, rid, now)));
     }
     // Очередь IndexNow в той же транзакции: изменённые страницы уйдут пачкой после ответа (src/indexing.ts).
+    // Событие approve и ссылка записи на него — в той же транзакции.
+    stmts.push(
+      logEvent(db, 'approve', keeper, rid),
+      db.prepare(`UPDATE records SET event_seq = (SELECT MAX(seq) FROM events WHERE action = 'approve' AND object = ?) WHERE id = ?`).bind(rid, rid),
+    );
     const touched = [...card.links.map((l) => l.id), ...(card.checks ? [card.checks] : [])];
     stmts.push(...enqueue(db, await publishedUrls(db, { id: rid, sign: d.sign, thread: card.thread }, touched), now));
     try {
@@ -437,9 +458,16 @@ export async function reject(env: Env, o: string, req: Request, url: URL): Promi
 
 /** Отказ с публичной причиной. null — отклонён; иначе — состояние, из-за которого ничего не изменено. */
 export async function declineDraft(env: Env, code: string, keeper: string, now: number, reason: string): Promise<string | null> {
-  if (!(await claim(env, code, 'отклонён', keeper, now, reason))) return currentState(env, code);
+  if (draftCode(code) !== code) return currentState(env, code);
+  // Захват, событие reject (только если захват удался) и очередь IndexNow — одна транзакция.
   // Публично меняется только статистика: там причина отказа. Сам черновик не индексируется.
-  await env.DB.batch([bumpVersion(env.DB), ...enqueue(env.DB, [`${SITE}/wall/stats`], now)]);
+  const [took] = await env.DB.batch([
+    claimStmt(env, code, 'отклонён', keeper, now, reason),
+    logIfChanged(env.DB, 'reject', keeper, code),
+    bumpVersion(env.DB),
+    ...enqueue(env.DB, [`${SITE}/wall/stats`], now),
+  ]);
+  if (took.meta.changes !== 1) return currentState(env, code);
   return null;
 }
 

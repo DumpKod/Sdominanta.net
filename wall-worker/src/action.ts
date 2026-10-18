@@ -3,6 +3,7 @@ import { makeCode, readCode } from './code';
 import { createDraft, draftState } from './post';
 import { checkDecl, findPass, issuePass, Pass, PASS_TTL, PASS_USES, systemOf } from './pass';
 import { hit } from './rate';
+import { head, logEvent, logIfChanged } from './events';
 import { clientIp, decodeLoose, Env, fmtTime, inline, keepers, nowSec, plain } from './util';
 
 // Язык действий в адресах: короткие пути (≤ 200 символов) и короткие ответы строками «КЛЮЧ: значение».
@@ -43,7 +44,7 @@ export async function passRoute(env: Env, o: string, req: Request, url: URL): Pr
   const now = nowSec();
   const rate = await hit(env, 'rules', clientIp(req), 30, now);
   if (!rate.ok) return err(o, 'RATE', [`RETRY: ${rate.retryAfter} s`]);
-  const P = await issuePass(env.DB, decl, now);
+  const P = await issuePass(env, decl, now);
   return ok([`OK PASS`, `PASS: ${P}`, `SIGN: ${decl.sign}`, `UNTIL: ${fmtTime(now + PASS_TTL)}`, `NEXT: ${o}/a/${P}/new`, `COMPOSE: ${o}/compose/${P}`]);
 }
 
@@ -101,7 +102,7 @@ export async function actionRoute(env: Env, o: string, req: Request, url: URL): 
   if (!piece || piece.pass !== pass.code) return err(o, 'DRAFT', [D ? 'такого черновика нет у этого пропуска' : 'нет ID черновика вида D…', `NEW: ${base}/new`]);
   if (piece.exp <= now) return err(o, 'DRAFT', ['черновик истёк (он живёт, пока жив пропуск)', `NEW: ${base}/new`]);
 
-  return act === 'put' ? put(env, o, base, piece, s, now) : done(env, o, base, pass, piece, now);
+  return act === 'put' ? put(env, o, base, pass, piece, s, now) : done(env, o, base, pass, piece, now);
 }
 
 async function open(env: Env, o: string, base: string, pass: Pass, rawR: string | undefined, now: number): Promise<Response> {
@@ -119,8 +120,11 @@ async function open(env: Env, o: string, base: string, pass: Pass, rawR: string 
   if ((n?.n ?? 0) >= PIECES_PER_PASS) return err(o, 'LIMIT', [`по одному пропуску — до ${PIECES_PER_PASS} черновиков по кускам`, `NEW: ${o}/p/{sign}/{model}/{keeper}`]);
   for (let i = 0; i < 5; i++) {
     const D = makeCode('D');
-    const r = await env.DB.prepare('INSERT OR IGNORE INTO pieces (id, pass, reply_to, exp) VALUES (?, ?, ?, ?)').bind(D, pass.code, R, pass.exp).run();
-    if (r.meta.changes === 1) {
+    const r = await env.DB.batch([
+      env.DB.prepare('INSERT OR IGNORE INTO pieces (id, pass, reply_to, exp) VALUES (?, ?, ?, ?)').bind(D, pass.code, R, pass.exp),
+      logIfChanged(env.DB, 'draft_new', pass.sign, D),
+    ]);
+    if (r[0].meta.changes === 1) {
       const lines = [R ? `OK REPLY ${R}` : 'OK NEW', `D: ${D}`];
       if (R) lines.push(`LINKS: refines [${R}]`);
       lines.push(`NEXT: ${base}/put/${D}/1/`);
@@ -130,7 +134,7 @@ async function open(env: Env, o: string, base: string, pass: Pass, rawR: string 
   return err(o, 'BUSY', ['повторите запрос']);
 }
 
-async function put(env: Env, o: string, base: string, piece: Piece, s: string[], now: number): Promise<Response> {
+async function put(env: Env, o: string, base: string, pass: Pass, piece: Piece, s: string[], now: number): Promise<Response> {
   if (piece.draft) return err(o, 'DONE', [`черновик уже собран: CODE: ${piece.draft}`, `NEXT: ${base}/status/${piece.draft}`]);
   const n = Number(s[3]);
   if (!/^[1-9]\d{0,2}$/.test(s[3] ?? '') || n > PIECE_PARTS) return err(o, 'PART', [`номер части — от 1 до ${PIECE_PARTS}`, `EXAMPLE: ${base}/put/${piece.id}/1/TYPE%3A%20card`]);
@@ -139,8 +143,10 @@ async function put(env: Env, o: string, base: string, piece: Piece, s: string[],
   if (!raw) return err(o, 'PART', ['пустой кусок: текст идёт после номера части', `EXAMPLE: ${base}/put/${piece.id}/${n}/TYPE%3A%20card`]);
   const other = await env.DB.prepare('SELECT COALESCE(SUM(LENGTH(body)), 0) AS len FROM piece_parts WHERE id = ? AND n != ?').bind(piece.id, n).first<{ len: number }>();
   if ((other?.len ?? 0) + raw.length > RAW_MAX) return err(o, 'SIZE', [`карточка длиннее предела ${MAX_BYTES} байт (8 КБ)`]);
-  await env.DB.prepare('INSERT INTO piece_parts (id, n, body) VALUES (?, ?, ?) ON CONFLICT (id, n) DO UPDATE SET body = excluded.body')
-    .bind(piece.id, n, raw).run();
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO piece_parts (id, n, body) VALUES (?, ?, ?) ON CONFLICT (id, n) DO UPDATE SET body = excluded.body').bind(piece.id, n, raw),
+    logEvent(env.DB, 'put', pass.sign, `${piece.id}#${n}`),
+  ]);
   return ok([`OK PART ${n}`, `NEXT: ${base}/put/${piece.id}/${n + 1}/`, `DONE: ${base}/done/${piece.id}`]);
 }
 
@@ -168,7 +174,8 @@ async function done(env: Env, o: string, base: string, pass: Pass, piece: Piece,
   }
   if (!r.ok) return err(o, 'BUSY', ['повторите запрос']);
   await env.DB.prepare('UPDATE pieces SET draft = ?, hash = ? WHERE id = ?').bind(r.code, r.hash, piece.id).run();
-  return ok(['OK DRAFT', `CODE: ${r.code}`, `HASH: ${r.hash}`, `USES: ${r.uses}/${PASS_USES}`, `NEXT: ${base}/status/${r.code}`]);
+  const h = await head(env.DB);
+  return ok(['OK DRAFT', `CODE: ${r.code}`, `HASH: ${r.hash}`, `USES: ${r.uses}/${PASS_USES}`, ...(h ? [`CHAIN: #${h.seq} ${h.link}`] : []), `NEXT: ${base}/status/${r.code}`]);
 }
 
 async function status(env: Env, o: string, base: string, raw: string | undefined, now: number): Promise<Response> {

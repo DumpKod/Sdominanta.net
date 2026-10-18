@@ -1,6 +1,7 @@
 import { cardHash, checkRefs, formatErrors, parseCard, sampleMd } from './card';
 import { ALPHABET, checkChar, DAMAGED, makeCode, readCode } from './code';
 import { tooMany } from './post';
+import { ANON, logEvent } from './events';
 import { hit } from './rate';
 import { clientIp, enc, Env, hex, hmacSha256, keepers, md, next, nowSec, render, signOf, slugOf } from './util';
 import step1 from './pages/test-1.md';
@@ -47,7 +48,7 @@ function filler(): string {
 
 /** Пройденный шаг прохода со знаком: бит в compat.steps. Проход без знака ничего не записывает. */
 const passed = (env: Env, mark: string | null, bit: number) =>
-  mark ? env.DB.prepare('UPDATE compat SET steps = steps | ? WHERE mark = ?').bind(bit, mark).run() : null;
+  mark ? [env.DB.prepare('UPDATE compat SET steps = steps | ? WHERE mark = ?').bind(bit, mark)] : [];
 
 const MARK_RE = new RegExp(`(?<![${ALPHABET}])[${ALPHABET}]{9}(?![${ALPHABET}])`, 'g');
 
@@ -123,6 +124,11 @@ export async function runTest(env: Env, o: string, t: TestInput): Promise<TestRe
   }
   const MARK_NOTE = !known && !n.ok && n.damaged ? 'Метка повреждена при копировании: контрольный символ не сходится. ' : '';
   const res = (body: string, extra: Partial<TestResult> = {}): TestResult => ({ status: 200, body, mark: NONCE, counted: !!credit, ...extra });
+  /** Запись шага (зачёт в compat) и событие test_step — одна транзакция. Кто: знак прохода, иначе аноним. */
+  const record = async (writes: D1PreparedStatement[], mark: string | null, who: string | null = null) => {
+    const actor = who ?? (mark ? (await env.DB.prepare('SELECT sign FROM compat WHERE mark = ?').bind(mark).first<{ sign: string }>())?.sign : null) ?? ANON;
+    await env.DB.batch([...writes, logEvent(env.DB, 'test_step', actor, `${mark || NONCE || '-'}/${step}${t.via === 'mcp' ? '/mcp' : ''}`)]);
+  };
 
   switch (step) {
     case '':
@@ -132,18 +138,18 @@ export async function runTest(env: Env, o: string, t: TestInput): Promise<TestRe
         const own = credit && (await env.DB.prepare('SELECT 1 AS x FROM compat WHERE mark = ? AND sign = ?').bind(credit, sign).first());
         if (!own) {
           if (credit) NONCE = await newMark(env, now);
-          await env.DB.prepare('INSERT OR IGNORE INTO compat (mark, sign, steps, day, path) VALUES (?, ?, 1, ?, ?)')
-            .bind(NONCE, sign, Math.floor(now / 86400), t.via).run();
-        }
-      }
+          await record([env.DB.prepare('INSERT OR IGNORE INTO compat (mark, sign, steps, day, path) VALUES (?, ?, 1, ?, ?)')
+            .bind(NONCE, sign, Math.floor(now / 86400), t.via)], NONCE, sign);
+        } else await record([], credit, sign);
+      } else await record([], null);
       return res(render(step1, { BASE, NONCE, SIGN: sign ? `${sign} (${slugOf(sign)})` : '' }), { counted: !!sign });
     }
     case '2':
-      await passed(env, credit, 2);
+      await record(passed(env, credit, 2), credit);
       return res(render(step2, { BASE, NONCE, NONCE_OK: known, MARK_NOTE, FILLER: filler() }));
     case '3': {
       const { code, hash } = await testCode(env, NONCE);
-      await passed(env, credit, 4);
+      await record(passed(env, credit, 4), credit);
       return res(render(step3, { BASE, NONCE, TEST_CODE: code, TEST_HASH: hash }));
     }
     case '4': {
@@ -151,7 +157,7 @@ export async function runTest(env: Env, o: string, t: TestInput): Promise<TestRe
       const given = readCode(url.searchParams.get('code'), 'ALEPH-');
       const ok = known && given.ok && given.code === code && url.searchParams.get('hash') === hash;
       const COPY_NOTE = !given.ok && given.damaged ? `Причина: ${DAMAGED}.` : '';
-      if (ok) await passed(env, credit, 8);
+      await record(ok ? passed(env, credit, 8) : [], credit);
       return res(render(step4, { BASE, NONCE, COPY_OK: ok, COPY_NOTE }), { ok, counted: ok && !!credit });
     }
     case '5': {
@@ -167,7 +173,7 @@ export async function runTest(env: Env, o: string, t: TestInput): Promise<TestRe
       }
       // Метка шага 5 может прийти и внутри текста карточки.
       const c5 = credit ?? (await firstIn(env, 'compat', candidates(url, [text]), now));
-      if (ok) await passed(env, c5, 16);
+      await record(ok ? passed(env, c5, 16) : [], c5);
       // Длина адреса в байтах: Cloudflare режет адреса длиннее 32 КБ, карточка в 8 КБ кириллицы — до ~24 КБ.
       if (t.via === 'web') result += `\n\nДлина полученного адреса: ${t.bytes} байт.`;
       return res(render(step5, { BASE, PARSE_RESULT: result }), { ok, counted: ok && !!c5, mark: c5 ?? NONCE });

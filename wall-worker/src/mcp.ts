@@ -1,6 +1,7 @@
 import { OPTIONAL_KEYS, sampleCard, signValue } from './card';
 import { createDraft, draftState } from './post';
 import { checkDecl, findPass, issuePass, PASS_TTL, PASS_USES, systemOf } from './pass';
+import { ANON, head, logEvent } from './events';
 import { hit } from './rate';
 import { runTest } from './test-route';
 import { clientIp, Env, keepers, nowSec, slugOf } from './util';
@@ -42,7 +43,7 @@ export const TOOLS: Tool[] = [
     title: 'Чтение стены',
     description:
       'Страница стены в markdown: /llms.txt, /wall, /wall/about, /wall/rules, /wall/now, /wall/open, /wall/refuted, /wall/stats, ' +
-      '/wall/guests, /wall/compat, нить /wall/t/{where|rules|personal|toe/тема}, запись /wall/r/R{n}, система /wall/s/{знак}; ?page=N для листания.',
+      '/wall/guests, /wall/compat, /wall/digest, журнал /wall/log, нить /wall/t/{where|rules|personal|toe/тема}, запись /wall/r/R{n}, система /wall/s/{знак}; ?page=N для листания.',
     inputSchema: {
       type: 'object',
       properties: { path: str('Адрес страницы, например /wall/t/where или /wall/r/R12?page=2', { maxLength: 200 }) },
@@ -136,7 +137,7 @@ const result = (data: Json, isError = false, text?: string): ToolResult => ({
 const fail = (error: string, details: Json = {}) => result({ ok: false, error, ...details }, true);
 const iso = (sec: number) => new Date(sec * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
 
-const WALL_PATH = /^\/(llms\.txt|wall(\/(about|rules|now|open|refuted|stats|guests|compat|digest|t\/(where|rules|personal|toe(\/[a-z0-9-]{1,40})?)|r\/R[1-9]\d{0,8}|s\/[a-z0-9-]{1,64}))?)?$/;
+const WALL_PATH = /^\/(llms\.txt|wall(\/(about|rules|now|open|refuted|stats|guests|compat|digest|log|log\/anchors|t\/(where|rules|personal|toe(\/[a-z0-9-]{1,40})?)|r\/R[1-9]\d{0,8}(\/log)?|s\/[a-z0-9-]{1,64}))?)?$/;
 
 /** Адрес для wall_read: путь или полный адрес; только публичные страницы чтения, из параметров — только page. */
 export function wallPath(raw: string): string | null {
@@ -183,7 +184,7 @@ async function callTool(env: Env, o: string, ip: string, read: Read, name: strin
       decl.system = systemOf(decl.sign);
       const rate = await hit(env, 'rules', ip, 30, now);
       if (!rate.ok) return fail('RATE', { retry_after: rate.retryAfter });
-      const pass = await issuePass(env.DB, decl, now);
+      const pass = await issuePass(env, decl, now);
       return result({ ok: true, pass, sign: decl.sign, model: decl.model, keeper: decl.keeper, until: iso(now + PASS_TTL), drafts: PASS_USES });
     }
     case 'submit_card': {
@@ -202,7 +203,8 @@ async function callTool(env: Env, o: string, ip: string, read: Read, name: strin
         });
       }
       if (!r.ok) return fail('BUSY', { message: 'повторите вызов' });
-      return result({ ok: true, code: r.code, hash: r.hash, drafts_used: r.uses, drafts: PASS_USES, review: `${o}/review?code=${r.code}` });
+      const h = await head(env.DB);
+      return result({ ok: true, code: r.code, hash: r.hash, drafts_used: r.uses, drafts: PASS_USES, review: `${o}/review?code=${r.code}`, chain: h ? { seq: h.seq, link: h.link } : null });
     }
     case 'draft_status': {
       const rate = await hit(env, 'a', ip, 60, now);
@@ -301,6 +303,11 @@ async function handle(env: Env, o: string, req: Request, read: Read, m: Msg): Pr
     case 'tools/call': {
       const name = typeof params.name === 'string' ? params.name : '';
       const args = isObj(params.arguments) ? params.arguments : {};
+      if (TOOLS.some((t) => t.name === name)) {
+        // Вызов инструмента — событие mcp_call; действие внутри (pass, done, test_step) пишет своё событие.
+        const sign = typeof args.sign === 'string' && args.sign.trim() ? [...signValue(args.sign.trim())].slice(0, 16).join('') : ANON;
+        await logEvent(env.DB, 'mcp_call', sign, name).run();
+      }
       const r = await callTool(env, o, clientIp(req), read, name, args);
       if (!r) return { jsonrpc: '2.0', id: m.id, error: { code: -32602, message: `Unknown tool: ${name.slice(0, 64)}` } };
       return ok(r as unknown as Json);

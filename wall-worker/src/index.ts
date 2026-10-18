@@ -3,11 +3,13 @@ import { approve, compose, keeperLogin, reject, review, rules, submit, submitSta
 import { wallCompat, wallTest } from './test-route';
 import { Format, pickFormat, present } from './format';
 import { flushIndexNow, INDEXNOW_KEY, SITEMAP_TTL, sitemapEntries, sitemapXml } from './indexing';
+import { head, headLine, seal } from './events';
 import { mcp } from './mcp';
+import { anchorDaily, unb64, upgradeAnchors } from './ots';
 import { panel } from './panel';
 import { sceneJson, vitrinaPage } from './vitrina';
 import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
-import { wallDigest, wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
+import { wallLog, wallRecordLog, wallDigest, wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
 import aboutText from './pages/about.md';
 import rulesText from './pages/rules.md';
 import llmsText from './pages/llms.txt';
@@ -106,7 +108,38 @@ export function pathForm(url: URL): URL | null {
   return null;
 }
 
+/** /wall/log/anchors: якоря OpenTimestamps по дням. */
+async function anchorsPage(env: Env, o: string): Promise<Response> {
+  const rows = await env.DB.prepare('SELECT day, seq, link, state, at FROM anchors ORDER BY day DESC LIMIT 400').all<{ day: number; seq: number; link: string; state: string; at: number }>();
+  let s = '# Якоря журнала\n\nРаз в сутки голова цепочки событий уходит в OpenTimestamps; календари вписывают её в биткоин (обычно за несколько часов). ';
+  s += 'Доказательство: файл .ots и строка события .txt, sha256 которой и есть голова. Проверка: `ots verify <день>.ots -f <день>.txt`.\n\n';
+  s += rows.results.length
+    ? rows.results.map((r) => `- ${new Date(r.day * 86400000).toISOString().slice(0, 10)} · событие #${r.seq} · ${r.link} · ${r.state} · ${o}/wall/log/anchor/${r.day}.ots · ${o}/wall/log/anchor/${r.day}.txt`).join('\n') + '\n'
+    : 'Якорей пока нет: первый появится в ближайшие сутки.\n';
+  return md(s + `\n## Куда дальше\n\n- [Журнал действий](${o}/wall/log)\n- [Меню стены](${o}/wall)\n`, { maxAge: 60 });
+}
+
+async function anchorFile(env: Env, day: number, kind: string): Promise<Response> {
+  const r = await env.DB.prepare('SELECT ots, line FROM anchors WHERE day = ?').bind(day).first<{ ots: string; line: string }>();
+  if (!r) return plain('Нет якоря за этот день.\n', { status: 404 });
+  if (kind === 'txt') return new Response(r.line, { headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'public, max-age=300', 'Content-Disposition': `attachment; filename="${day}.txt"` } });
+  return new Response(unb64(r.ots), { headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'public, max-age=300', 'Content-Disposition': `attachment; filename="${day}.ots"` } });
+}
+
+/** Свидетели: голова журнала в конце каждой страницы стены и /llms.txt (после кэша страниц: голова всегда свежая). */
+async function withHead(res: Response, env: Env, o: string): Promise<Response> {
+  if (res.status !== 200 || !/^text\/(markdown|plain)/.test(res.headers.get('Content-Type') ?? '')) return res;
+  const text = (await res.text()).replace(/\n*$/, '\n');
+  return new Response(`${text}\n${headLine(await head(env.DB), o)}\n`, res);
+}
+
 async function route(req: Request, env: Env, ctx: ExecutionContext, fmt: Format): Promise<Response> {
+  const res = await routeInner(req, env, ctx, fmt);
+  const path = new URL(req.url).pathname;
+  return path === '/' || path === '/llms.txt' || path === '/wall' || path.startsWith('/wall/') ? withHead(res, env, new URL(req.url).origin) : res;
+}
+
+async function routeInner(req: Request, env: Env, ctx: ExecutionContext, fmt: Format): Promise<Response> {
   const composing = /^\/compose(\/[^/]*)?\/?$/.exec(new URL(req.url).pathname);
   if (composing) return compose(env, new URL(req.url).origin, req, seg(composing[1]?.slice(1)));
   const keeperPanel = /^\/k(\/.*)?$/.exec(new URL(req.url).pathname);
@@ -161,6 +194,11 @@ async function route(req: Request, env: Env, ctx: ExecutionContext, fmt: Format)
   }
 
   if (p === '/wall/test' || p.startsWith('/wall/test/')) return wallTest(env, o, p.slice('/wall/test/'.length), req, url);
+  if (p === '/wall/log') return wallLog(env, o, url);
+  if (p === '/wall/log/anchors') return anchorsPage(env, o);
+  let a: RegExpExecArray | null;
+  if ((a = /^\/wall\/log\/anchor\/(\d{5})\.(ots|txt)$/.exec(p))) return anchorFile(env, Number(a[1]), a[2]);
+  if ((a = /^\/wall\/r\/(R[1-9]\d{0,8})\/log$/.exec(p))) return wallRecordLog(env, o, a[1]);
 
   const pages: Record<string, () => Promise<Response>> = {
     '/wall/now': () => wallNow(env, o),
@@ -216,7 +254,19 @@ async function serveInner(req: Request, env: Env, ctx: ExecutionContext): Promis
 export default {
   fetch: serve,
   // Раз в минуту: остаток очереди IndexNow, который не ушёл сразу (пинг не чаще раза в минуту).
+  // Раз в сутки — якорь журнала в OpenTimestamps, раз в час — проверка ждущих якорей. Сбой — повтор в следующую минуту.
   async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(flushIndexNow(env, nowSec()));
+    ctx.waitUntil(
+      (async () => {
+        try {
+          await seal(env.DB);
+          await anchorDaily(env, Date.now());
+          await upgradeAnchors(env, nowSec());
+        } catch (e) {
+          console.error(e instanceof Error ? `anchor: ${e.name}: ${e.message}` : 'anchor: error');
+        }
+      })(),
+    );
   },
 } satisfies ExportedHandler<Env>;

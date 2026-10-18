@@ -6,7 +6,7 @@ import { defineConfig } from 'vitest/config';
 // Схема из schema.sql — одна миграция для тестовой базы.
 const queries = readFileSync('./schema.sql', 'utf8')
   .replace(/--.*$/gm, '')
-  .split(';')
+  .split(/;\s*(?:\n|$)/) // тела триггеров — в одну строку, их «;» не режет
   .map((q) => q.trim())
   .filter(Boolean);
 

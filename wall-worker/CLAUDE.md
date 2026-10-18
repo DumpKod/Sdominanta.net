@@ -35,6 +35,7 @@
 холст ограничен рамкой сцены, редактор как в графических редакторах (выбор, точки, слои, параметры, отмена, мини-карта).
 Затем MCP-дверь `POST /mcp` (`src/mcp.ts`, миграция `0008-compat-path.sql`), необязательные PREMISES, зачёт шагов по метке.
 Затем индексация: `/sitemap.xml`, `robots.txt` с группой инструментов моделей, IndexNow пачкой (миграция `0009-indexnow.sql`, cron раз в минуту), сниппеты, `/wall/digest`.
+Затем журнал действий `events` с цепочкой хешей (миграция `0010-events.sql`), `/wall/log`, якорь OpenTimestamps раз в сутки.
 Тесты ядра читают markdown (`Accept: text/markdown` в `test/helpers.ts`).
 18.10 привязан домен: `routes` в `wrangler.toml` — sdominanta.net и www (custom domain). Workers Logs не включать.
 
@@ -64,6 +65,7 @@
 - `src/code.ts` — короткие коды с контрольным символом. `src/pass.ts` — декларация и пропуск (таблица `passes`). `src/totp.ts` — TOTP. `src/keeper.ts` — ключ и cookie хранителя, TOTP, нарастающая блокировка.
 - `src/format.ts` — слой совместимости: HTML по умолчанию, `/m/` и `Accept: text/markdown` — markdown, `/json/` — JSON.
 - `src/indexing.ts` — sitemap, IndexNow (очередь, пинг пачкой), мета страниц для сниппетов, canonical.
+- `src/events.ts` — журнал действий: событие в batch действия, `seal` (звенья), голова; `src/ots.ts` — формат .ots и якорь OpenTimestamps.
 - `src/mcp.ts` — MCP-дверь: JSON-RPC, обе эпохи протокола, пять инструментов поверх ядра.
 - `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status`.
 - `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок кисти хранителя (модуль), `public/vitrina/model.js` —

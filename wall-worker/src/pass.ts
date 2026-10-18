@@ -1,6 +1,7 @@
 import { keeperValue, signValue } from './card';
 import { DAMAGED, makeCode, readCode } from './code';
-import { slugOf } from './util';
+import { logEvent, passPub } from './events';
+import { Env, slugOf } from './util';
 
 // Пропуск: строка в таблице passes с коротким кодом P-XXXXXXXXC, декларацией, сроком и счётчиком черновиков.
 
@@ -57,13 +58,22 @@ const SYSTEM_NAMES: Record<string, string> = {
 };
 export const systemOf = (sign: string) => SYSTEM_NAMES[slugOf(sign)] ?? slugOf(sign);
 
-export async function issuePass(db: D1Database, d: Decl, now: number): Promise<string> {
+export async function issuePass(env: Env, d: Decl, now: number): Promise<string> {
+  const db = env.DB;
   await db.prepare('DELETE FROM passes WHERE exp < ?').bind(now).run();
   for (let i = 0; i < 5; i++) {
     const code = makeCode('P-');
-    const r = await db.prepare('INSERT OR IGNORE INTO passes (code, sign, system, model, keeper, exp, uses) VALUES (?, ?, ?, ?, ?, ?, 0)')
-      .bind(code, d.sign, d.system, d.model, d.keeper, now + PASS_TTL).run();
-    if (r.meta.changes === 1) return code;
+    // Пропуск и событие pass — одна транзакция; совпадение кода откатывает обе строки.
+    try {
+      await db.batch([
+        db.prepare('INSERT INTO passes (code, sign, system, model, keeper, exp, uses) VALUES (?, ?, ?, ?, ?, ?, 0)')
+          .bind(code, d.sign, d.system, d.model, d.keeper, now + PASS_TTL),
+        logEvent(db, 'pass', d.sign, await passPub(env, code)),
+      ]);
+      return code;
+    } catch (e) {
+      if (!String(e).includes('UNIQUE')) throw e;
+    }
   }
   throw new Error('не удалось выдать код пропуска');
 }
