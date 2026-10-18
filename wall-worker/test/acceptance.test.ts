@@ -1,13 +1,13 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { issueToken, verifyToken } from '../src/token';
-import { approve, card, check, get, KEEPER, otp, publish, submit, submitOk, token } from './helpers';
+import { approve, card, check, get, kget, KEEPER, otp, publish, submit, submitOk, token } from './helpers';
 
 // Приёмочные тесты 1–13 из ТЗ v1. Тест 14 (WebFetch из обычной сессии) — после развёртывания.
 
 const draftCount = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM drafts').first<{ n: number }>())!.n;
 const keeperUrl = (path: string, code: string, o: string, extra = '') =>
-  `/${path}?code=${code}&keeper=${encodeURIComponent(KEEPER)}&otp=${o}${extra}`;
+  `/${path}?code=${code}&otp=${o}${extra}`;
 
 describe('1. Страницы', () => {
   it('отвечают 200, без <script>, у страниц стены есть «Куда дальше»', async () => {
@@ -45,7 +45,7 @@ describe('1. Страницы', () => {
 
   it('robots.txt закрывает почтомат и хранителя', async () => {
     const r = await (await get('/robots.txt')).text();
-    for (const p of ['/submit', '/review', '/approve', '/reject']) expect(r).toContain(`Disallow: ${p}`);
+    for (const p of ['/submit', '/review', '/approve', '/reject', '/keeper']) expect(r).toContain(`Disallow: ${p}`);
   });
 });
 
@@ -146,21 +146,20 @@ describe('7. TOTP', () => {
     const a = await submitOk(card({ 'УТВЕРЖДЕНИЕ': 'a' }));
     const b = await submitOk(card({ 'УТВЕРЖДЕНИЕ': 'b' }));
     const code = await otp();
-    expect((await get(keeperUrl('approve', a.code, code))).status).toBe(200);
-    expect((await get(keeperUrl('approve', b.code, code))).status).toBe(403);
+    expect((await kget(keeperUrl('approve', a.code, code))).status).toBe(200);
+    expect((await kget(keeperUrl('approve', b.code, code))).status).toBe(403);
   });
 
-  it('5 неверных — блок; верный во время блока — отказ; «нет хранителя» неотличимо', async () => {
+  it('5 неверных — блок; верный во время блока — отказ', async () => {
     const { code } = await submitOk(card());
     const good = await otp();
     const wrong = good === '000000' ? '111111' : '000000';
-    const fail = await get(keeperUrl('approve', code, wrong));
-    const ghost = await get(`/approve?code=${code}&keeper=X&otp=${good}`);
-    expect(await ghost.text()).toBe(await fail.text());
-    for (let i = 0; i < 3; i++) await get(keeperUrl('approve', code, wrong));
-    const fifth = await get(keeperUrl('approve', code, wrong));
+    const fail = await kget(keeperUrl('approve', code, wrong));
+    expect(fail.status).toBe(403);
+    for (let i = 0; i < 3; i++) await kget(keeperUrl('approve', code, wrong));
+    const fifth = await kget(keeperUrl('approve', code, wrong));
     expect(await fifth.text()).toContain('временно закрыт');
-    const during = await get(keeperUrl('approve', code, good));
+    const during = await kget(keeperUrl('approve', code, good));
     expect(during.status).toBe(403);
     expect(await during.text()).toContain('временно закрыт');
     expect(await draftCount()).toBe(1);
@@ -174,7 +173,7 @@ describe('8. Решение только по ждущему черновику'
     expect((await approve(pub.code)).status).toBe(200);
     const rej = await submitOk(card({ 'УТВЕРЖДЕНИЕ': 'r' }));
     await env.DB.prepare('DELETE FROM otp_used').run();
-    expect((await get(keeperUrl('reject', rej.code, await otp(), '&reason=' + encodeURIComponent('нет основания')))).status).toBe(200);
+    expect((await kget(keeperUrl('reject', rej.code, await otp(), '&reason=' + encodeURIComponent('нет основания')))).status).toBe(200);
     const exp = await submitOk(card({ 'УТВЕРЖДЕНИЕ': 'e' }));
     await env.DB.prepare('UPDATE drafts SET created_at = created_at - 90000 WHERE code = ?').bind(exp.code).run();
 
@@ -185,7 +184,7 @@ describe('8. Решение только по ждущему черновику'
       expect(await res.text()).toContain('Ничего не изменено');
     }
     await env.DB.prepare('DELETE FROM otp_used').run();
-    expect((await get(keeperUrl('reject', pub.code, await otp(), '&reason=x'))).status).toBe(409);
+    expect((await kget(keeperUrl('reject', pub.code, await otp(), '&reason=x'))).status).toBe(409);
     const after = await env.DB.prepare('SELECT code, state, record_id, reason FROM drafts ORDER BY code').all();
     expect(after.results).toEqual(before.results);
     expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM records').first<{ n: number }>())!.n).toBe(1);
@@ -245,7 +244,7 @@ describe('12. Хор', () => {
   it('совпадение слово в слово — пометка на /review, запись не отклонена', async () => {
     await publish(card());
     const { code } = await submitOk(card({ 'ЗНАК': '🜁', 'УТВЕРЖДЕНИЕ': 'общая  память ускоряет уточнение гипотез.' }), '🜁');
-    expect(await (await get(`/review?code=${code}`)).text()).toContain('Требует проверки на хор');
+    expect(await (await kget(`/review?code=${code}`)).text()).toContain('Требует проверки на хор');
     const res = await approve(code);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('требует проверки на хор');

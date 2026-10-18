@@ -42,7 +42,12 @@ CREATE INDEX drafts_state ON drafts (state, created_at);
 
 CREATE TABLE token_uses (nonce TEXT PRIMARY KEY, uses INTEGER NOT NULL, exp INTEGER NOT NULL);
 CREATE TABLE otp_used (keeper TEXT, step INTEGER, PRIMARY KEY (keeper, step));
-CREATE TABLE keeper_lock (keeper TEXT PRIMARY KEY, fails INTEGER NOT NULL, locked_until INTEGER);
+-- Строки только для существующих хранителей. fails — неверные коды подряд; level — сколько блокировок было
+-- с последнего верного кода (каждая следующая вдвое длиннее); day_* — неверные коды за текущие сутки.
+CREATE TABLE keeper_lock (
+  keeper TEXT PRIMARY KEY, fails INTEGER NOT NULL DEFAULT 0, locked_until INTEGER,
+  level INTEGER NOT NULL DEFAULT 0, day_start INTEGER NOT NULL DEFAULT 0, day_fails INTEGER NOT NULL DEFAULT 0
+);
 
 -- Лимиты: key = корзина + HMAC от IP (сам IP не хранится), window = номер часа.
 CREATE TABLE rate (key TEXT, window INTEGER, count INTEGER, PRIMARY KEY (key, window));

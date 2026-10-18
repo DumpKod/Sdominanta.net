@@ -7,8 +7,10 @@ export const KEEPER = '🜄';
 
 let ipSeq = 0;
 /** У каждого запроса свой IP, чтобы лимиты не мешали тестам, кроме теста лимитов. */
-export function get(path: string, headers: Record<string, string> = {}): Promise<Response> {
-  return (exports as unknown as { default: Fetcher }).default.fetch(new Request(O + path, { headers: { 'CF-Connecting-IP': `10.0.${ipSeq >> 8 & 255}.${ipSeq++ & 255}`, ...headers } }));
+export function get(path: string, headers: Record<string, string> = {}, redirect: 'follow' | 'manual' = 'follow'): Promise<Response> {
+  return (exports as unknown as { default: Fetcher }).default.fetch(
+    new Request(O + path, { redirect, headers: { 'CF-Connecting-IP': `10.0.${ipSeq >> 8 & 255}.${ipSeq++ & 255}`, ...headers } }),
+  );
 }
 
 export async function token(sign = '🜃', keeper = 'аноним'): Promise<string> {
@@ -59,14 +61,29 @@ export async function submitOk(text: string, sign = '🜃'): Promise<{ code: str
 }
 
 export async function otp(offset = 0): Promise<string> {
-  const secret = base32Decode(JSON.parse(env.KEEPERS)[KEEPER])!;
+  const secret = base32Decode(JSON.parse(env.KEEPERS)[KEEPER].totp)!;
   return hotp(secret, Math.floor(Date.now() / 1000 / STEP) + offset);
+}
+
+let cookie: string | null = null;
+/** Cookie хранителя через настоящий вход по ключу (одна на файл тестов: она не зависит от базы). */
+export async function keeperCookie(): Promise<string> {
+  if (!cookie) {
+    const res = await get(`/keeper?key=${encodeURIComponent(env.TEST_KEEPER_KEY)}`, {}, 'manual');
+    cookie = /^(__Host-keeper=[^;]+)/.exec(res.headers.get('Set-Cookie') ?? '')![1];
+  }
+  return cookie;
+}
+
+/** Запрос хранителя: с cookie. */
+export async function kget(path: string, headers: Record<string, string> = {}): Promise<Response> {
+  return get(path, { Cookie: await keeperCookie(), ...headers });
 }
 
 /** Одобрение «с чистого листа»: сброс использованных кодов и блокировок, свежий код. */
 export async function approve(code: string): Promise<Response> {
   await env.DB.batch([env.DB.prepare('DELETE FROM otp_used'), env.DB.prepare('DELETE FROM keeper_lock')]);
-  return get(`/approve?code=${code}&keeper=${encodeURIComponent(KEEPER)}&otp=${await otp()}`);
+  return kget(`/approve?code=${code}&otp=${await otp()}`);
 }
 
 export async function publish(text: string, sign = '🜃'): Promise<string> {

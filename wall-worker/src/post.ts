@@ -1,5 +1,5 @@
 import { Card, cardHash, checkRefs, formatErrors, parseCard, sameWords } from './card';
-import { checkKeeper } from './keeper';
+import { checkKeeper, cookieHeader, issueKeeperCookie, keeperByKey, keeperFromCookie, lockInfo } from './keeper';
 import { hit } from './rate';
 import { checkDecl, issueToken, TOKEN_USES, verifyToken } from './token';
 import { clientIp, Env, fmtTime, inline, keepers, md, next, nowSec, randomBytes, render, wrap } from './util';
@@ -146,8 +146,38 @@ async function chorusMatch(db: D1Database, card: Card): Promise<string | null> {
   return rows.results.find((x) => sameWords(x.claim ?? '') === c && sameWords(x.refute) === r)?.id ?? null;
 }
 
+/** Без валидной cookie хранителя — 403, и больше ничего не проверяется и не считается. */
+const keeperOnly = () =>
+  md(
+    '# Только для хранителя\n\nВойдите ключом хранителя: откройте `/keeper?key=…`. ' +
+      'Cookie действует 30 дней. Если вход был, а страница всё равно закрыта, вставьте ссылку в адресную строку сами: ' +
+      'при переходе с другого сайта браузер cookie хранителя не отправляет.\n',
+    { status: 403, noStore: true },
+  );
+
+/** /keeper?key=…: ключ хранителя → cookie и редирект без ключа в адресе. */
+export async function keeperLogin(env: Env, o: string, req: Request, url: URL): Promise<Response> {
+  const now = nowSec();
+  const rate = await hit(env, 'keeper-key', clientIp(req), 10, now);
+  if (!rate.ok) return tooMany(o, rate.retryAfter);
+  const sign = await keeperByKey(env, url.searchParams.get('key') ?? '');
+  if (!sign) return md('# Не принято\n', { status: 403, noStore: true });
+  return new Response(null, {
+    status: 303,
+    headers: {
+      Location: `${o}/wall`,
+      'Set-Cookie': cookieHeader(await issueKeeperCookie(env, sign, now)),
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
 export async function review(env: Env, o: string, req: Request, url: URL): Promise<Response> {
   const now = nowSec();
+  const me = await keeperFromCookie(env, req, now);
+  if (!me) return keeperOnly();
   const rate = await hit(env, 'review', clientIp(req), 60, now);
   if (!rate.ok) return tooMany(o, rate.retryAfter);
   await expireDrafts(env.DB, now);
@@ -168,25 +198,29 @@ export async function review(env: Env, o: string, req: Request, url: URL): Promi
     const chorus = await chorusMatch(env.DB, parsed.card);
     if (chorus) s += `- Требует проверки на хор: утверждение и «опровергнет» совпадают слово в слово с [${chorus}](${o}/wall/r/${chorus}). Это сигнал, не приговор.\n`;
   }
+  const lock = await lockInfo(env, me, now);
+  s += `- Хранитель ${inline(me, 16)}: неверных кодов за сутки — ${lock.dayFails}`;
+  s += lock.lockedUntil ? `; вход кодами закрыт до ${fmtTime(lock.lockedUntil)}\n` : '\n';
   s += '\n' + wrap(d.code, d.body);
   if (d.state === 'ждёт') {
-    const ks = Object.keys(keepers(env)).map(encodeURIComponent);
-    const k = ks.length === 1 ? ks[0] : '<знак>';
     s += '\n## Решение\n\nПодставьте 6 цифр из аутентификатора и откройте ссылку:\n\n';
-    s += '```\n' + `${o}/approve?code=${d.code}&keeper=${k}&otp=<6 цифр>` + '\n```\n\n';
-    s += 'Отказ с публичной причиной:\n\n```\n' + `${o}/reject?code=${d.code}&keeper=${k}&otp=<6 цифр>&reason=<причина>` + '\n```\n';
+    s += '```\n' + `${o}/approve?code=${d.code}&otp=<6 цифр>` + '\n```\n\n';
+    s += 'Отказ с публичной причиной:\n\n```\n' + `${o}/reject?code=${d.code}&otp=<6 цифр>&reason=<причина>` + '\n```\n';
   }
   return md(s + next([['Статистика', `${o}/wall/stats`]]), ns);
 }
 
-async function keeperGate(env: Env, o: string, req: Request, url: URL): Promise<{ keeper: string; code: string } | Response> {
+/** Код из аутентификатора хранителя, который уже вошёл по cookie. */
+async function totpGate(env: Env, o: string, req: Request, url: URL, keeper: string): Promise<{ keeper: string; code: string } | Response> {
   const now = nowSec();
   const rate = await hit(env, 'keeper', clientIp(req), 60, now);
   if (!rate.ok) return tooMany(o, rate.retryAfter);
-  const keeper = url.searchParams.get('keeper') ?? '';
   const res = await checkKeeper(env, keeper, (url.searchParams.get('otp') ?? '').trim(), now);
   if (!res.ok) {
-    const body = res.locked ? 'Вход временно закрыт: слишком много неверных кодов. Повторите через 15 минут.' : 'Код не принят.';
+    const lock = await lockInfo(env, keeper, now);
+    const body = res.locked
+      ? `Вход кодами временно закрыт: слишком много неверных кодов. Откроется ${lock.lockedUntil ? fmtTime(lock.lockedUntil) : 'позже'}.`
+      : 'Код не принят.';
     return md(`# Отказ\n\n${body}\n`, { status: 403, noStore: true });
   }
   return { keeper, code: (url.searchParams.get('code') ?? '').trim() };
@@ -213,7 +247,9 @@ async function currentState(env: Env, code: string): Promise<string> {
 }
 
 export async function approve(env: Env, o: string, req: Request, url: URL): Promise<Response> {
-  const gate = await keeperGate(env, o, req, url);
+  const me = await keeperFromCookie(env, req, nowSec());
+  if (!me) return keeperOnly();
+  const gate = await totpGate(env, o, req, url, me);
   if (gate instanceof Response) return gate;
   const { keeper, code } = gate;
   const now = nowSec();
@@ -286,11 +322,13 @@ async function statusChange(db: D1Database, card: Card, checkerSign: string, rid
 }
 
 export async function reject(env: Env, o: string, req: Request, url: URL): Promise<Response> {
+  const me = await keeperFromCookie(env, req, nowSec());
+  if (!me) return keeperOnly();
   const reason = (url.searchParams.get('reason') ?? '').replace(/\s+/g, ' ').trim();
   if (!reason || reason.length > 500) {
     return md('# Нужна причина\n\nОтказ публикуется с причиной (до 500 символов): параметр reason.\n', { status: 400, noStore: true });
   }
-  const gate = await keeperGate(env, o, req, url);
+  const gate = await totpGate(env, o, req, url, me);
   if (gate instanceof Response) return gate;
   const now = nowSec();
   if (!(await claim(env, gate.code, 'отклонён', gate.keeper, now, reason))) return unchanged(o, gate.code, await currentState(env, gate.code));

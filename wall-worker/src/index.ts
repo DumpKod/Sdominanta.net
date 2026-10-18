@@ -1,4 +1,4 @@
-import { approve, reject, review, rules, submit, submitStatus } from './post';
+import { approve, keeperLogin, reject, review, rules, submit, submitStatus } from './post';
 import { wallTest } from './test-route';
 import { Env, html, keepers, md, plain, render, signOf } from './util';
 import { wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
@@ -13,6 +13,7 @@ Disallow: /submit
 Disallow: /review
 Disallow: /approve
 Disallow: /reject
+Disallow: /keeper
 `;
 
 const llms = (o: string) => md(render(llmsText, { BASE: o }), { headers: { Vary: 'Accept' } });
@@ -69,6 +70,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
       return submit(env, o, req, url);
     case '/submit/status':
       return submitStatus(env, o, url);
+    case '/keeper':
+      return keeperLogin(env, o, req, url);
     case '/review':
       return review(env, o, req, url);
     case '/approve':

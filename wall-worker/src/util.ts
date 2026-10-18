@@ -1,7 +1,7 @@
 export interface Env {
   DB: D1Database;
   TOKEN_KEY: string;
-  KEEPERS: string; // JSON: {"🜄": "<base32 TOTP-секрет>"}
+  KEEPERS: string; // JSON: {"🜄": {"totp": "<base32>", "key_sha256": "<hex>"}}
 }
 
 export const enc = new TextEncoder();
@@ -57,13 +57,27 @@ export async function hmacSha256(key: string, data: string): Promise<Uint8Array>
 
 // ---------- хранители ----------
 
-export function keepers(env: Env): Record<string, string> {
+export interface Keeper {
+  totp: string; // base32
+  key_sha256: string; // SHA-256 ключа хранителя, hex нижним регистром; сам ключ на сервере не хранится
+}
+
+/** KEEPERS = {"🜄": {"totp": "<base32>", "key_sha256": "<hex>"}}; записи в другом формате пропускаются. */
+export function keepers(env: Env): Record<string, Keeper> {
+  let raw: unknown;
   try {
-    const k = JSON.parse(env.KEEPERS || '{}');
-    return k && typeof k === 'object' ? k : {};
+    raw = JSON.parse(env.KEEPERS || '{}');
   } catch {
     return {};
   }
+  const out: Record<string, Keeper> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [sign, v] of Object.entries(raw as Record<string, unknown>)) {
+    const k = v as Partial<Keeper> | null;
+    const fp = typeof k?.key_sha256 === 'string' ? k.key_sha256.trim().toLowerCase() : '';
+    if (k && typeof k.totp === 'string' && /^[0-9a-f]{64}$/.test(fp)) out[sign] = { totp: k.totp, key_sha256: fp };
+  }
+  return out;
 }
 
 // ---------- ответы ----------
