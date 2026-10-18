@@ -22,6 +22,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   const ctx = cv.getContext('2d', { alpha: false });
   const glowCv = document.createElement('canvas');
   const gctx = glowCv.getContext('2d');
+  const glow2 = document.createElement('canvas'), g2ctx = glow2.getContext('2d');
   const keeper = root.dataset.keeper === '1';
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -288,14 +289,40 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
      --------------------------------------------------------------------- */
   let NF = 0;
   let fx, fy, fvx, fvy, fhx, fhy, fph, fb, fsc, fcode = new Int32Array(0);
+  // ответ поля пустоты на узел — по очереди: каждый кадр пересчитывается треть узлов, остальные берут прошлый
+  // (узел за кадр сдвигается на доли пикселя). Это главный расход кадра, и он растёт с толщиной жил.
+  let vSd, vNx, vNy, vTx, vTy, vV, vTick = 0;
+  const VOID_EVERY = 3;
   let fkeys = new Map(); // ключ клетки или куска → [начало, число]
 
-  function calcPx() { return Math.max(10, Math.sqrt((W * H) / 9000)) / S.density; }
+  function calcPx() { return Math.max(10, Math.sqrt((W * H) / 9000)) / (S.density * Math.sqrt(Q)); }
   // Одна картина на любом экране: движок считает кадр для экрана-образца (не больше REF_AREA пикселей CSS),
   // холст растягивается на весь экран. Большой экран получает ту же композицию крупнее, а не в разы больше узлов.
   // W, H, мышь и камера внутри движка — в пикселях образца; наружу (редактору) — в пикселях CSS, множитель VK.
-  const REF_AREA = 400000, PIXEL_BUDGET = 1600000;
+  const REF_AREA = 400000, PIXEL_BUDGET = 1600000, BAND_BUDGET = 6000;
   let VK = 1;
+
+  // Качество под устройство: Q — доля узлов поля и пикселей холста (1 — полное). Сколько стоит кадр, видно только
+  // на самом устройстве: движок меряет время своего кадра и шаг кадров и снижает Q, пока кадр не уложится;
+  // запас — понемногу поднимает обратно, но не выше уровня, на котором уже не справился. В браузере ничего не хранится.
+  const QS = [1, 0.8, 0.64, 0.5, 0.38, 0.28];
+  let qi = 0;
+  let Q = QS[qi], qCeil = 0;
+  const perf = { work: 8, gap: 16.7, t: 0, hold: 0 };
+  function govern(work, gap, dt) {
+    perf.work += (work - perf.work) * 0.05;
+    perf.gap += (Math.min(100, gap) - perf.gap) * 0.05;
+    perf.t += dt;
+    if (going || perf.t < 0.8) return; // после смены качества — дать кадрам устояться
+    let want = qi;
+    if (perf.work > 11 || perf.gap > 26) want = Math.min(QS.length - 1, qi + 1);
+    else if (perf.work < 5 && perf.gap < 19) { perf.hold += dt; if (perf.hold > 6 && qi > qCeil) want = qi - 1; }
+    else perf.hold = 0;
+    if (want === qi) return;
+    if (want > qi) qCeil = Math.max(qCeil, want); // не справился на qi — выше want не подниматься
+    qi = want; Q = QS[qi]; perf.t = 0; perf.hold = 0;
+    resize();
+  }
 
   function buildField(keep) {
     const old = keep && fx ? { fx, fy, fvx, fvy, fb, fkeys } : null;
@@ -315,16 +342,27 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       }
       groups.push([key, start, c1 - c0 + 1]);
     }
+    // Полосы узлов вдоль жил. Толщина расширяет полосу, но узлы в ней реже (шаг растёт как корень четвёртой
+    // степени ширины), а все полосы вместе не больше BAND_BUDGET·Q узлов: иначе толстые жилы съедают кадр.
+    const plan = [];
+    let total = 0;
     for (const ch of chunks) {
       const v = veins[ch.v];
       if (v.live || !v.lod) continue;
-      const start = H_.length / 3;
-      const sf = Math.max(4.2 * u, Math.min(fieldSp * 0.62, v.R * 0.55)) / Math.sqrt(S.density);
+      const near = Math.min(fieldSp * 1.3, v.R * 2.5 + fieldSp * 0.5);
       // полоса узлов вокруг тонкой жилы уже: иначе мелкие слова тонут в ореоле
-      const B = v.R * v.st.thick * 1.5 + Math.min(fieldSp * 1.3, v.R * 2.5 + fieldSp * 0.5);
-      const r2 = mulberry(hashStr(ch.key));
+      const B = v.R * v.st.thick * 1.5 + near, B1 = v.R * 1.5 + near;
+      const sf = (Math.max(4.2 * u, Math.min(fieldSp * 0.62, v.R * 0.55)) / Math.sqrt(S.density * Q)) * Math.pow(Math.max(1, B / B1), 0.25);
       const span = Math.max(1, ch.j1 - ch.j0);
-      const cnt = Math.round(((span * v.step * 2 * B) / (sf * sf)) * 0.65);
+      const cnt = ((span * v.step * 2 * B) / (sf * sf)) * 0.65;
+      plan.push({ ch, v, B, sf, span, cnt });
+      total += cnt;
+    }
+    const kB = Math.min(1, (BAND_BUDGET * Q) / Math.max(1, total)), kS = 1 / Math.sqrt(kB);
+    for (const { ch, v, B, sf: sf0, span, cnt: c0 } of plan) {
+      const start = H_.length / 3;
+      const sf = sf0 * kS, cnt = Math.round(c0 * kB);
+      const r2 = mulberry(hashStr(ch.key));
       for (let i = 0; i < cnt; i++) {
         const j = Math.min(v.n - 1, ch.j0 + ((r2() * span) | 0)), t = (r2() * 2 - 1) * B;
         H_.push(v.x[j] + v.nx[j] * t + (r2() - 0.5) * v.step, v.y[j] + v.ny[j] * t + (r2() - 0.5) * v.step, sf);
@@ -336,6 +374,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     fx = new Float32Array(NF); fy = new Float32Array(NF); fvx = new Float32Array(NF); fvy = new Float32Array(NF);
     fhx = new Float32Array(NF); fhy = new Float32Array(NF); fph = new Float32Array(NF); fb = new Float32Array(NF);
     fsc = new Float32Array(NF); fcode = new Int32Array(NF);
+    vSd = new Float32Array(NF); vNx = new Float32Array(NF); vNy = new Float32Array(NF); vTx = new Float32Array(NF); vTy = new Float32Array(NF);
+    vV = new Int32Array(NF).fill(-2); // -2 — ещё не спрашивали
     for (let k = 0; k < NF; k++) {
       fhx[k] = fx[k] = H_[3 * k]; fhy[k] = fy[k] = H_[3 * k + 1]; fsc[k] = H_[3 * k + 2]; fph[k] = ph[k];
     }
@@ -414,37 +454,52 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   }
   const COLORS = Array.from({ length: NB }, (_, k) => colorFor((k + 0.5) / NB));
 
-  /** Связи соседних узлов (экранные координаты): сетка ячеек L, сила связи — в ведро своего цвета. */
+  /**
+   * Связи соседних узлов (экранные координаты): сетка ячеек, сила связи — в ведро своего цвета.
+   * У узлов свой размах связи (SC·scK·1.6, не больше L). Крупные связываются в сетке с ячейкой L, а пары, где хоть
+   * один узел мелкий (размах ≤ L/2), — в сетке с ячейкой L/2: в плотных полосах у жил вчетверо меньше пустых проверок.
+   */
+  let hReach = new Float32Array(0), hBig = new Uint8Array(0);
   function linkNodes(X, Y, B, n, L, gain, base, SC, scK, CODE) {
-    const cols = Math.ceil(W / L) + 2, rows = Math.ceil(H / L) + 2;
+    if (hReach.length < n) { hReach = new Float32Array(Math.max(n, 1024)); hBig = new Uint8Array(hReach.length); }
+    const half = L / 2;
+    for (let i = 0; i < n; i++) { const r = SC ? Math.min(L, SC[i] * scK * 1.6) : L; hReach[i] = r; hBig[i] = r > half ? 1 : 0; }
+    linkPass(X, Y, B, n, L, gain, base, CODE, 1);
+    if (SC) linkPass(X, Y, B, n, half, gain, base, CODE, 0);
+  }
+  /** Один проход: big = 1 — только пары крупных; big = 0 — пары, где хоть один мелкий. */
+  function linkPass(X, Y, B, n, cell, gain, base, CODE, big) {
+    const cols = Math.ceil(W / cell) + 2, rows = Math.ceil(H / cell) + 2;
     if (!hHead || hHead.length < cols * rows) hHead = new Int32Array(cols * rows);
     if (!hNext || hNext.length < n) hNext = new Int32Array(Math.max(n, 1024));
     hHead.fill(-1, 0, cols * rows);
     for (let i = 0; i < n; i++) {
-      const cx = Math.floor(X[i] / L) + 1, cy = Math.floor(Y[i] / L) + 1;
+      if (big && !hBig[i]) { hNext[i] = -2; continue; }
+      const cx = Math.floor(X[i] / cell) + 1, cy = Math.floor(Y[i] / cell) + 1;
       if (!(cx >= 0 && cy >= 0 && cx < cols && cy < rows)) { hNext[i] = -2; continue; }
       const c = cy * cols + cx; hNext[i] = hHead[c]; hHead[c] = i;
     }
-    const L2 = L * L, OFF = [[0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
     for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
       for (let i = hHead[cy * cols + cx]; i >= 0; i = hNext[i]) {
-        for (const [ox, oy] of OFF) {
-          const nx = cx + ox, ny = cy + oy;
+        const xi = X[i], yi = Y[i], ri = hReach[i], bi = hBig[i], ci = CODE ? CODE[i] : 0, Bi = B[i];
+        for (let k = 0; k < 5; k++) {
+          const nx = cx + OFFX[k], ny = cy + OFFY[k];
           if (nx < 0 || nx >= cols || ny >= rows) continue;
-          for (let j = ox || oy ? hHead[ny * cols + nx] : hNext[i]; j >= 0; j = hNext[j]) {
-            const dx = X[i] - X[j], dy = Y[i] - Y[j], d2 = dx * dx + dy * dy;
-            let Lp = L, Lp2 = L2;
-            if (SC) { Lp = Math.min(SC[i], SC[j]) * scK * 1.6; Lp2 = Lp * Lp; }
-            if (d2 > Lp2) continue;
-            if (CODE && CODE[i] && CODE[i] === -CODE[j]) continue; // связь не перекидывается через пустоту
-            const f = (1 - Math.sqrt(d2) / Lp) * (base + (1 - base) * Math.max(B[i], B[j])) * gain;
+          for (let j = k ? hHead[ny * cols + nx] : hNext[i]; j >= 0; j = hNext[j]) {
+            if (!big && bi && hBig[j]) continue; // пара крупных — уже в первом проходе
+            const dx = xi - X[j], dy = yi - Y[j], d2 = dx * dx + dy * dy;
+            const Lp = ri < hReach[j] ? ri : hReach[j];
+            if (d2 > Lp * Lp) continue;
+            if (ci && ci === -CODE[j]) continue; // связь не перекидывается через пустоту
+            const f = (1 - Math.sqrt(d2) / Lp) * (base + (1 - base) * (Bi > B[j] ? Bi : B[j])) * gain;
             if (f < 0.02) continue;
-            bucket[Math.min(NB - 1, (f * NB) | 0)].push(X[i], Y[i], X[j], Y[j]);
+            bucket[Math.min(NB - 1, (f * NB) | 0)].push(xi, yi, X[j], Y[j]);
           }
         }
       }
     }
   }
+  const OFFX = [0, 1, -1, 0, 1], OFFY = [0, 0, 1, 1, 1];
 
   function flush(widthBase) {
     for (let k = 0; k < NB; k++) {
@@ -471,12 +526,16 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (win) win.k += (1 - win.k) * (reduce.matches ? 1 : 0.1);
     const hlArea = hl >= 0 && objs[hl] && objs[hl].area && objs[hl].area.length >= 3 ? objs[hl].area : null;
     const ax0 = act.x0, ay0 = act.y0, ax1 = act.x1, ay1 = act.y1;
+    vTick = (vTick + 1) % VOID_EVERY;
     for (let i = 0; i < NF; i++) {
       if (fx[i] < ax0 || fx[i] > ax1 || fy[i] < ay0 || fy[i] > ay1) continue; // вне камеры узел замирает
       const hx = fhx[i] + drift * (Math.sin(fhy[i] * 0.009 * lv + t * 0.35 + fph[i] * 0.3) + 0.5 * Math.sin(fhx[i] * 0.017 * lv - t * 0.27));
       const hy = fhy[i] + drift * (Math.cos(fhx[i] * 0.008 * lv - t * 0.31) + 0.5 * Math.sin(fhy[i] * 0.021 * lv + t * 0.4 + fph[i] * 0.3));
       let ax = (hx - fx[i]) * 0.035, ay = (hy - fy[i]) * 0.035;
-      queryVoid(fx[i], fy[i]);
+      if (vV[i] === -2 || (i + vTick) % VOID_EVERY === 0) {
+        queryVoid(fx[i], fy[i]);
+        vSd[i] = qSd; vNx[i] = qNx; vNy[i] = qNy; vTx[i] = qTx; vTy[i] = qTy; vV[i] = qV;
+      } else { qSd = vSd[i]; qNx = vNx[i]; qNy = vNy[i]; qTx = vTx[i]; qTy = vTy[i]; qV = vV[i]; }
       let b = 0;
       // сторона стенки: узлы с разных берегов одной жилы не связываются
       fcode[i] = qSd < fsc[i] * 1.5 ? (qV + 1) * (qNx * -qTy + qNy * qTx >= 0 ? 1 : -1) : 0;
@@ -604,10 +663,16 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     ctx.fill();
     if (win) drawWindow();
     // свечение: размытый уменьшенный кадр поверх (дешевле shadowBlur)
+    // Размытие без ctx.filter: в Firefox и на части видеокарт blur() считается на процессоре и съедает кадр.
+    // Уменьшение в 4 раза, ещё в 2 и обратно — сглаживание растягивает свет в мягкий ореол.
     gctx.globalCompositeOperation = 'copy';
-    gctx.filter = 'blur(3px)';
     gctx.drawImage(cv, 0, 0, glowCv.width, glowCv.height);
-    gctx.filter = 'none';
+    g2ctx.globalCompositeOperation = 'copy';
+    g2ctx.drawImage(glowCv, 0, 0, glow2.width, glow2.height);
+    gctx.globalAlpha = 0.6;
+    gctx.globalCompositeOperation = 'source-over';
+    gctx.drawImage(glow2, 0, 0, glowCv.width, glowCv.height);
+    gctx.globalAlpha = 1;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = Math.min(1, S.glow * 0.9 * (1 + S.sound * (0.5 * snd.beat + 0.3 * snd.level)));
     ctx.drawImage(glowCv, 0, 0, cv.width, cv.height);
@@ -659,8 +724,12 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   function frame(ts) {
     raf = 0;
     if (document.hidden || reduce.matches) return;
-    const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.016;
+    // не чаще 60 кадров в секунду: на экранах 120–144 Гц иначе тот же кадр считался бы вдвое-втрое чаще
+    if (lastTs && ts - lastTs < 15) { loop(); return; }
+    const gap = lastTs ? ts - lastTs : 16.7;
+    const dt = lastTs ? Math.min(0.05, gap / 1000) : 0.016;
     lastTs = ts;
+    const w0 = performance.now();
     T += dt;
     snd = hearFn ? hearFn(dt) || SILENT : SILENT;
     stepFade(dt);
@@ -668,6 +737,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     updateRadii();
     step();
     draw();
+    govern(performance.now() - w0, gap, dt);
     loop();
   }
   function loop() {
@@ -1303,9 +1373,10 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     VK = Math.min(1, Math.sqrt(REF_AREA / Math.max(1, cw * ch)));
     W = cw * VK; H = ch * VK;
     // пиксели холста: как у экрана, но в пределах бюджета (свечение мягкое, лишние пиксели рисуются впустую)
-    DPR = Math.max(1, Math.min((window.devicePixelRatio || 1) / VK, 2 / VK, Math.sqrt(PIXEL_BUDGET / Math.max(1, W * H))));
+    DPR = Math.max(1, Math.min((window.devicePixelRatio || 1) / VK, 2 / VK, Math.sqrt((PIXEL_BUDGET * Q) / Math.max(1, W * H))));
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
     glowCv.width = Math.max(1, Math.round(W / 4)); glowCv.height = Math.max(1, Math.round(H / 4));
+    glow2.width = Math.max(1, Math.round(W / 8)); glow2.height = Math.max(1, Math.round(H / 8));
     if (!userMoved) { const to = fitTarget(scene.bounds()); cam.x = to.x; cam.y = to.y; cam.zoom = to.zoom; }
     clampCam();
     if (win) win = layoutWindow(win.o);
