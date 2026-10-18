@@ -741,6 +741,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     loop();
   }
   function loop() {
+    if (pages.length && !tween) return; // открыт текст: поле стоит
     if (!raf && !document.hidden && !reduce.matches) raf = requestAnimationFrame(frame);
   }
   function stop() {
@@ -905,7 +906,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   cv.addEventListener('wheel', (e) => {
     e.preventDefault();
-    if (going) return; // переход между пространствами не прерывается
+    if (going || pages.length) return; // переход между пространствами не прерывается
     tween = null;
     const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1;
     // гостю колёсико — масштаб; в инструментах правки — сдвиг, а масштаб — с Ctrl/⌘ (щипок трекпада приходит с Ctrl)
@@ -926,7 +927,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   window.addEventListener('keydown', (e) => {
     if (typing(e)) return;
-    if (e.key === 'Escape' && win) closeWindow();
+    if (e.key === 'Escape' && pages.length) history.back();
+    else if (e.key === 'Escape' && win) closeWindow();
     else if (e.key === 'Escape' && tool === 'view' && SPACE !== 'main') goOut();
     if (e.code === 'Space' && !spaceDown) { spaceDown = true; cv.classList.add('grab-ready'); if (tool !== 'view') e.preventDefault(); }
     if ((e.code === 'Digit1' && e.shiftKey) || e.key === 'Home') { e.preventDefault(); fitAll(); }
@@ -975,12 +977,12 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (!o) return;
     if (o.inner) goIn(i);
     else if (o.window) openWindow(o);
-    else if (o.href) location.href = new URL(o.href, location.origin).href;
+    else if (o.href) openLink(o.href, i);
   }
   function tap(x, y) {
     if (win) {
       const l = winTarget(x, y);
-      if (l && l.href) location.href = l.href;
+      if (l && l.href) { closeWindow(); openLink(l.href); }
       else if (!l || l.close) closeWindow(); // клик мимо окна или по крестику закрывает его
       return;
     }
@@ -1014,6 +1016,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
         const o = scene.objects[idx()];
         if (o && o.inner) { e.preventDefault(); goIn(idx()); }
         else if (o && o.window) { e.preventDefault(); openWindow(o); }
+        else if (o && o.href && ownPath(o.href)) { e.preventDefault(); openLink(o.href, idx()); }
       });
     }
   }
@@ -1055,12 +1058,13 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   }
   /** Объект-вход под точкой экрана: по жилам и областям, иначе — самый маленький вход, в чьей рамке точка. */
   function portalAt(sx, sy) {
+    const door = (o) => o.inner || (o.href && ownPath(o.href));
     const i = hit(sx, sy);
-    if (i >= 0 && scene.objects[i].inner) return i;
+    if (i >= 0 && door(scene.objects[i])) return i;
     const [wx, wy] = cam.toWorld(sx, sy, W, H);
     let best = -1, area = Infinity;
     scene.objects.forEach((o, j) => {
-      if (!o.inner) return;
+      if (!door(o)) return;
       const b = o.bounds(), a = (b.x1 - b.x0) * (b.y1 - b.y0);
       if (wx >= b.x0 && wx <= b.x1 && wy >= b.y0 && wy <= b.y1 && a < area) { best = j; area = a; }
     });
@@ -1076,7 +1080,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       if (i >= 0) {
         const b = scene.objects[i].bounds();
         const sw = (b.x1 - b.x0) * cam.zoom, sh = (b.y1 - b.y0) * cam.zoom;
-        if (Math.max(sw / W, sh / H) > 0.55 || cam.zoom >= ZOOM_MAX * 0.98) { goIn(i); return true; }
+        if (Math.max(sw / W, sh / H) > 0.55 || cam.zoom >= ZOOM_MAX * 0.98) { activate(i); return true; }
         return false;
       }
       if (cam.zoom >= ZOOM_MAX * 0.98) { shake = Math.min(1.2, shake + 0.35); loop(); return true; }
@@ -1227,7 +1231,10 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     });
   }
 
-  window.addEventListener('popstate', () => {
+  window.addEventListener('popstate', (e) => {
+    const st = e.state || {};
+    if (st.page) { showPage(st.page, true); return; }
+    if (pages.length) closePages();
     const m = /^\/in\/([a-z0-9-]{1,32})\/?$/.exec(location.pathname);
     const target = m ? m[1] : 'main';
     if (target === SPACE) return;
@@ -1235,6 +1242,156 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (i >= 0) goIn(i, true);
     else goOut(true, target);
   });
+
+  /* ---------------------------------------------------------------------
+     СТРАНИЦЫ ВНУТРИ: объект-ссылка на страницу сети открывает её в алеф-нуле — тем же текстом, что у страницы
+     (markdown по Accept), с живыми ссылками; ссылка внутри ведёт глубже, «Наружу», Esc и «назад» — на уровень выше.
+     Адрес — настоящий адрес страницы (history): перезагрузка или ссылка дают ту же страницу обычным HTML.
+     Пока открыт текст, поле не считается: позади — неподвижный снимок раздутого объекта, кадр ничего не стоит.
+     --------------------------------------------------------------------- */
+  const ownPath = (href) => {
+    try { const u = new URL(href, location.origin); return u.origin === location.origin && !/^\/(k|in)(\/|$)/.test(u.pathname) ? u.pathname : null; }
+    catch { return null; }
+  };
+  const pages = []; // стопка открытых страниц: адреса путей
+  let pageEl = null, pageBody = null, pageBack = null, pageReq = 0, pageRim = null;
+
+  function pageBox() {
+    if (pageEl) return;
+    pageEl = document.createElement('article');
+    pageEl.className = 'page-space';
+    pageEl.hidden = true;
+    pageEl.setAttribute('aria-live', 'polite');
+    const bar = document.createElement('div');
+    bar.className = 'page-bar';
+    pageBack = document.createElement('button');
+    pageBack.type = 'button';
+    pageBack.textContent = '← Наружу';
+    pageBack.addEventListener('click', () => history.back());
+    bar.append(pageBack);
+    pageBody = document.createElement('div');
+    pageBody.className = 'page-body';
+    pageEl.append(bar, pageBody);
+    pageEl.addEventListener('click', (e) => {
+      const a = e.target.closest && e.target.closest('a[href]');
+      if (!a) return;
+      const path = ownPath(a.getAttribute('href'));
+      if (path) { e.preventDefault(); openLink(path); }
+    });
+    document.body.append(pageEl);
+  }
+
+  /** Открыть ссылку: своя страница — внутри (из объекта i — раздуть его), чужая — как обычно. */
+  function openLink(href, i) {
+    const path = ownPath(href);
+    if (!path) { location.href = new URL(href, location.origin).href; return; }
+    if (going) return;
+    if (i === undefined || pages.length || reduce.matches) { pushPage(path); return; }
+    const o = scene.objects[i];
+    highlight(-1);
+    going = { dir: 'page' };
+    tween = {
+      from: cam.clone(), to: inflated(o.bounds(), 1.5), t: 0, dur: 0.5, free: true,
+      done: () => { pageRim = snapshot(); fade.veilTo = 1; setTimeout(() => { going = null; pushPage(path, cam.clone()); }, 140); },
+    };
+    loop();
+  }
+  function pushPage(path, camBefore) {
+    if (!pages.length) pages.base = camBefore || null;
+    history.pushState({ page: path }, '', path);
+    showPage(path);
+  }
+
+  /** Показать страницу path (вперёд — в стопку; назад по истории — срезать стопку до неё). */
+  async function showPage(path, fromHistory) {
+    pageBox();
+    const at = pages.lastIndexOf(path);
+    if (fromHistory && at >= 0) pages.length = at + 1;
+    else pages.push(path);
+    if (!pageRim) pageRim = snapshot();
+    pageEl.hidden = false;
+    document.documentElement.classList.add('in-page');
+    stop();
+    calmFrame();
+    const req = ++pageReq;
+    pageBody.textContent = '…';
+    let text;
+    try {
+      const r = await fetch(path, { headers: { Accept: 'text/markdown' }, credentials: 'same-origin' });
+      text = await r.text();
+    } catch { text = 'ERR\nСтраница не открылась. Её адрес: ' + path; }
+    if (req !== pageReq) return;
+    pageBody.textContent = '';
+    renderMd(text, pageBody);
+    pageEl.scrollTop = 0;
+    pageBack.focus({ preventScroll: true });
+  }
+
+  function closePages() {
+    pages.length = 0;
+    pageReq++;
+    if (pageEl) pageEl.hidden = true;
+    document.documentElement.classList.remove('in-page');
+    pageRim = null;
+    fade.veil = 1; fade.veilTo = 0;
+    if (pages.base) { const b = pages.base; cam.x = b.x; cam.y = b.y; cam.zoom = b.zoom; pages.base = null; }
+    // назад из раздутого объекта к общему виду
+    const all = fitTarget(scene.bounds());
+    if (!reduce.matches) tween = { from: cam.clone(), to: userMoved ? cam.clone().clampTo(limitRect(), W, H, 0.05, ZOOM_MAX) : all, t: 0, dur: 0.6, free: true, done: clampCam };
+    else { clampCam(); still(30); }
+    loop();
+  }
+
+  /** Неподвижный кадр позади текста: снимок раздутого объекта, приглушённый. */
+  function calmFrame() {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#010306';
+    ctx.fillRect(0, 0, W, H);
+    if (pageRim) { ctx.globalAlpha = 0.28; ctx.drawImage(pageRim, -W * 0.1, -H * 0.1, W * 1.2, H * 1.2); ctx.globalAlpha = 1; }
+  }
+
+  /** Markdown страниц сети → DOM, только текстом (никакого HTML из ответа): заголовки, абзацы, списки, ссылки, код. */
+  function renderMd(md, box) {
+    const lines = md.replace(/\r/g, '').split('\n');
+    let list = null, para = null, pre = null;
+    const end = () => { list = null; para = null; };
+    for (const line of lines) {
+      if (pre) { if (/^```/.test(line)) { pre = null; } else pre.textContent += line + '\n'; continue; }
+      if (/^```/.test(line)) { end(); pre = document.createElement('pre'); box.append(pre); continue; }
+      if (!line.trim()) { end(); continue; }
+      let m;
+      if ((m = /^(#{1,4})\s+(.*)$/.exec(line))) { end(); const h = document.createElement('h' + Math.min(4, m[1].length + 1)); inline(m[2], h); box.append(h); continue; }
+      if ((m = /^\s*[-*]\s+(.*)$/.exec(line))) {
+        para = null;
+        if (!list) { list = document.createElement('ul'); box.append(list); }
+        const li = document.createElement('li'); inline(m[1], li); list.append(li); continue;
+      }
+      if (/^\s*\|/.test(line) || /^ {4}/.test(line)) { end(); const p = document.createElement('pre'); p.className = 'page-row'; p.textContent = line; box.append(p); continue; }
+      list = null;
+      if (!para) { para = document.createElement('p'); box.append(para); } else para.append(document.createElement('br'));
+      inline(line.replace(/^>\s?/, ''), para);
+    }
+  }
+  /** Строка: [текст](адрес), **жирный**, `код`; остальное — текстом. Адреса — только http(s) и свои пути. */
+  function inline(text, el) {
+    const re = /\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|`([^`]+)`|(https?:\/\/[^\s)]+)/g;
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) el.append(text.slice(last, m.index));
+      if (m[1] !== undefined || m[5] !== undefined) {
+        const href = m[2] || m[5], a = document.createElement('a');
+        let ok = false;
+        try { const u = new URL(href, location.origin); ok = u.protocol === 'https:' || u.protocol === 'http:'; } catch { /* битый адрес */ }
+        if (ok) { a.href = href; a.textContent = m[1] || m[5]; if (!ownPath(href)) a.rel = 'noopener noreferrer'; el.append(a); }
+        else el.append(m[0]);
+      } else if (m[3] !== undefined) { const b = document.createElement('strong'); b.textContent = m[3]; el.append(b); }
+      else { const c = document.createElement('code'); c.textContent = m[4]; el.append(c); }
+      last = re.lastIndex;
+    }
+    if (last < text.length) el.append(text.slice(last));
+  }
 
   /* ---------------------------------------------------------------------
      ОКНО ИЗ ПУСТОТЫ: узлы поля расходятся из прямоугольника экрана, внутри — текст электрошрифтом (жилы символов,
@@ -1382,7 +1539,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (win) win = layoutWindow(win.o);
     fx = null;
     ensureView(true);
-    if (reduce.matches) still(60);
+    if (pages.length) calmFrame();
+    else if (reduce.matches) still(60);
   }
 
   function readSpace() {

@@ -97,3 +97,37 @@ html:not(.js) .music-play { display: none; }
 /* В месте сцены (slot): элемент встаёт в рамку объекта, координаты ставит движок. */
 .slotted { position: fixed; right: auto; bottom: auto; max-width: none; box-sizing: border-box; overflow: hidden; justify-content: center; }
 .slotted[hidden] { display: none; }
+
+/* Страница сети внутри алеф-нуля: тот же текст, что у страницы, читаемым столбцом поверх приглушённого холста. */
+.page-space {
+  position: fixed; inset: 0; z-index: 3; overflow-y: auto; overscroll-behavior: contain;
+  padding: max(16px, 6vh) 16px 12vh; box-sizing: border-box;
+  color: #cbd5e1; font: 16px/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: radial-gradient(ellipse at center, rgba(1, 10, 14, 0.55), rgba(1, 3, 6, 0.85));
+}
+.page-space[hidden] { display: none; }
+.page-bar, .page-body { max-width: 72ch; margin: 0 auto; }
+.page-bar { position: sticky; top: 0; padding: 0 0 14px; }
+.page-bar button {
+  font: inherit; font-size: 13px; color: #a5f3fc; background: rgba(2, 8, 20, 0.85); cursor: pointer;
+  border: 1px solid rgba(0, 242, 254, 0.35); border-radius: 16px; padding: 4px 12px;
+}
+.page-bar button:hover, .page-bar button:focus-visible { border-color: rgba(0, 242, 254, 0.8); outline: none; }
+.page-body h2, .page-body h3, .page-body h4 { color: #e0fbff; font-weight: 600; letter-spacing: 0.02em; margin: 1.4em 0 0.5em; }
+.page-body h2 { font-size: 1.4em; text-shadow: 0 0 14px rgba(0, 242, 254, 0.45); }
+.page-body h3 { font-size: 1.15em; }
+.page-body h4 { font-size: 1em; }
+.page-body p, .page-body ul { margin: 0 0 0.9em; }
+.page-body ul { padding-left: 1.4em; }
+.page-body a { color: #67e8f9; text-decoration: none; border-bottom: 1px solid rgba(103, 232, 249, 0.35); }
+.page-body a:hover, .page-body a:focus-visible { color: #cffafe; border-bottom-color: #67e8f9; outline: none; }
+.page-body code { color: #a5f3fc; }
+.page-body pre { margin: 0 0 0.9em; white-space: pre-wrap; overflow-wrap: anywhere; color: #94a3b8; }
+.page-body pre.page-row { margin: 0; }
+.in-page .keeper, .in-page .home { visibility: hidden; }
+.in-page .music { z-index: 4; }
+
+/* Предпросмотр хранителя: витрина как у гостя, одна кнопка возврата к правке. */
+.kp[hidden], .kp-back[hidden] { display: none; }
+.kp-back { position: fixed; left: 14px; top: 14px; z-index: 5; }
+.kp-preview .keeper { visibility: hidden; }

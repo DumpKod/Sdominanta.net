@@ -525,3 +525,21 @@ describe('Места в сцене: плеер и вход хранителя', 
     for (const s of ['function placeSlots(', "querySelectorAll('[data-slot]')", 'SLOT_MIN']) expect(vitrinaJs, s).toContain(s);
   });
 });
+
+describe('Страницы сети внутри алеф-нуля и предпросмотр', () => {
+  it('ссылка объекта открывает страницу внутри: текст markdown, ссылки глубже, адрес — настоящий; поле стоит', () => {
+    for (const s of ['function openLink(', 'function showPage(', 'function renderMd(', "Accept: 'text/markdown'", 'history.pushState({ page: path }', 'if (pages.length && !tween) return;'])
+      expect(vitrinaJs, s).toContain(s);
+    // текст ответа только через textContent и узлы, никакого HTML из ответа
+    expect(vitrinaJs).not.toMatch(/innerHTML|insertAdjacentHTML|outerHTML/);
+  });
+
+  it('страница сети по Accept: text/markdown — тот же текст, что видят модели', async () => {
+    const res = await get('/wall', { Accept: 'text/markdown' });
+    expect(res.headers.get('Content-Type')).toContain('text/markdown');
+  });
+
+  it('предпросмотр в редакторе: панель прячется, витрина как у гостя', () => {
+    for (const s of ['function setPreview(', 'Вернуться к правке', "classList.toggle('kp-preview', on)", 'if (preview) return;']) expect(editorJs, s).toContain(s);
+  });
+});
