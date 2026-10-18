@@ -13,6 +13,7 @@
 //     strokes: [ { r, pts: [[x, y(, r)]…], closed? } ],   жилы в координатах мира
 //     area?: [[x, y]…],                   область попадания в координатах мира (многоугольник)
 //     window?: { title?, text?, links?: [ { label, href } ] }   окно из пустоты по клику
+//     frame?: { width, aspect, round, ring, far }   рама окна (FRAME в public/vitrina/model.js)
 //     slot?: "player"                     место для живого HTML: player — плеер, keeper — вход хранителя
 //     inner?: "aleph"                     алеф-нуль: колёсико или клик внутрь — пространство aleph (/in/aleph)
 //     style?: { tubeR, thick, resonance, tact, flow, wobble, fill, sound }   свои параметры объекта
@@ -34,6 +35,7 @@ export interface SceneObject {
   area?: number[][];
   window?: { title?: string; text?: string; links?: { label: string; href: string }[] };
   style?: Record<string, number>;
+  frame?: Record<string, number>;
   inner?: string;
   slot?: (typeof SLOTS)[number];
 }
@@ -50,6 +52,9 @@ const LIMITS = { objects: 200, strokes: 400, pts: 2000, area: 200, links: 20, la
 /** Пределы параметров — те же, что у ползунков редактора (STYLE и SPACE в public/vitrina/model.js). */
 export const STYLE_RANGE: Record<string, [number, number]> = {
   tubeR: [0.5, 200], thick: [0.4, 2.5], resonance: [0, 1], tact: [0, 3], flow: [0, 2], wobble: [0, 1], fill: [0, 1], sound: [0, 2],
+};
+export const FRAME_RANGE: Record<string, [number, number]> = {
+  width: [240, 1400], aspect: [0, 2], round: [0, 1], ring: [4, 160], far: [0, 1],
 };
 export const SPACE_RANGE: Record<string, [number, number]> = { drift: [0, 2], density: [0.5, 1.6], glow: [0, 1.5], haze: [0, 1.5], sound: [0, 2] };
 
@@ -97,7 +102,7 @@ export function validateScene(raw: string): Check {
   j.objects.forEach((o: unknown, i: number) => {
     const at = `objects[${i}]`;
     if (!isObj(o)) return void errors.push(`${at}: объект`);
-    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'window', 'style', 'inner', 'slot'], at);
+    only(o, ['id', 'label', 'href', 'z', 'strokes', 'area', 'window', 'frame', 'style', 'inner', 'slot'], at);
     if (o.slot !== undefined && !(SLOTS as readonly unknown[]).includes(o.slot)) errors.push(`${at}.slot: место — ${SLOTS.join(' или ')}`);
     if (o.inner !== undefined && (typeof o.inner !== 'string' || !SPACE_RE.test(o.inner) || o.inner === 'main'))
       errors.push(`${at}.inner: имя пространства — латиница, цифры, дефис, до 32, не main`);
@@ -121,6 +126,7 @@ export function validateScene(raw: string): Check {
     if (o.area !== undefined && (!Array.isArray(o.area) || o.area.length < 3 || o.area.length > LIMITS.area || !o.area.every((p) => point(p, [2]))))
       errors.push(`${at}.area: от 3 до ${LIMITS.area} точек [x, y]`);
     if (o.style !== undefined) params(o.style, STYLE_RANGE, `${at}.style`);
+    if (o.frame !== undefined) params(o.frame, FRAME_RANGE, `${at}.frame`);
     if (o.window !== undefined) {
       const w = o.window;
       if (!isObj(w)) errors.push(`${at}.window: { title, text, links }`);

@@ -8,6 +8,7 @@
 //     strokes: [ { r, pts: [[x, y(, r)]…], closed? } ],   жилы в координатах мира
 //     area?: [[x, y]…],                        область попадания в координатах мира
 //     window?: { title?, text?, links?: [ { label, href } ] },
+//     frame?: { width, aspect, round, ring, far }   рама окна: размер, форма, рамка из узлов области, фон
 //     style?: { tubeR, thick, resonance, tact, flow, wobble, fill, sound }   свои параметры объекта, как в движке хранителя
 // } ] }
 
@@ -37,6 +38,20 @@ export const SPACE = {
   sound: [0, 2, 1], // реакция поля всей сцены на музыку (дрейф, свечение, удары)
 };
 const defaults = (spec) => Object.fromEntries(Object.entries(spec).map(([k, v]) => [k, v[2]]));
+/**
+ * Рама окна объекта: [мин, макс, по умолчанию]. Мода фиксируется окном в конце приближения (предел масштаба) над областью.
+ * width — ширина окна в пикселях CSS;
+ * aspect — высота к ширине (0 — по высоте экрана); round — форма (0 прямоугольник, 1 овал);
+ * ring — толщина рамки из узлов области в пикселях CSS; far — сколько узлов фона гаснет, пока окно раскрыто.
+ */
+export const FRAME = {
+  width: [240, 1400, 760],
+  aspect: [0, 2, 0],
+  round: [0, 1, 0.25],
+  ring: [4, 160, 36],
+  far: [0, 1, 0.75],
+};
+export const FRAME_DEFAULTS = defaults(FRAME);
 export const STYLE_DEFAULTS = defaults(STYLE);
 export const SPACE_DEFAULTS = defaults(SPACE);
 
@@ -143,11 +158,16 @@ export class SceneObject {
     this.strokes = clone(src.strokes || []);
     this.area = src.area ? clone(src.area) : null;
     this.window = src.window ? clone(src.window) : null;
+    this.frame = src.frame ? clone(src.frame) : null;
     this.style = src.style ? clone(src.style) : null;
   }
   /** Параметр объекта: свой или по умолчанию. */
   get(k) {
     return this.style && typeof this.style[k] === 'number' ? this.style[k] : STYLE_DEFAULTS[k];
+  }
+  /** Параметр рамы окна: свой или по умолчанию. */
+  frameGet(k) {
+    return this.frame && typeof this.frame[k] === 'number' ? this.frame[k] : FRAME_DEFAULTS[k];
   }
   /** Радиус новых мазков: tubeR объекта, иначе средний радиус его жил. */
   tubeR() {
@@ -216,6 +236,7 @@ export class SceneObject {
     o.strokes = this.strokes;
     if (this.area && this.area.length >= 3) o.area = this.area;
     if (this.window && Object.keys(this.window).length) o.window = this.window;
+    if (this.frame && Object.keys(this.frame).length) o.frame = this.frame;
     if (this.style && Object.keys(this.style).length) o.style = this.style;
     return o;
   }

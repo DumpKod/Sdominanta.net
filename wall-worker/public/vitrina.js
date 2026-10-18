@@ -216,7 +216,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
         if (!list) continue;
         for (const code of list) {
           const vj = Math.floor(code / (MASK + 1));
-          if (vj === vi || find(vj) === find(vi)) continue;
+          // такт и резонанс — свои у каждого объекта: области сливаются только внутри одного объекта
+          if (vj === vi || veins[vj].obj !== v.obj || find(vj) === find(vi)) continue;
           const w = veins[vj], j = code & MASK;
           const ax = w.x[j], ay = w.y[j], ex = w.x[j + 1] - ax, ey = w.y[j + 1] - ay, el = ex * ex + ey * ey || 1e-9;
           const t = Math.max(0, Math.min(1, ((v.x[i] - ax) * ex + (v.y[i] - ay) * ey) / el));
@@ -235,8 +236,13 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     for (const r of regions) r.f = Math.max(0.12, Math.min(2.6, 220 / Math.max(1, r.len)));
   }
 
+  // Возбуждение моды под курсором — малым пятном (EXC_PX пикселей экрана): набухание, свет плазмы и узлов у стенки.
+  const EXC_PX = 60, exc = { x: 0, y: 0, r2: 0, on: false };
+  const excAt = (lo, x, y) => (lo < 0.01 ? 0 : exc.on ? lo * Math.exp(-((x - exc.x) ** 2 + (y - exc.y) ** 2) * exc.r2) : lo * 0.4);
   function updateRadii() {
     const t = T;
+    const [lwx, lwy] = cam.toWorld(mouse.x, mouse.y, W, H), lR = (EXC_PX * VK) / cam.zoom, lR2 = 1 / (lR * lR);
+    exc.x = lwx; exc.y = lwy; exc.r2 = lR2; exc.on = mouse.in;
     for (const r of regions) {
       const ang = t * 6.283 * r.f * (0.4 + r.tact);
       r.S1 = Math.sin(ang + r.ph); r.C1 = Math.cos(ang + r.ph); r.S2 = Math.sin(2 * ang + r.ph * 1.7);
@@ -245,7 +251,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       if (!v.vis) continue;
       const r = regions[v.region], st = v.st;
       const modeA = v.closed ? r.S1 : r.S1 * 0.7, modeB = v.closed ? r.C1 : r.S2 * 0.45;
-      const lift = 1 + 0.3 * (scene.objects[v.obj].$lift || 0); // подсвеченный объект чуть набухает
+      // возбуждение моды под курсором: вся мода светлеет и чуть набухает, сильнее — только у самого курсора
+      const lo = scene.objects[v.obj].$lift || 0;
       let lam = v.R * 10;
       if (v.closed) lam = v.len / Math.max(1, Math.round(v.len / lam));
       for (let i = 0; i < v.n; i++) {
@@ -253,6 +260,11 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
         const beat = 0.5 + 0.5 * Math.sin((s / lam) * 6.283 - t * 2.4 * st.tact + v.ph[3]);
         const pulse = beat * beat * beat * beat;
         const mode = v.m1[i] * modeA + v.m2[i] * modeB;
+        let lift = 1;
+        if (lo > 0.01) {
+          if (mouse.in) { const dx = v.x[i] - lwx, dy = v.y[i] - lwy; lift = 1 + 0.25 * lo * Math.exp(-(dx * dx + dy * dy) * lR2); }
+          else lift = 1 + 0.12 * lo;
+        }
         v.rad[i] = v.rb[i] * st.thick * lift * (1 + 0.16 * st.wobble * v.wob[i] + st.resonance * (0.45 * pulse + 0.3 * mode));
       }
     }
@@ -317,7 +329,9 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     else if (perf.work < 6 && perf.gap < 19) qG = Math.min(1, qG + dt * 0.06);
   }
 
+  let fieldGen = 0; // номер сборки поля: рама пересобирает свою группу узлов после пересборки
   function buildField(keep) {
+    fieldGen++;
     const old = keep && fx ? { fx, fy, fvx, fvy, fb, fkeys } : null;
     fieldPx = calcPx();
     fieldSp = fieldPx * u;
@@ -387,6 +401,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   /* ---------------------------------------------------------------------
      3. МЕМБРАНА: плазма внутри жилы (s вдоль, u поперёк), кусками; положение считается из s и u каждый кадр
      --------------------------------------------------------------------- */
+  let homeZ = 1; // масштаб общего вида: глубже — курсор действует на меньший круг
   let NM = 0, mv, mc, ms, mu, mph, mx, my, mb;
   function buildMembrane() {
     const list = [];
@@ -418,6 +433,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     lv = level; u = 1 / level;
     fieldSp = calcPx() * u;
     built = { lv, rect: expand(view, w * 0.2, h * 0.2) };
+    homeZ = cam.clone().fit(scene.bounds(), W, H, 0.05, 0, ZOOM_MAX).zoom;
     buildVeins();
     return true;
   }
@@ -507,17 +523,90 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     }
   }
 
+  let marks = []; // области, отмеченные редактором: узлы внутри светятся
+  function litOf(poly, b) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of poly) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+    return { poly, b, x0, y0, x1, y1 };
+  }
+
+  /*
+   * Рама из узлов области. Группа — узлы поля внутри области объекта в миг раскрытия. Каждый узел помнит направление
+   * от середины области и свою глубину в ней (доля от края области в этом направлении). Цель узла — луч из середины
+   * окна в том же направлении до контура окна (суперэллипс: round 0 — почти прямоугольник, 1 — овал), плюс глубина × ring
+   * наружу. Любая форма области так разворачивается в понятное окно: середина пустеет под новую моду, край — рамка.
+   */
+  let fcap = new Uint8Array(0), ftx = new Float32Array(0), fty = new Float32Array(0);
+  function capture(f) {
+    const a = f.o.area, L = litOf(a, 0);
+    let cx = 0, cy = 0;
+    for (const p of a) { cx += p[0]; cy += p[1]; }
+    cx /= a.length; cy /= a.length;
+    // направления — в долях рамки области: вытянутая область ложится по всему контуру окна, а не грудой на двух сторонах
+    const hx = Math.max(1e-6, (L.x1 - L.x0) / 2), hy = Math.max(1e-6, (L.y1 - L.y0) / 2);
+    if (fcap.length < NF) { fcap = new Uint8Array(NF); ftx = new Float32Array(NF); fty = new Float32Array(NF); } else fcap.fill(0);
+    const BINS = 48, top = new Float32Array(BINS), idx = [], th = [], dd = [];
+    for (let i = 0; i < NF; i++) {
+      if (fx[i] < L.x0 || fx[i] > L.x1 || fy[i] < L.y0 || fy[i] > L.y1 || !inPoly(a, fx[i], fy[i])) continue;
+      const dx = (fx[i] - cx) / hx, dy = (fy[i] - cy) / hy, d = Math.hypot(dx, dy), t = Math.atan2(dy, dx);
+      const bin = Math.min(BINS - 1, (((t + Math.PI) / (2 * Math.PI)) * BINS) | 0);
+      if (d > top[bin]) top[bin] = d;
+      idx.push(i); th.push(t); dd.push(d);
+    }
+    const n = idx.length;
+    f.cap = Int32Array.from(idx);
+    f.cc = new Float32Array(n); f.cs = new Float32Array(n); f.cr = new Float32Array(n);
+    for (let j = 0; j < n; j++) {
+      const bin = Math.min(BINS - 1, (((th[j] + Math.PI) / (2 * Math.PI)) * BINS) | 0);
+      f.cc[j] = Math.cos(th[j]); f.cs[j] = Math.sin(th[j]);
+      f.cr[j] = Math.min(1, dd[j] / Math.max(1e-6, top[bin]));
+      fcap[idx[j]] = 1;
+    }
+    f.gen = fieldGen;
+  }
+  /** Цели узлов группы на этот кадр: контур текущего прямоугольника рамы на экране → мир. */
+  function ringTargets(f, z) {
+    const a = Math.max(4, f.w / 2), b = Math.max(4, f.h / 2), mx = f.x + f.w / 2, my = f.y + f.h / 2;
+    // частицы не пропадают: если их больше, чем помещается в рамку при плотности поля ×3, рамка утолщается внутрь
+    // и наружу — иначе связи в тесной рамке считаются парами квадратично и кадр встаёт
+    const sp = fieldPx * 0.6, need = (f.cap.length * sp * sp) / Math.max(1, 2 * (f.w + f.h));
+    const n = 2 + (1 - f.round) * 14, ring = Math.max(f.ring * VK, need), iz = 1 / z;
+    for (let j = 0; j < f.cap.length; j++) {
+      const i = f.cap[j], c = f.cc[j], s = f.cs[j];
+      // луч в долях окна до контура |X|^n + |Y|^n = 1, затем наружу на глубину узла × ring
+      const t = Math.pow(Math.pow(Math.abs(c), n) + Math.pow(Math.abs(s), n), -1 / n);
+      const off = (f.cr[j] * 0.9 + (fph[i] * 0.15915 - 0.5) * 0.25) * ring;
+      ftx[i] = (mx + a * c * t + c * off - W / 2) * iz + cam.x;
+      fty[i] = (my + b * s * t + s * off - H / 2) * iz + cam.y;
+    }
+  }
+
   function step() {
     cull();
     const t = T, z = cam.zoom, iz = 1 / z, drift = S.drift * fieldSp * 0.55 * (1 + S.sound * (0.8 * snd.low + 0.4 * snd.beat));
     const objs = scene.objects;
     const nb = snd.bands.length;
-    const crPx = Math.max(22, Math.min(44, Math.min(W, H) * 0.045)), cr = crPx * iz, cr2 = cr * cr;
+    // Курсор расталкивает малую область: глубже по масштабу — меньше; у раскрытого окна и в алеф-нуле — ещё меньше;
+    // на самой моде (ниже) — ещё уже и слабее.
+    const crPx = Math.max(14, Math.min(28, Math.min(W, H) * 0.03)) * Math.max(0.4, Math.min(1, Math.pow(homeZ / z, 0.22))) * (rama || SPACE !== 'main' ? 0.6 : 1);
+    const cr = crPx * iz, cr2 = cr * cr;
     const cursorOn = mouse.in && tool === 'view' && !gesture;
     const [mwx, mwy] = cam.toWorld(mouse.x, mouse.y, W, H);
     for (let i = 0; i < objs.length; i++) objs[i].$lift = (objs[i].$lift || 0) + ((i === hl ? 1 : 0) - (objs[i].$lift || 0)) * (reduce.matches ? 1 : 0.12);
     if (win) win.k += (1 - win.k) * (reduce.matches ? 1 : 0.1);
-    const hlArea = hl >= 0 && objs[hl] && objs[hl].area && objs[hl].area.length >= 3 ? objs[hl].area : null;
+    // подсвеченные области: под курсором и отмеченные редактором; рамка многоугольника — дешёвая проверка до inPoly
+    const lit = [];
+    if (hl >= 0 && objs[hl] && objs[hl].area && objs[hl].area.length >= 3 && objs[hl].$lift > 0.02) lit.push(litOf(objs[hl].area, 0.6 * objs[hl].$lift));
+    for (const m of marks) if (m && m.length >= 3) lit.push(litOf(m, 0.55));
+    // рама: узлы области растекаются в рамку окна, фон уходит вдаль
+    const R = rama && rama.o && rama.o.area && rama.o.area.length >= 3 ? rama : null;
+    let kk = 0, far = 0;
+    if (R) {
+      if (R.gen !== fieldGen) capture(R);
+      kk = ease(Math.min(1, R.k));
+      far = kk * R.far;
+      ringTargets(R, z);
+    }
     const ax0 = act.x0, ay0 = act.y0, ax1 = act.x1, ay1 = act.y1;
     const hole = win || (rama && rama.hole);
     vTick = (vTick + 1) % VOID_EVERY;
@@ -527,8 +616,10 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     const qR = (rama ? Math.max(rama.w, rama.h) * 0.8 : Math.max(W, H) * 0.42) * iz, qR2 = 1 / (qR * qR), qLow = qG, qSpan = 1 - qG;
     if (fon.length < NF) fon = new Uint8Array(Math.max(NF, 1024));
     for (let i = 0; i < NF; i++) {
-      if (fx[i] < ax0 || fx[i] > ax1 || fy[i] < ay0 || fy[i] > ay1) { fon[i] = 1; continue; } // вне камеры узел замирает
-      if (qLow < 1) {
+      const cap = R && fcap[i];
+      if (!cap && (fx[i] < ax0 || fx[i] > ax1 || fy[i] < ay0 || fy[i] > ay1)) { fon[i] = 1; continue; } // вне камеры узел замирает
+      if (!cap && far > 0 && fph[i] * 0.15915 > 1 - far) { fon[i] = 0; continue; } // фон за раскрытым окном редеет
+      if (!cap && qLow < 1) {
         const ddx = fx[i] - qfx, ddy = fy[i] - qfy, t = 1 - (ddx * ddx + ddy * ddy) * qR2;
         // далеко от фокуса и ранг высок — узел спит; узлы у жил (слова) засыпают последними
         if (fph[i] * 0.15915 * (fsc[i] < bandSc ? 0.55 : 1) > qLow + qSpan * (t > 0 ? t : 0)) { fon[i] = 0; continue; }
@@ -548,21 +639,33 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
         const v = veins[qV];
         if (qSd < 0) { const p = -qSd * 0.32; ax += qNx * p; ay += qNy * p; b = 1; }
         else { const q = qSd / (fsc[i] * 1.6); b = Math.exp(-q * q); }
-        const fl = v.st.flow * b * 0.5 * iz; ax += qTx * fl; ay += qTy * fl; // стенки скользят вдоль линии
-        b *= (1 + 0.5 * (objs[v.obj].$lift || 0)) * (1 + 0.9 * v.st.sound * snd.bands[qV % nb]); // у каждой жилы своя полоса частот
+        // Параметры объекта (течение, такты, резонанс, звук) — его собственная жизнь, поле их не перенимает:
+        // узлы пространства только расступаются перед стенкой и светятся у неё; ритм поля — свой (дрейф, space.sound).
+        b *= 1 + 0.7 * excAt(objs[v.obj].$lift || 0, fx[i], fy[i]);
       }
-      if (cursorOn) {
+      if (cap && kk > 0) {
+        // узел области идёт на своё место в рамке; свой дрейф и стенки слабеют по мере раскрытия
+        ax = ax * (1 - kk) + (ftx[i] - fx[i]) * 0.08 * kk;
+        ay = ay * (1 - kk) + (fty[i] - fy[i]) * 0.08 * kk;
+        b = Math.max(b * (1 - kk), 0.55 * kk);
+      } else if (cursorOn) {
         const dx = fx[i] - mwx, dy = fy[i] - mwy, d2 = dx * dx + dy * dy;
-        if (d2 < cr2 * 2.2) {
+        if (d2 < cr2) {
+          // у моды (на стенке и внутри жилы) курсор слабее и уже: раздвигается часть, а не весь объект
+          const onMode = qSd < fsc[i] * 2, rr = onMode ? cr * 0.6 : cr;
           const d = Math.sqrt(d2) || 1e-6;
-          if (d < cr) { const q = 1 - d / cr, p = q * q * 1.6 * iz; ax += (dx / d) * p; ay += (dy / d) * p; b = Math.max(b, q * 0.5); }
+          if (d < rr) { const q = 1 - d / rr, p = q * q * (onMode ? 0.45 : 1.6) * iz; ax += (dx / d) * p; ay += (dy / d) * p; b = Math.max(b, q * 0.5); }
         }
       }
-      if (hole) {
+      if (far > 0 && !cap) b *= 1 - 0.6 * far;
+      if (hole && !(cap && kk > 0)) {
         const p = voidPush(hole, (fx[i] - cam.x) * z + W / 2, (fy[i] - cam.y) * z + H / 2);
         if (p) { ax += p[0] * iz; ay += p[1] * iz; b = Math.max(b, p[2]); }
       }
-      if (hlArea && inPoly(hlArea, fx[i], fy[i])) b = Math.max(b, 0.6 * objs[hl].$lift);
+      for (let m = 0; m < lit.length; m++) {
+        const L = lit[m];
+        if (fx[i] >= L.x0 && fx[i] <= L.x1 && fy[i] >= L.y0 && fy[i] <= L.y1 && inPoly(L.poly, fx[i], fy[i])) b = Math.max(b, L.b);
+      }
       fvx[i] = fvx[i] * 0.8 + ax; fvy[i] = fvy[i] * 0.8 + ay;
       fx[i] += fvx[i]; fy[i] += fvy[i];
       fb[i] = fb[i] * 0.6 + b * 0.4;
@@ -580,7 +683,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       mx[i] = cx + v.nx[j] * off + Math.sin(t * 1.3 + mph[i] * 3) * jit;
       my[i] = cy + v.ny[j] * off + Math.cos(t * 1.1 + mph[i] * 2) * jit;
       const tactB = 0.5 + 0.5 * Math.sin((ms[i] / (v.R * 10)) * 6.283 - t * 2.4 * v.st.tact + v.ph[3]);
-      mb[i] = (0.45 + 0.4 * mu[i] * mu[i] + 0.25 * tactB * tactB) * (1 + 0.6 * (objs[v.obj].$lift || 0)) * (v.st.fill / 0.6) * (1 + 0.9 * v.st.sound * snd.mid + 0.8 * band);
+      mb[i] = (0.45 + 0.4 * mu[i] * mu[i] + 0.25 * tactB * tactB) * (1 + 0.8 * excAt(objs[v.obj].$lift || 0, mx[i], my[i])) * (v.st.fill / 0.6) * (1 + 0.9 * v.st.sound * snd.mid + 0.8 * band);
     }
   }
 
@@ -631,7 +734,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       const v = veins[ch.v];
       if (v.obj !== lastObj) {
         if (lastObj > -2) ctx.stroke();
-        ctx.strokeStyle = `rgba(0, 242, 254, ${(0.16 + 0.34 * (objs[v.obj].$lift || 0) + (v.lod ? 0 : 0.3)).toFixed(3)})`;
+        ctx.strokeStyle = `rgba(0, 242, 254, ${(0.16 + 0.12 * (objs[v.obj].$lift || 0) + (v.lod ? 0 : 0.3)).toFixed(3)})`;
         ctx.beginPath();
         lastObj = v.obj;
       }
@@ -673,12 +776,18 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (rama && rama.hole && rama.k > 0) {
       const f = rama, a = Math.min(1, f.k * 1.4);
       ctx.globalCompositeOperation = 'source-over';
+      // середина окна пустеет под новую моду; край рисует сама группа узлов области (у рамы без области — тонкий контур)
       ctx.fillStyle = `rgba(1, 3, 6, ${(0.93 * a).toFixed(3)})`;
-      ctx.fillRect(f.x, f.y, f.w, f.h);
+      ctx.beginPath();
+      const rr = (f.round * Math.min(f.w, f.h)) / 2;
+      if (ctx.roundRect) ctx.roundRect(f.x, f.y, f.w, f.h, rr); else ctx.rect(f.x, f.y, f.w, f.h);
+      ctx.fill();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.strokeStyle = `rgba(0, 242, 254, ${(0.35 * a).toFixed(3)})`;
-      ctx.lineWidth = VK;
-      ctx.strokeRect(f.x + 0.5, f.y + 0.5, f.w - 1, f.h - 1);
+      if (!f.cap || !f.cap.length) {
+        ctx.strokeStyle = `rgba(0, 242, 254, ${(0.35 * a).toFixed(3)})`;
+        ctx.lineWidth = VK;
+        ctx.stroke();
+      }
     }
     // свечение: размытый уменьшенный кадр поверх (дешевле shadowBlur)
     // Размытие без ctx.filter: в Firefox и на части видеокарт blur() считается на процессоре и съедает кадр.
@@ -1110,13 +1219,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (going) return true;
     if (dy < 0) {
       pull = 0;
-      const i = portalAt(sx, sy);
-      if (i >= 0) {
-        const b = areaBounds(scene.objects[i]);
-        const sw = (b.x1 - b.x0) * cam.zoom, sh = (b.y1 - b.y0) * cam.zoom;
-        // область заполнила экран — объект фиксируется: дальше колёсико раскрывает раму
-        if (Math.max(sw / W, sh / H) > 0.55) { openFrame(i, false); return true; }
-      }
+      // мода фиксируется окном только в конце приближения (предел масштаба) — это ловит колёсико ниже
       return false;
     }
     if (dy > 0 && SPACE !== 'main') {
@@ -1327,10 +1430,16 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     document.body.append(pageEl);
   }
 
-  /** Прямоугольник раскрытой рамы: по центру экрана, столбец для чтения. */
-  function frameTarget() {
-    const m = 16 * VK, w = Math.min(W - 2 * m, 760 * VK), h = Math.min(H - 2 * m, Math.max(H * 0.82, 320 * VK));
+  /** Прямоугольник раскрытой рамы: по центру экрана; ширина и пропорция — из параметров рамы объекта. */
+  function frameTarget(o) {
+    const fg = (k) => (o && o.frameGet ? o.frameGet(k) : M.FRAME_DEFAULTS[k]);
+    const m = 16 * VK, w = Math.min(W - 2 * m, fg('width') * VK), asp = fg('aspect');
+    const h = asp > 0 ? Math.min(H - 2 * m, w * asp) : Math.min(H - 2 * m, Math.max(H * 0.82, 320 * VK));
     return { x: (W - w) / 2, y: (H - h) / 2, w, h };
+  }
+  function frameParams(o) {
+    const fg = (k) => (o && o.frameGet ? o.frameGet(k) : M.FRAME_DEFAULTS[k]);
+    return { round: fg('round'), ring: fg('ring'), far: fg('far') };
   }
   function objRect(o) {
     const b = areaBounds(o);
@@ -1353,22 +1462,22 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (win) closeWindow();
     highlight(-1);
     tween = null;
-    rama = { o, kind, path: kind === 'page' ? ownPath(o.href) : null, from: objRect(o), k: 0, want: auto ? 1 : null, pushed: false };
+    rama = { o, kind, path: kind === 'page' ? ownPath(o.href) : null, from: objRect(o), k: 0, want: auto ? 1 : null, pushed: false, gen: -1, ...frameParams(o) };
     placeFrame();
     if (kind !== 'space') loadFrame();
     loop();
   }
   /** Рама без объекта (вперёд по истории, прямой переход): из точки в центре. */
   function openFramePath(path) {
-    const t = frameTarget();
-    rama = { o: null, kind: 'page', path, from: { x: t.x + t.w / 2 - 4, y: t.y + t.h / 2 - 4, w: 8, h: 8 }, k: 0, want: 1, pushed: true };
+    const t = frameTarget(null);
+    rama = { o: null, kind: 'page', path, from: { x: t.x + t.w / 2 - 4, y: t.y + t.h / 2 - 4, w: 8, h: 8 }, k: 0, want: 1, pushed: true, ...frameParams(null) };
     pages.length = 0;
     loadFrame();
     loop();
   }
 
   function placeFrame() {
-    const t = frameTarget(), f = rama, e = ease(f.k);
+    const f = rama, t = frameTarget(f.o), e = ease(f.k);
     f.x = lerp(f.from.x, t.x, e); f.y = lerp(f.from.y, t.y, e); f.w = lerp(f.from.w, t.w, e); f.h = lerp(f.from.h, t.h, e);
     // дыра в поле: та же сила раздвигания, что у окна из пустоты
     f.hole = { x: f.x, y: f.y, w: f.w, h: f.h, k: Math.min(1, f.k * 1.6) };
@@ -1378,6 +1487,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (!show) return;
     pageEl.style.left = f.x / VK + 'px'; pageEl.style.top = f.y / VK + 'px';
     pageEl.style.width = f.w / VK + 'px'; pageEl.style.height = f.h / VK + 'px';
+    pageEl.style.borderRadius = (f.round * Math.min(f.w, f.h)) / 2 / VK + 'px';
     pageEl.style.opacity = String(Math.min(1, (f.k - 0.75) / 0.2));
     pageEl.classList.toggle('live', f.k >= 0.98);
   }
@@ -1701,6 +1811,17 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     get space() { return SPACE; },
     get rama() { return rama && { kind: rama.kind, k: rama.k, want: rama.want, path: rama.path }; },
     goIn, goOut,
+    /** Редактор: области, чьи узлы светятся (многоугольники мира). */
+    set marks(list) { marks = list || []; },
+    /** Редактор: долететь к области объекта и раскрыть его окно. */
+    openFrameOf(id) {
+      const i = scene.objects.findIndex((o) => o.id === id), o = scene.objects[i];
+      if (i < 0 || !kindOf(o)) return false;
+      if (rama) closeFrameNow();
+      flyTo(areaBounds(o));
+      if (tween) tween.done = () => openFrame(i, true); else openFrame(i, true);
+      return true;
+    },
     /** Слух холста: f(dt) → { bands, low, mid, high, level, beat } (music.js). null — тишина. */
     setSound(f) { hearFn = f; loop(); },
     setInput(h) { editorInput = h; },

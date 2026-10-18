@@ -526,6 +526,26 @@ describe('Места в сцене: плеер и вход хранителя', 
   });
 });
 
+describe('Окно объекта: рама из узлов области', () => {
+  it('frame — параметры рамы в пределах; модель хранит их и отдаёт по умолчанию', () => {
+    expect(validateScene(tiny({ frame: { width: 600, aspect: 0.7, round: 0.5, ring: 40, far: 0.8 } })).ok).toBe(true);
+    expect(validateScene(tiny({ frame: { round: 2 } })).ok).toBe(false);
+    expect(validateScene(tiny({ frame: { open: 0.5 } })).ok).toBe(false);
+    const o = new M.SceneObject({ id: 'a', label: 'A', strokes: [], frame: { round: 1 } });
+    expect(o.toJSON()).toMatchObject({ frame: { round: 1 } });
+    expect(o.frameGet('round')).toBe(1);
+    expect(o.frameGet('width')).toBe(M.FRAME.width[2]);
+  });
+  it('узлы области растекаются в рамку окна, фон редеет; окно фиксируется в конце приближения', () => {
+    for (const s of ['function capture(', 'function ringTargets(', 'fieldGen', 'fph[i] * 0.15915 > 1 - far', 'cam.zoom <= z0 * 1.002'])
+      expect(vitrinaJs, s).toContain(s);
+  });
+  it('параметры объекта — его собственные: области такта не сливаются между объектами, поле не перенимает течение', () => {
+    expect(vitrinaJs).toContain('veins[vj].obj !== v.obj');
+    expect(vitrinaJs).not.toContain('v.st.flow * b');
+  });
+});
+
 describe('Страницы сети внутри алеф-нуля и предпросмотр', () => {
   it('рама: приближение в область объекта фиксирует его, колёсико раскрывает прямоугольник; внутри окно или страница', () => {
     for (const s of ['function openFrame(', 'function frameWheel(', 'function stepFrame(', 'function renderMd(', "Accept: 'text/markdown'", 'history.pushState({ page: path }', 'inPoly(o.area, wx, wy)', 'voidPush(hole,'])
