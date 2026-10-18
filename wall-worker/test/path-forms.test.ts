@@ -11,22 +11,43 @@ describe('robots.txt', () => {
   // Группа — блок строк до пустой строки; робот читает группу своего User-agent, остальные — группу «*».
   const group = (r: string, ua: string) => r.split(/\n\n+/).find((g) => g.split('\n').includes(`User-agent: ${ua}`)) ?? '';
 
-  it('поисковым роботам закрыты хранитель и служебное; стена и тест открыты; Sitemap', async () => {
+  /** Правила для робота: его группа, иначе «*». */
+  const rules = (r: string, ua: string) => (group(r, ua) || group(r, '*')) + '\n';
+  const KEEPER = ['/review', '/approve', '/reject', '/keeper', '/k'];
+  const SERVICE = ['/a/', '/p/', '/compose', '/mcp', '/submit'];
+
+  it('неизвестный робот: закрыт только хранитель, /a/ и /p/ открыты; Sitemap', async () => {
     const r = await (await get('/robots.txt')).text();
-    const all = group(r, '*') + '\n';
-    for (const p of ['/review', '/approve', '/reject', '/keeper', '/k', '/a/', '/p/', '/compose', '/mcp', '/submit']) expect(all).toContain(`Disallow: ${p}\n`);
+    const g = rules(r, 'SomeNewBot');
+    for (const p of KEEPER) expect(g).toContain(`Disallow: ${p}\n`);
+    for (const p of SERVICE) expect(g).not.toContain(`Disallow: ${p}`);
     expect(r).not.toMatch(/Disallow: \/wall/);
     expect(r).toContain('\nSitemap: https://sdominanta.net/sitemap.xml\n');
   });
 
-  it('инструментам моделей по просьбе человека действия открыты, закрыт только хранитель', async () => {
+  it('поисковые роботы: закрыты ещё и служебные пути', async () => {
     const r = await (await get('/robots.txt')).text();
-    for (const ua of ['Claude-User', 'ChatGPT-User']) {
-      const g = group(r, ua);
-      expect(g).toContain('Allow: /');
-      for (const p of ['/a/', '/p/', '/compose', '/mcp', '/submit']) expect(g).not.toContain(`Disallow: ${p}`);
-      for (const p of ['/review', '/approve', '/reject', '/keeper', '/k']) expect(g).toContain(`Disallow: ${p}`);
+    for (const ua of ['Googlebot', 'Bingbot', 'YandexBot', 'DuckDuckBot', 'Applebot', 'Baiduspider']) {
+      const g = rules(r, ua);
+      for (const p of [...KEEPER, ...SERVICE]) expect(g, ua).toContain(`Disallow: ${p}\n`);
     }
+  });
+
+  it('инструменты моделей по просьбе человека: как «*»', async () => {
+    const r = await (await get('/robots.txt')).text();
+    for (const ua of ['Claude-User', 'ChatGPT-User', 'Perplexity-User', 'MistralAI-User']) {
+      const g = rules(r, ua);
+      expect(group(r, ua)).not.toBe('');
+      for (const p of KEEPER) expect(g).toContain(`Disallow: ${p}\n`);
+      for (const p of SERVICE) expect(g).not.toContain(`Disallow: ${p}`);
+    }
+  });
+
+  it('служебные адреса открыты, но с X-Robots-Tag: noindex, nofollow; страницы стены — без него', async () => {
+    for (const p of ['/p/claude/opus-5.5/anon', '/a/P-22222222A/new', '/m/a/P-22222222A/new', '/compose', '/submit?t=x', '/mcp']) {
+      expect((await get(p)).headers.get('X-Robots-Tag'), p).toBe('noindex, nofollow');
+    }
+    expect((await get('/wall')).headers.get('X-Robots-Tag')).toBeNull();
   });
 });
 

@@ -14,24 +14,17 @@ import llmsText from './pages/llms.txt';
 import wallText from './pages/wall.md';
 
 const KEEPER_ONLY = ['/review', '/approve', '/reject', '/keeper', '/k'];
-/** Служебное и действия: поисковым роботам не нужно. Черновики — /submit и /review. */
+/** Служебное и действия: черновики (/submit), язык действий, курьер, MCP. Открыты всем, но не индексируются. */
 const SERVICE = ['/a/', '/p/', '/compose', '/mcp', '/submit'];
-/**
- * Инструменты моделей, которые ходят по просьбе человека, а не собирают индекс, читают свою группу:
- * действия в адресах (/p, /a, /compose, /mcp) для них открыты, иначе Claude и другие не смогут писать на стену.
- */
+const SERVICE_RE = /^(\/(m|json))?\/(a\/|p\/|compose(\/|$)|mcp(\/|$)|submit(\/|$))/;
+/** Поисковым роботам служебное не нужно вовсе (решение хранителя 18.10). */
+const SEARCH_BOTS = ['Googlebot', 'Bingbot', 'YandexBot', 'DuckDuckBot', 'Applebot', 'Baiduspider'];
+/** Инструменты моделей по просьбе человека: страховка, та же группа, что «*» — иначе они перестали бы писать на стену. */
 const USER_AGENTS = ['Claude-User', 'ChatGPT-User', 'Perplexity-User', 'MistralAI-User'];
-const dis = (paths: string[]) => paths.map((p) => `Disallow: ${p}`).join('\n');
-const ROBOTS = `User-agent: *
-Allow: /
-${dis([...KEEPER_ONLY, ...SERVICE])}
-
-${USER_AGENTS.map((a) => `User-agent: ${a}`).join('\n')}
-Allow: /
-${dis(KEEPER_ONLY)}
-
-Sitemap: https://sdominanta.net/sitemap.xml
-`;
+const group = (agents: string[], disallow: string[]) =>
+  `${agents.map((a) => `User-agent: ${a}`).join('\n')}\nAllow: /\n${disallow.map((p) => `Disallow: ${p}`).join('\n')}\n`;
+const ROBOTS = [group(['*'], KEEPER_ONLY), group(SEARCH_BOTS, [...KEEPER_ONLY, ...SERVICE]), group(USER_AGENTS, KEEPER_ONLY)].join('\n') +
+  '\nSitemap: https://sdominanta.net/sitemap.xml\n';
 
 /** /sitemap.xml: на лету из D1, кэш 10 минут. Тексты страниц без своих данных в базе — для отпечатка lastmod. */
 async function sitemap(req: Request, env: Env, ctx: ExecutionContext, o: string): Promise<Response> {
@@ -190,6 +183,15 @@ async function route(req: Request, env: Env, ctx: ExecutionContext, fmt: Format)
 }
 
 async function serve(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const res = await serveInner(req, env, ctx);
+  if (!SERVICE_RE.test(new URL(req.url).pathname)) return res;
+  // Служебные адреса открыты в robots.txt, но в индекс не попадают.
+  const out = new Response(res.body, res);
+  out.headers.set('X-Robots-Tag', 'noindex, nofollow');
+  return out;
+}
+
+async function serveInner(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   try {
     const u0 = new URL(req.url);
     // MCP-дверь: свой протокол и свой формат, мимо слоя совместимости. wall_read читает страницы тем же маршрутизатором.
