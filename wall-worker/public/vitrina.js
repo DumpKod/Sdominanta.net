@@ -291,6 +291,11 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   let fkeys = new Map(); // ключ клетки или куска → [начало, число]
 
   function calcPx() { return Math.max(10, Math.sqrt((W * H) / 9000)) / S.density; }
+  // Одна картина на любом экране: движок считает кадр для экрана-образца (не больше REF_AREA пикселей CSS),
+  // холст растягивается на весь экран. Большой экран получает ту же композицию крупнее, а не в разы больше узлов.
+  // W, H, мышь и камера внутри движка — в пикселях образца; наружу (редактору) — в пикселях CSS, множитель VK.
+  const REF_AREA = 400000, PIXEL_BUDGET = 1600000;
+  let VK = 1;
 
   function buildField(keep) {
     const old = keep && fx ? { fx, fy, fvx, fvy, fb, fkeys } : null;
@@ -602,7 +607,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     ctx.globalAlpha = 1;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
-    if (overlay) overlay(ctx);
+    if (overlay) { ctx.setTransform(DPR * VK, 0, 0, DPR * VK, 0, 0); overlay(ctx); ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
   }
 
   /* ---------------------------------------------------------------------
@@ -707,7 +712,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   cv.addEventListener('pointerdown', (e) => {
     tween = null;
     try { cv.setPointerCapture(e.pointerId); } catch { /* указатель уже ушёл */ }
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    pointers.set(e.pointerId, { x: e.clientX * VK, y: e.clientY * VK });
     if (pointers.size === 2) {
       if (gesture && gesture.kind === 'editor' && editorInput && editorInput.cancel) editorInput.cancel();
       gesture = { kind: 'pinch', ...pinchState() };
@@ -715,16 +720,16 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     }
     if (pointers.size > 2) return;
     const panKey = e.button === 1 || spaceDown;
-    if (panKey) { e.preventDefault(); gesture = { kind: 'pan', x: e.clientX, y: e.clientY }; cv.classList.add('grab'); return; }
+    if (panKey) { e.preventDefault(); gesture = { kind: 'pan', x: e.clientX * VK, y: e.clientY * VK }; cv.classList.add('grab'); return; }
     if (tool !== 'view' && editorInput) { gesture = { kind: 'editor' }; editorInput.down(e); return; }
     if (e.button !== 0 && e.pointerType === 'mouse') return;
-    gesture = { kind: 'tap', x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY };
+    gesture = { kind: 'tap', x0: e.clientX * VK, y0: e.clientY * VK, x: e.clientX * VK, y: e.clientY * VK };
   });
 
   cv.addEventListener('pointermove', (e) => {
-    mouse.x = e.clientX; mouse.y = e.clientY; mouse.in = true;
+    mouse.x = e.clientX * VK; mouse.y = e.clientY * VK; mouse.in = true;
     const p = pointers.get(e.pointerId);
-    if (p) { p.x = e.clientX; p.y = e.clientY; }
+    if (p) { p.x = e.clientX * VK; p.y = e.clientY * VK; }
     if (gesture && gesture.kind === 'pinch' && pointers.size >= 2) {
       const s = pinchState();
       cam.zoomAt(s.cx, s.cy, W, H, s.d / gesture.d, 0, ZOOM_MAX);
@@ -734,29 +739,29 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       cameraChanged();
       return;
     }
-    if (gesture && gesture.kind === 'tap' && Math.hypot(e.clientX - gesture.x0, e.clientY - gesture.y0) > 5) {
+    if (gesture && gesture.kind === 'tap' && Math.hypot(e.clientX * VK - gesture.x0, e.clientY * VK - gesture.y0) > 5) {
       gesture = { kind: 'pan', x: gesture.x, y: gesture.y };
       cv.classList.add('grab');
       highlight(-1);
     }
     if (gesture && gesture.kind === 'pan') {
-      cam.panBy(e.clientX - gesture.x, e.clientY - gesture.y);
-      gesture.x = e.clientX; gesture.y = e.clientY;
+      cam.panBy(e.clientX * VK - gesture.x, e.clientY * VK - gesture.y);
+      gesture.x = e.clientX * VK; gesture.y = e.clientY * VK;
       userMoved = true;
       cameraChanged();
       return;
     }
-    if (gesture && gesture.kind === 'tap') { gesture.x = e.clientX; gesture.y = e.clientY; }
+    if (gesture && gesture.kind === 'tap') { gesture.x = e.clientX * VK; gesture.y = e.clientY * VK; }
     if (gesture && gesture.kind === 'editor') { editorInput.move(e); return; }
     if (!gesture && tool !== 'view' && editorInput) { editorInput.move(e); return; }
     if (tool !== 'view') return;
     if (win) {
-      const l = winTarget(e.clientX, e.clientY);
+      const l = winTarget(e.clientX * VK, e.clientY * VK);
       win.hover = l && l.href ? l : null;
       cv.classList.toggle('over', !!l);
       return;
     }
-    highlight(hit(e.clientX, e.clientY));
+    highlight(hit(e.clientX * VK, e.clientY * VK));
   });
 
   function pointerEnd(e) {
@@ -772,7 +777,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     gesture = null;
     cv.classList.remove('grab');
     if (g && g.kind === 'editor') { editorInput.up(e); return; }
-    if (g && g.kind === 'tap' && e.type === 'pointerup') tap(e.clientX, e.clientY);
+    if (g && g.kind === 'tap' && e.type === 'pointerup') tap(e.clientX * VK, e.clientY * VK);
   }
   cv.addEventListener('pointerup', pointerEnd);
   cv.addEventListener('pointercancel', pointerEnd);
@@ -788,7 +793,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1;
     // гостю колёсико — масштаб; в инструментах правки — сдвиг, а масштаб — с Ctrl/⌘ (щипок трекпада приходит с Ctrl)
     if (tool === 'view' || e.ctrlKey || e.metaKey) {
-      cam.zoomAt(e.clientX, e.clientY, W, H, Math.exp(-e.deltaY * k * (e.ctrlKey ? 0.01 : 0.0015)), 0, ZOOM_MAX);
+      cam.zoomAt(e.clientX * VK, e.clientY * VK, W, H, Math.exp(-e.deltaY * k * (e.ctrlKey ? 0.01 : 0.0015)), 0, ZOOM_MAX);
     } else {
       cam.panBy(-e.deltaX * k, -e.deltaY * k);
     }
@@ -798,7 +803,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   cv.addEventListener('dblclick', (e) => {
     if (tool !== 'view') { if (editorInput && editorInput.dblclick) editorInput.dblclick(e); return; }
-    if (!win && hit(e.clientX, e.clientY) < 0) fitAll();
+    if (!win && hit(e.clientX * VK, e.clientY * VK) < 0) fitAll();
   });
 
   window.addEventListener('keydown', (e) => {
@@ -1025,8 +1030,11 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   }
 
   function resize() {
-    DPR = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth; H = window.innerHeight;
+    const cw = window.innerWidth, ch = window.innerHeight;
+    VK = Math.min(1, Math.sqrt(REF_AREA / Math.max(1, cw * ch)));
+    W = cw * VK; H = ch * VK;
+    // пиксели холста: как у экрана, но в пределах бюджета (свечение мягкое, лишние пиксели рисуются впустую)
+    DPR = Math.max(1, Math.min((window.devicePixelRatio || 1) / VK, 2 / VK, Math.sqrt(PIXEL_BUDGET / Math.max(1, W * H))));
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
     glowCv.width = Math.max(1, Math.round(W / 4)); glowCv.height = Math.max(1, Math.round(H / 4));
     if (!userMoved) { const to = fitTarget(scene.bounds()); cam.x = to.x; cam.y = to.y; cam.zoom = to.zoom; }
@@ -1047,10 +1055,17 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
      Редактор хранителя (/k/editor.js, отдаётся только в сессии) получает движок событием vitrina:ready.
      --------------------------------------------------------------------- */
   const api = {
-    M, cv, cam, keeper,
+    M, cv, keeper,
+    /** Камера для редактора — в пикселях CSS: zoom — пикселей CSS на единицу мира. */
+    cam: {
+      get x() { return cam.x; }, set x(v) { cam.x = v; },
+      get y() { return cam.y; }, set y(v) { cam.y = v; },
+      get zoom() { return cam.zoom * VK; }, set zoom(v) { cam.zoom = v / VK; },
+      view(w, h) { return cam.view(w * VK, h * VK); },
+    },
     get scene() { return scene; },
     get objects() { return scene.objects; },
-    get W() { return W; }, get H() { return H; },
+    get W() { return W / VK; }, get H() { return H / VK; },
     get tool() { return tool; },
     get level() { return lv; },
     get panning() { return !!gesture && gesture.kind !== 'editor'; },
@@ -1061,15 +1076,15 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     setInput(h) { editorInput = h; },
     onCamera(f) { listeners.push(f); },
     setLive(l) { liveStroke = l; ensureView(true); refresh(2); },
-    toWorld(sx, sy) { return cam.toWorld(sx, sy, W, H); },
-    toScreen(wx, wy) { return cam.toScreen(wx, wy, W, H); },
+    toWorld(sx, sy) { return cam.toWorld(sx * VK, sy * VK, W, H); },
+    toScreen(wx, wy) { const [x, y] = cam.toScreen(wx, wy, W, H); return [x / VK, y / VK]; },
     /** Ближайшая жила к точке экрана: объект, номер мазка и расстояние до стенки в пикселях экрана. */
     nearest(sx, sy) {
-      const [wx, wy] = cam.toWorld(sx, sy, W, H);
+      const [wx, wy] = cam.toWorld(sx * VK, sy * VK, W, H);
       queryVoid(wx, wy);
-      return qV >= 0 ? { obj: veins[qV].obj, si: veins[qV].si, sd: qSd * cam.zoom } : null;
+      return qV >= 0 ? { obj: veins[qV].obj, si: veins[qV].si, sd: (qSd * cam.zoom) / VK } : null;
     },
-    hit, highlight, fitAll, flyTo, cameraChanged,
+    hit: (sx, sy) => hit(sx * VK, sy * VK), highlight, fitAll, flyTo, cameraChanged,
     exportScene() { return scene.toJSON(); },
     /** Сцена изменилась на месте (правка объектов): пересобрать жилы, камеру не трогать. */
     rebuild(n) { readSpace(); bindNav(); ensureView(true); refresh(n || 30); },
