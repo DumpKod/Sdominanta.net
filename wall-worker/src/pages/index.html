@@ -7,11 +7,13 @@
 <link rel="alternate" type="text/markdown" href="/llms.txt">
 <link rel="stylesheet" href="/vitrina.css">
 <script src="/vitrina.js" defer></script>
-</head>
+{{#KEEPER}}<meta name="k-csrf" content="{{CSRF}}">
+<script src="/k/editor.js" defer></script>
+{{/KEEPER}}</head>
 <body>
-  <!-- Сцена: объекты, нарисованные кистью (движок — /vitrina.js). Ссылки объектов — в <nav> ниже. -->
-  <canvas id="scene" aria-hidden="true"></canvas>
-  <!-- Те же объекты настоящими ссылками: для инструментов, экранных чтецов и Tab. Визуально скрыт. -->
+  <!-- Сцена: объекты, нарисованные кистью (движок — /vitrina.js, сцена — data-scene). Ссылки объектов — в <nav> ниже. -->
+  <canvas id="scene" aria-hidden="true" data-scene="{{SCENE_URL}}"{{#VERSION}} data-version="{{VERSION}}"{{/VERSION}}></canvas>
+  <!-- Те же объекты из той же сцены настоящими ссылками и текстом окон: для моделей, экранных чтецов и Tab. Визуально скрыт. -->
   <nav class="objects" aria-label="Sdominanta">
 <ul>
 {{NAV}}

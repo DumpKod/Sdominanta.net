@@ -25,10 +25,12 @@
 изменения схемы для уже созданной базы — файлы в `migrations/`, применяются `wrangler d1 execute sdominanta --remote --file=…`.
 18.10 позже: язык действий в адресах `/p/…`, `/a/{пропуск}/…`, латинские ключи карточки, `public/` для витрины
 (миграция `migrations/0003-pieces.sql`). Движок кисти хранителя встроен в `public/vitrina.js` (сцена — `src/scene.ts`,
-слова — `tools/trace-words.mjs`, см. «Отступления» в `README.md`).
+слова — `tools/build-scene.mjs`, см. «Отступления» в `README.md`).
 Затем слой совместимости (`src/format.ts`), таблица `/wall/compat` (миграция `0004-compat.sql`), план MCP — `docs/mcp-door-plan.md`.
 Затем курьер `/compose` (форма для человека системы, которая не строит адреса) и выводы о возможностях в `/wall/compat`.
 Затем панель хранителя `/k` (`src/panel.ts`, аккаунты — `src/account.ts`, миграция `0005-accounts.sql`).
+Затем админка витрины: сцена в таблице `scenes` (миграция `0006-scenes.sql`), `/vitrina/scene.json`, редактор `/k/editor.js` только в сессии,
+раздел `/k/vitrina` (версии, предпросмотр, публикация, откат), области и окна из пустоты, шрифт из жил `public/vitrina/font.json`.
 Тесты ядра читают markdown (`Accept: text/markdown` в `test/helpers.ts`).
 18.10 привязан домен: `routes` в `wrangler.toml` — sdominanta.net и www (custom domain). Workers Logs не включать.
 
@@ -58,8 +60,10 @@
 - `src/code.ts` — короткие коды с контрольным символом. `src/pass.ts` — декларация и пропуск (таблица `passes`). `src/totp.ts` — TOTP. `src/keeper.ts` — ключ и cookie хранителя, TOTP, нарастающая блокировка.
 - `src/format.ts` — слой совместимости: HTML по умолчанию, `/m/` и `Accept: text/markdown` — markdown, `/json/` — JSON.
 - `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status`.
-- `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок кисти хранителя, `src/scene.ts` — объекты сцены.
-- `tools/` — `trace-words.mjs` (подписи → жилы, Playwright) и `trace.js` (автотрассировка движка); в Worker не входят.
+- `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок кисти хранителя, `public/vitrina/font.json` — шрифт из жил.
+- `src/scene.ts` — формат, проверка и чтение сцены; `src/scene-default.json` — встроенная сцена; `src/vitrina.ts` — страница витрины.
+- `src/pages/editor.js.txt` — редактор витрины (отдаётся как `/k/editor.js` только в сессии хранителя).
+- `tools/` — `build-scene.mjs` (сцена по умолчанию и шрифт, Playwright) и `trace.js` (автотрассировка движка); в Worker не входят.
 - `src/rate.ts` — лимиты. `src/post.ts` — правила/пропуск, почтомат, review/approve/reject (ядро — `publishDraft`, `declineDraft`).
 - `src/panel.ts` — панель `/k`: вход кодом, сессии, CSRF, очередь, кнопки. `src/account.ts` — аккаунты, шифрование TOTP-секрета.
 - `src/wall.ts` — страницы чтения. `src/test-route.ts` — `/wall/test`.

@@ -22,7 +22,7 @@ const damaged = (raw: string | null) => {
   return !c.ok && c.damaged;
 };
 
-const bumpVersion = (db: D1Database) =>
+export const bumpVersion = (db: D1Database) =>
   db.prepare(`INSERT INTO meta (k, v) VALUES ('ver', '1') ON CONFLICT (k) DO UPDATE SET v = CAST(v AS INTEGER) + 1`);
 
 const expireDrafts = (db: D1Database, now: number) =>

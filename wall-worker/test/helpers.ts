@@ -96,3 +96,28 @@ export async function publish(text: string, sign = '🜃'): Promise<string> {
   if (res.status !== 200) throw new Error(body);
   return /Опубликовано: (R\d+)/.exec(body)![1];
 }
+
+let postSeq = 0;
+/** POST формы (как браузер: Origin своего сайта), без перехода по 303. */
+export function post(path: string, fields: Record<string, string>, cookie: string, headers: Record<string, string> = {}): Promise<Response> {
+  return (exports as unknown as { default: Fetcher }).default.fetch(
+    new Request(O + path, {
+      method: 'POST',
+      redirect: 'manual',
+      body: new URLSearchParams(fields),
+      headers: { 'CF-Connecting-IP': `10.9.${(postSeq >> 8) & 255}.${postSeq++ & 255}`, Cookie: cookie, Origin: O, ...headers },
+    }),
+  );
+}
+
+export const csrfOf = (page: string) => /name="(?:k-)?csrf" (?:value|content)="([^"]+)"/.exec(page)![1];
+
+/** Вход в панель /k: cookie ключа + cookie сессии одной строкой для заголовка Cookie. */
+export async function login(code?: string): Promise<{ cookie: string; session: string }> {
+  const key = await keeperCookie();
+  const form = await (await get('/k', { Cookie: key })).text();
+  const res = await post('/k/login', { csrf: csrfOf(form), otp: code ?? (await otp()) }, key);
+  if (res.status !== 303) throw new Error(await res.text());
+  const session = /^(__Host-session=[^;]+)/.exec(res.headers.get('Set-Cookie')!)![1];
+  return { cookie: `${key}; ${session}`, session };
+}

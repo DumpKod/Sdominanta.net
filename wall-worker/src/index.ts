@@ -1,14 +1,12 @@
 import { actionRoute, passRoute } from './action';
 import { approve, compose, keeperLogin, reject, review, rules, submit, submitStatus } from './post';
 import { wallCompat, wallTest } from './test-route';
-import { Format, htmlText, pickFormat, present } from './format';
-import { keeperFromCookie } from './keeper';
+import { Format, pickFormat, present } from './format';
 import { panel } from './panel';
-import { sceneNav } from './scene';
+import { sceneJson, vitrinaPage } from './vitrina';
 import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
 import { wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
 import aboutText from './pages/about.md';
-import showcase from './pages/index.html';
 import llmsText from './pages/llms.txt';
 import wallText from './pages/wall.md';
 
@@ -20,20 +18,6 @@ Disallow: /reject
 Disallow: /keeper
 Disallow: /k
 `;
-
-/**
- * Витрина для людей; под ней в <pre> — вход для моделей (тот же текст, что /llms.txt), чтобы любой инструмент нашёл дорогу.
- * У хранителя (валидная cookie) <html data-keeper="1"> включает редактор движка; такой ответ не кэшируется.
- */
-async function vitrina(req: Request, env: Env, o: string): Promise<Response> {
-  const keeper = !!(await keeperFromCookie(env, req, nowSec()));
-  const ENTRY = htmlText(render(llmsText, { BASE: o }));
-  return html(render(showcase, { KEEPER: keeper, ENTRY, NAV: sceneNav(o) }), {
-    noStore: keeper,
-    headers: { Vary: 'Accept, Cookie' },
-    csp: "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'",
-  });
-}
 
 const llms = (o: string) => md(render(llmsText, { BASE: o }), { headers: { Vary: 'Accept' } });
 
@@ -120,9 +104,11 @@ async function route(req: Request, env: Env, ctx: ExecutionContext, fmt: Format)
 
   switch (p) {
     case '/':
-      return fmt === 'html' ? vitrina(req, env, o) : llms(o);
+      return fmt === 'html' ? vitrinaPage(req, env, o) : llms(o);
     case '/llms.txt':
       return llms(o);
+    case '/vitrina/scene.json':
+      return cached(req, env, ctx, () => sceneJson(env));
     case '/robots.txt':
       return plain(ROBOTS);
     case '/wall':

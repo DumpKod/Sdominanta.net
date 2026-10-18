@@ -1,0 +1,324 @@
+// Редактор витрины хранителя. Отдаётся как /k/editor.js только при действующей сессии (__Host-session):
+// без сессии этого кода в браузере нет. Работает поверх движка /vitrina.js (событие vitrina:ready).
+// Инструменты: смотреть, двигать (колесо — масштаб), кисть (мазок в выбранный объект), ластик (клик по жиле),
+// область (клики — вершины многоугольника, двойной клик — замкнуть). Поля объекта: подпись, адрес, окно.
+// Кнопки: «Сохранить черновик», «Опубликовать», «Откатить» — POST в /k/vitrina/* с CSRF-токеном сессии.
+(() => {
+  'use strict';
+  const csrf = (document.querySelector('meta[name="k-csrf"]') || {}).content || '';
+  const start = (api) => {
+    if (start.done) return;
+    start.done = true;
+    init(api);
+  };
+  if (window.vitrinaEngine) start(window.vitrinaEngine);
+  document.addEventListener('vitrina:ready', (e) => start(e.detail));
+
+  function init(E) {
+    const cv = E.cv;
+    const version = cv.dataset.version || '';
+    const el = (tag, cls, text) => {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text) n.textContent = text;
+      return n;
+    };
+    const button = (parent, name, fn, cls) => {
+      const b = el('button', 'kp-b' + (cls ? ' ' + cls : ''), name);
+      b.type = 'button';
+      b.addEventListener('click', fn);
+      parent.append(b);
+      return b;
+    };
+    const input = (tag) => el(tag || 'input', 'kp-in');
+    const wrap = (inp, text) => {
+      const l = el('label', 'kp-f');
+      l.append(el('span', '', text), inp);
+      return l;
+    };
+
+    const panel = el('div', 'kp');
+    const head = el('p', 'kp-note', version ? `Предпросмотр версии ${version}` : 'Витрина: опубликованная сцена');
+    const toolsRow = el('div', 'kp-row');
+    const TOOLS = { view: 'Смотреть', move: 'Двигать', brush: 'Кисть', erase: 'Ластик', area: 'Область' };
+    const btns = {};
+    for (const [t, name] of Object.entries(TOOLS)) btns[t] = button(toolsRow, name, () => setTool(t));
+    const pick = el('select', 'kp-sel');
+    const objRow = el('div', 'kp-row');
+    const fLabel = input(), fHref = input(), fTitle = input(), fText = input('textarea'), fLinks = input('textarea');
+    const fields = [fLabel, fHref, fTitle, fText, fLinks];
+    fText.rows = 4;
+    fLinks.rows = 3;
+    const fieldsBox = el('div', 'kp-fields');
+    fieldsBox.append(
+      wrap(fLabel, 'Подпись (видят модели в <nav>)'),
+      wrap(fHref, 'Адрес: относительный путь, например /wall'),
+      wrap(fTitle, 'Окно: заголовок'),
+      wrap(fText, 'Окно: текст'),
+      wrap(fLinks, 'Окно: ссылки, по строке «подпись | /путь»'),
+    );
+    const sceneRow = el('div', 'kp-row');
+    const note = el('p', 'kp-note', 'Правки живут на этой странице, пока не сохранены черновиком.');
+    const box = el('textarea', 'kp-json');
+    box.spellcheck = false;
+    box.hidden = true;
+    panel.append(head, toolsRow, pick, objRow, fieldsBox, sceneRow, note, box);
+    document.body.append(panel);
+
+    let tool = 'view';
+    function setTool(t) {
+      tool = t;
+      E.setTool(t);
+      for (const [k, b] of Object.entries(btns)) b.classList.toggle('on', k === t);
+      if (t !== 'area') areaPts = [];
+      E.rebuild(2);
+    }
+    const sel = () => E.objects[+pick.value];
+    function fillPick() {
+      const v = pick.value;
+      pick.textContent = '';
+      E.objects.forEach((o, i) => pick.append(new Option(`${o.id} — ${o.label}`, String(i))));
+      pick.value = v && +v < E.objects.length ? v : '0';
+      showFields();
+    }
+    function showFields() {
+      const o = sel();
+      if (!o) return;
+      fLabel.value = o.label;
+      fHref.value = o.hrefRaw || '';
+      fTitle.value = (o.window && o.window.title) || '';
+      fText.value = (o.window && o.window.text) || '';
+      fLinks.value = ((o.window && o.window.links) || []).map((l) => `${l.label} | ${l.href}`).join('\n');
+    }
+    function readFields() {
+      const o = sel();
+      if (!o) return;
+      o.label = fLabel.value.trim() || o.id;
+      const href = fHref.value.trim();
+      o.hrefRaw = href || null;
+      o.href = href ? new URL(href, location.origin).href : null;
+      const links = fLinks.value
+        .split('\n')
+        .map((l) => l.split('|').map((x) => x.trim()))
+        .filter((l) => l[0] && l[1])
+        .map(([label, href]) => ({ label, href }));
+      const w = {};
+      if (fTitle.value.trim()) w.title = fTitle.value.trim();
+      if (fText.value.trim()) w.text = fText.value.trim();
+      if (links.length) w.links = links;
+      o.window = Object.keys(w).length ? w : null;
+      pick.options[+pick.value].textContent = `${o.id} — ${o.label}`;
+    }
+    pick.addEventListener('change', showFields);
+    for (const f of fields) {
+      f.addEventListener('input', readFields);
+      f.addEventListener('keydown', (e) => e.stopPropagation());
+    }
+
+    button(objRow, 'Новый объект', () => {
+      let n = 1;
+      while (E.objects.some((o) => o.id === 'obj-' + n)) n++;
+      const o = E.makeObject({ id: 'obj-' + n, label: 'Новый объект ' + n, place: { x: 0.5, y: 0.5, k: 1 } });
+      o.place = { x: 0.5, y: 0.5, k: 1 };
+      E.objects.push(o);
+      fillPick();
+      pick.value = String(E.objects.length - 1);
+      showFields();
+      E.rebuild();
+    });
+    button(objRow, 'Удалить объект', () => {
+      if (E.objects.length < 2) return;
+      E.objects.splice(+pick.value, 1);
+      pick.value = '0';
+      fillPick();
+      E.rebuild();
+    });
+    button(objRow, 'Убрать область', () => {
+      const o = sel();
+      if (o) { o.area = null; E.rebuild(); }
+    });
+
+    // ---------- сохранение, публикация, откат ----------
+    async function post(path, data) {
+      const body = new URLSearchParams({ csrf, ...data });
+      const r = await fetch(path, { method: 'POST', body, credentials: 'same-origin', headers: { 'X-Editor': '1' } });
+      return { ok: r.ok, text: await r.text() };
+    }
+    const line = (text, k) => (new RegExp(`^${k}: (.+)$`, 'm').exec(text) || [])[1];
+    async function save() {
+      readFields();
+      const r = await post('/k/vitrina/save', { json: JSON.stringify(E.exportScene()) });
+      note.textContent = r.ok ? `Черновик сохранён: версия ${line(r.text, 'VERSION')}.` : r.text;
+      return r.ok ? line(r.text, 'VERSION') : null;
+    }
+    button(sceneRow, 'Сохранить черновик', save);
+    button(sceneRow, 'Опубликовать', async () => {
+      const v = await save();
+      if (!v) return;
+      const r = await post('/k/vitrina/publish', { version: v });
+      note.textContent = r.ok ? `Опубликована версия ${v}.` : r.text;
+    });
+    button(sceneRow, 'Откатить', async () => {
+      const r = await post('/k/vitrina/rollback', {});
+      note.textContent = r.ok ? `Откат: на витрине ${line(r.text, 'TO')}.` : r.text;
+    });
+    button(sceneRow, 'Версии', () => { location.href = '/k/vitrina'; });
+    button(sceneRow, 'JSON', () => {
+      readFields();
+      box.value = JSON.stringify(E.exportScene());
+      box.hidden = !box.hidden;
+    });
+    button(sceneRow, 'Применить JSON', () => {
+      try {
+        const j = JSON.parse(box.value);
+        if (!j || !Array.isArray(j.objects)) throw new Error('нужно { v: 1, objects: [...] }');
+        E.objects.length = 0;
+        for (const s of j.objects) E.objects.push(E.makeObject(s));
+        fillPick();
+        E.rebuild();
+        note.textContent = 'JSON применён на странице. Сохраните черновик — сервер проверит его.';
+      } catch (e) {
+        note.textContent = 'Ошибка JSON: ' + e.message;
+      }
+    });
+    box.addEventListener('keydown', (e) => e.stopPropagation());
+
+    // ---------- инструменты на холсте ----------
+    let drag = null, raw = [], areaPts = [];
+    const toGlyph = (o, x, y) => [Math.round(((x - o.fit.ox) / o.fit.s) * 10) / 10, Math.round(((y - o.fit.oy) / o.fit.s) * 10) / 10];
+    const center = (o) => [(o.fit.ox + (o.g.w * o.fit.s) / 2) / E.W, (o.fit.oy + (o.g.h * o.fit.s) / 2) / E.H];
+    const brushR = (o) => {
+      const rs = o.g.strokes.map((s) => s.r).sort((a, b) => a - b);
+      return rs.length ? rs[rs.length >> 1] : Math.max(2, o.g.w / 180);
+    };
+    const choose = (i) => { if (i >= 0) { pick.value = String(i); showFields(); } };
+
+    cv.addEventListener('pointerdown', (e) => {
+      const x = e.clientX, y = e.clientY;
+      if (tool === 'move') {
+        const i = E.hit(x, y);
+        if (i < 0) return;
+        choose(i);
+        const o = E.objects[i], [cx, cy] = center(o);
+        drag = { o, dx: x - cx * E.W, dy: y - cy * E.H };
+        cv.setPointerCapture(e.pointerId);
+      } else if (tool === 'brush') {
+        const o = sel();
+        raw = [toGlyph(o, x, y)];
+        E.setLive({ obj: +pick.value, st: { r: brushR(o), pts: raw.slice() } });
+        cv.setPointerCapture(e.pointerId);
+      } else if (tool === 'erase') {
+        const n = E.nearest(x, y);
+        if (!n || n.sd > 14 || n.v.si < 0) return;
+        E.objects[n.v.obj].g.strokes.splice(n.v.si, 1);
+        E.rebuild();
+      } else if (tool === 'area') {
+        areaPts.push(toGlyph(sel(), x, y));
+        E.rebuild(2);
+      }
+    });
+    cv.addEventListener('pointermove', (e) => {
+      if (drag) {
+        const o = drag.o, k = (o.place && o.place.k) || 1;
+        o.place = { x: Math.min(1, Math.max(0, (e.clientX - drag.dx) / E.W)), y: Math.min(1, Math.max(0, (e.clientY - drag.dy) / E.H)), k };
+        E.rebuild(4);
+      } else if (tool === 'brush' && raw.length) {
+        const o = sel(), p = toGlyph(o, e.clientX, e.clientY), l = raw[raw.length - 1];
+        if (Math.hypot(p[0] - l[0], p[1] - l[1]) * o.fit.s > 1.5) {
+          raw.push(p);
+          E.setLive({ obj: +pick.value, st: { r: brushR(o), pts: smoothPts(raw, 2) } });
+        }
+      }
+    });
+    const end = () => {
+      if (drag) { drag = null; E.settle(); }
+      if (raw.length) {
+        const o = sel();
+        if (raw.length > 1) {
+          const pts = rdp(smoothPts(smoothPts(raw, 4), 2), 0.35).map((p) => p.map((v) => Math.round(v * 10) / 10));
+          o.g.strokes.push({ r: brushR(o), pts });
+          o.hasGlyph = true;
+        }
+        raw = [];
+        E.setLive(null);
+        E.rebuild();
+      }
+    };
+    cv.addEventListener('pointerup', end);
+    cv.addEventListener('pointercancel', end);
+    cv.addEventListener('dblclick', () => {
+      if (tool !== 'area' || areaPts.length < 3) return;
+      sel().area = areaPts.slice(0, 200);
+      areaPts = [];
+      E.rebuild();
+    });
+    cv.addEventListener('wheel', (e) => {
+      if (tool !== 'move') return;
+      const i = E.hit(e.clientX, e.clientY);
+      if (i < 0) return;
+      e.preventDefault();
+      const o = E.objects[i], [cx, cy] = center(o), cur = o.place || { x: cx, y: cy, k: 1 };
+      o.place = { x: Math.min(1, Math.max(0, cur.x)), y: Math.min(1, Math.max(0, cur.y)), k: Math.max(0.1, Math.min(10, cur.k * Math.exp(-e.deltaY * 0.0015))) };
+      E.rebuild();
+    }, { passive: false });
+
+    // Оси жил и область выбранного объекта поверх кадра — видно, что правится.
+    E.setOverlay((c) => {
+      if (tool === 'view') return;
+      const o = sel();
+      if (!o) return;
+      c.lineWidth = 1;
+      c.setLineDash([3, 9]);
+      c.strokeStyle = 'rgba(0, 242, 254, 0.35)';
+      c.strokeRect(o.fit.ox, o.fit.oy, o.g.w * o.fit.s, o.g.h * o.fit.s);
+      const poly = (pts, closed) => {
+        c.beginPath();
+        pts.forEach(([x, y], j) => (j ? c.lineTo : c.moveTo).call(c, o.fit.ox + x * o.fit.s, o.fit.oy + y * o.fit.s));
+        if (closed) c.closePath();
+        c.stroke();
+      };
+      c.strokeStyle = 'rgba(250, 204, 21, 0.6)';
+      if (o.area) poly(o.area, true);
+      if (areaPts.length) poly(areaPts, false);
+      c.setLineDash([]);
+    });
+
+    fillPick();
+    setTool('view');
+  }
+
+  function smoothPts(pts, win) {
+    if (win < 1 || pts.length < 3) return pts;
+    const out = [pts[0]], D = pts[0].length;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const acc = new Array(D).fill(0);
+      let c = 0;
+      for (let j = -win; j <= win; j++) {
+        const p = pts[Math.min(pts.length - 1, Math.max(0, i + j))];
+        for (let d = 0; d < D; d++) acc[d] += p[d];
+        c++;
+      }
+      out.push(acc.map((v) => v / c));
+    }
+    out.push(pts[pts.length - 1]);
+    return out;
+  }
+
+  function rdp(pts, eps) {
+    if (pts.length < 3) return pts;
+    const keep = new Uint8Array(pts.length);
+    keep[0] = keep[pts.length - 1] = 1;
+    const stack = [[0, pts.length - 1]];
+    while (stack.length) {
+      const [a, b] = stack.pop();
+      const ax = pts[a][0], ay = pts[a][1], ex = pts[b][0] - ax, ey = pts[b][1] - ay, el = Math.hypot(ex, ey) || 1e-9;
+      let md = -1, mi = -1;
+      for (let i = a + 1; i < b; i++) {
+        const d = Math.abs((pts[i][0] - ax) * ey - (pts[i][1] - ay) * ex) / el;
+        if (d > md) { md = d; mi = i; }
+      }
+      if (md > eps) { keep[mi] = 1; stack.push([a, mi], [mi, b]); }
+    }
+    return pts.filter((_, i) => keep[i]);
+  }
+})();

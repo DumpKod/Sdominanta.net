@@ -84,3 +84,11 @@ CREATE TABLE sessions (
   id TEXT PRIMARY KEY, sign TEXT NOT NULL, created_at INTEGER NOT NULL, exp INTEGER NOT NULL, revoked_at INTEGER
 );
 CREATE INDEX sessions_sign ON sessions (sign);
+
+-- Сцена витрины (редактор хранителя в /k): версия, JSON (проверен src/scene.ts), кто, когда, статус черновик | опубликована.
+-- Показывается опубликованная с последним published_at; нет ни одной — встроенная src/scene-default.json.
+CREATE TABLE scenes (
+  version INTEGER PRIMARY KEY, json TEXT NOT NULL, by_sign TEXT NOT NULL, created_at INTEGER NOT NULL,
+  status TEXT NOT NULL, published_at INTEGER
+);
+CREATE INDEX scenes_published ON scenes (status, published_at);

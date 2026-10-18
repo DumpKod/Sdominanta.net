@@ -2,7 +2,11 @@ import { checkKeeper, keeperFromCookie, lockInfo, COOKIE } from './keeper';
 import { declineDraft, DRAFT_TTL, draftView, publishDraft, tooMany, waitingDrafts } from './post';
 import { formatErrors } from './card';
 import { hit } from './rate';
-import { b64url, clientIp, enc, Env, fmtTime, hmacSha256, html, nowSec, randomBytes, sha256hex, timingSafeEqual } from './util';
+import { DEFAULT_SCENE, SCENE_MAX, publishedScene, SceneRow, validateScene, Scene } from './scene';
+import { bumpVersion } from './post';
+import { jsonResponse, vitrinaPage } from './vitrina';
+import { b64url, clientIp, enc, Env, fmtTime, hmacSha256, html, nowSec, plain, randomBytes, sha256hex, timingSafeEqual } from './util';
+import editorJs from './pages/editor.js.txt';
 
 // Панель хранителя /k — простой HTML без скриптов.
 // Вход в два слоя, как у старых адресов: cookie ключа (__Host-keeper) → форма с 6 цифрами из аутентификатора →
@@ -56,7 +60,17 @@ function page(title: string, body: string, o: { status?: number; headers?: Recor
     'button{cursor:pointer;background:#083344}form{margin:8px 0}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}\n' +
     '.warn{color:#fcd34d}.muted{color:#64748b}textarea{width:100%;box-sizing:border-box}\n' +
     '</style>\n</head>\n<body>\n' + body + '\n</body>\n</html>\n';
-  return html(doc, { status: o.status ?? 200, noStore: true, csp: CSP, headers: { 'X-Frame-Options': 'DENY', ...o.headers } });
+  // same-origin, а не no-referrer: при no-referrer браузер шлёт с формы «Origin: null», и проверка своего адреса отказала бы.
+  return html(doc, { status: o.status ?? 200, noStore: true, csp: CSP, headers: { 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'same-origin', ...o.headers } });
+}
+
+/** Сессия хранителя для витрины: cookie ключа + действующая сессия того же хранителя; csrf — токен её форм. */
+export async function keeperSession(env: Env, req: Request, now: number): Promise<{ sign: string; id: string; csrf: string } | null> {
+  const me = await keeperFromCookie(env, req, now);
+  if (!me) return null;
+  const s = await sessionFrom(env, req, now);
+  if (!s || s.sign !== me) return null;
+  return { sign: me, id: s.id, csrf: await csrfFor(env, 'session', s.id) };
 }
 
 const refused = () => page('Не принято', '<h1>Не принято</h1>', { status: 403 });
@@ -74,18 +88,22 @@ function loginForm(csrf: string, note = ''): string {
 
 function header(sign: string, csrf: string): string {
   return (
-    `<div class="row"><a href="/k">Очередь</a><span class="muted">Хранитель ${esc(sign)}</span>` +
+    `<div class="row"><a href="/k">Очередь</a><a href="/k/vitrina">Витрина</a><span class="muted">Хранитель ${esc(sign)}</span>` +
     `<form method="post" action="/k/logout"><input type="hidden" name="csrf" value="${esc(csrf)}"><button type="submit">Выйти</button></form>` +
     `<form method="post" action="/k/logout-all"><input type="hidden" name="csrf" value="${esc(csrf)}"><button type="submit">Выйти везде</button></form></div>`
   );
 }
 
-async function readForm(req: Request): Promise<Record<string, string> | null> {
-  if (Number(req.headers.get('Content-Length') ?? 0) > FORM_MAX) return null;
+// Сохранение сцены несёт её JSON в форме: до 256 КБ, а кириллица в urlencoded растёт до 9 раз — потолок с запасом.
+const SCENE_FORM_MAX = SCENE_MAX * 9 + FORM_MAX;
+
+async function readForm(req: Request, max = FORM_MAX): Promise<Record<string, string> | null> {
+  if (Number(req.headers.get('Content-Length') ?? 0) > max) return null;
   try {
-    const f = await req.formData();
+    const text = await req.text();
+    if (text.length > max) return null;
     const out: Record<string, string> = {};
-    for (const [k, v] of f) if (typeof v === 'string' && !(k in out)) out[k] = v;
+    for (const [k, v] of new URLSearchParams(text)) if (!(k in out)) out[k] = v;
     return out;
   } catch {
     return null;
@@ -110,6 +128,14 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
 
   const s = await sessionFrom(env, req, now);
   const session = s && s.sign === me ? s : null;
+
+  // Код редактора витрины отдаётся только в сессии: без неё его нет нигде.
+  if (path === '/editor.js') {
+    if (!session || post) return plain('// нет сессии хранителя\n', { status: 403, noStore: true });
+    return new Response(editorJs, {
+      headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' },
+    });
+  }
 
   if (!session) {
     const loginCsrf = await csrfFor(env, 'login', cookieValue(req, COOKIE) ?? '');
@@ -141,13 +167,14 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   const top = header(me, csrf);
 
   if (post) {
-    const f = await readForm(req);
+    const f = await readForm(req, path === '/vitrina/save' ? SCENE_FORM_MAX : FORM_MAX);
     if (!f || !(await csrfOk(env, 'session', session.id, f.csrf ?? ''))) return page('Отказ', top + '<h1>Отказ</h1><p>Форма устарела: откройте страницу заново.</p>', { status: 403 });
     if (path === '/logout' || path === '/logout-all') {
       const q = path === '/logout' ? 'UPDATE sessions SET revoked_at = ? WHERE id = ?' : 'UPDATE sessions SET revoked_at = ? WHERE sign = ? AND revoked_at IS NULL';
       await env.DB.prepare(q).bind(now, path === '/logout' ? session.id : me).run();
       return new Response(null, { status: 303, headers: { Location: `${o}/k`, 'Set-Cookie': sessionCookie('', 0), 'Cache-Control': 'no-store' } });
     }
+    if (path.startsWith('/vitrina/')) return sceneAction(env, o, req, path, f, me, now, top);
     const code = (f.code ?? '').trim();
     const back = `<p><a href="/k">К очереди</a> · <a href="/k/d/${esc(encodeURIComponent(code))}">Черновик</a></p>`;
     if (path === '/approve') {
@@ -188,6 +215,19 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
     return page('Панель хранителя', b);
   }
 
+  if (path === '/vitrina') return scenesPage(env, top, csrf);
+  const pv = /^\/vitrina\/v\/([1-9]\d{0,8})$/.exec(path);
+  if (pv) {
+    const row = await sceneRow(env, +pv[1]);
+    if (!row) return page('Не найдено', top + '<h1>Версии нет</h1>', { status: 404 });
+    return vitrinaPage(req, env, o, { scene: JSON.parse(row.json) as Scene, sceneUrl: `/k/vitrina/scene/${row.version}.json`, version: row.version });
+  }
+  const sj = /^\/vitrina\/scene\/(0|[1-9]\d{0,8})\.json$/.exec(path);
+  if (sj) {
+    if (sj[1] === '0') return jsonResponse(JSON.stringify(DEFAULT_SCENE), { noStore: true });
+    const row = await sceneRow(env, +sj[1]);
+    return row ? jsonResponse(row.json, { noStore: true, version: row.version }) : page('Не найдено', top + '<h1>Версии нет</h1>', { status: 404 });
+  }
   const m = /^\/d\/([^/]+)$/.exec(path);
   if (m) {
     const v = await draftView(env, m[1], now);
@@ -214,4 +254,70 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
     return page('Черновик ' + d.code, b);
   }
   return page('Не найдено', top + '<h1>Не найдено</h1>', { status: 404 });
+}
+
+// ---------- витрина: версии сцены ----------
+
+const sceneRow = (env: Env, v: number) => env.DB.prepare('SELECT * FROM scenes WHERE version = ?').bind(v).first<SceneRow>();
+
+async function scenesPage(env: Env, top: string, csrf: string): Promise<Response> {
+  const cur = await publishedScene(env);
+  const rows = (await env.DB.prepare('SELECT version, by_sign, created_at, status, published_at, length(json) AS size FROM scenes ORDER BY version DESC LIMIT 100').all<SceneRow & { size: number }>()).results;
+  const hidden = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
+  let b = top + '<h1>Витрина</h1>\n';
+  b += `<p>Сейчас на витрине: ${cur.version ? `версия ${cur.version}` : 'встроенная сцена'}. <a href="/">Открыть витрину с редактором</a></p>\n`;
+  b += `<form method="post" action="/k/vitrina/rollback">${hidden}<button type="submit">Откатить</button> <span class="muted">— снять текущую публикацию: витрина вернётся к предыдущей опубликованной версии</span></form>\n`;
+  if (!rows.length) b += '<p>Версий ещё нет: сохраните черновик из редактора на витрине.</p>';
+  else {
+    b += '<table><tr><th>Версия</th><th>Статус</th><th>Кто</th><th>Когда</th><th>Размер</th><th></th></tr>\n';
+    for (const r of rows) {
+      const state = r.version === cur.version ? 'на витрине' : r.status === 'опубликована' ? 'опубликована раньше' : r.published_at ? 'снята' : 'черновик';
+      b += `<tr><td>${r.version}</td><td>${state}</td><td>${esc(r.by_sign)}</td><td>${esc(fmtTime(r.created_at))}</td><td>${Math.ceil(r.size / 1024)} КБ</td>`;
+      b += `<td class="row"><a href="/k/vitrina/v/${r.version}">Предпросмотр</a>`;
+      if (r.version !== cur.version) b += `<form method="post" action="/k/vitrina/publish">${hidden}<input type="hidden" name="version" value="${r.version}"><button type="submit">Опубликовать</button></form>`;
+      b += '</td></tr>\n';
+    }
+    b += '</table>';
+  }
+  return page('Витрина', b);
+}
+
+/**
+ * POST /k/vitrina/save (json) → новая версия «черновик»; /publish (version) → она на витрине; /rollback → снять текущую.
+ * Редактор шлёт заголовок X-Editor: 1 и получает строки OK/ERR; формы панели получают страницу.
+ */
+async function sceneAction(env: Env, o: string, req: Request, path: string, f: Record<string, string>, me: string, now: number, top: string): Promise<Response> {
+  const editor = req.headers.get('X-Editor') === '1';
+  const reply = (ok: boolean, lines: string[], status = 200) =>
+    editor
+      ? plain(lines.join('\n') + '\n', { status, noStore: true })
+      : page(ok ? 'Витрина' : 'Отказ', top + `<h1>${esc(lines[0])}</h1><pre>${esc(lines.slice(1).join('\n'))}</pre><p><a href="/k/vitrina">К версиям</a></p>`, { status });
+  if (path === '/vitrina/save') {
+    const raw = f.json ?? '';
+    const v = validateScene(raw);
+    if (!v.ok) return reply(false, ['ERR SCENE', ...v.errors.map((e) => '- ' + e)], 400);
+    const json = JSON.stringify(v.scene);
+    const r = await env.DB.prepare(
+      `INSERT INTO scenes (version, json, by_sign, created_at, status) VALUES ((SELECT COALESCE(MAX(version), 0) + 1 FROM scenes), ?, ?, ?, 'черновик') RETURNING version`,
+    ).bind(json, me, now).first<{ version: number }>();
+    return reply(true, ['OK SAVED', `VERSION: ${r!.version}`, `PREVIEW: ${o}/k/vitrina/v/${r!.version}`]);
+  }
+  if (path === '/vitrina/publish') {
+    const n = Number(f.version);
+    const row = Number.isInteger(n) && n > 0 ? await sceneRow(env, n) : null;
+    if (!row) return reply(false, ['ERR VERSION', '- такой версии нет'], 404);
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE scenes SET status = 'опубликована', published_at = ? WHERE version = ?`).bind(now, n),
+      bumpVersion(env.DB),
+    ]);
+    return reply(true, ['OK PUBLISHED', `VERSION: ${n}`]);
+  }
+  if (path === '/vitrina/rollback') {
+    const cur = await publishedScene(env);
+    if (!cur.version) return reply(false, ['ERR ROLLBACK', '- на витрине встроенная сцена, откатывать некуда'], 409);
+    await env.DB.batch([env.DB.prepare(`UPDATE scenes SET status = 'черновик' WHERE version = ?`).bind(cur.version), bumpVersion(env.DB)]);
+    const now2 = await publishedScene(env);
+    return reply(true, ['OK ROLLBACK', `FROM: ${cur.version}`, `TO: ${now2.version || 'встроенная'}`]);
+  }
+  return reply(false, ['ERR ACTION'], 404);
 }

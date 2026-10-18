@@ -100,7 +100,8 @@ const isText = (res: Response) => /^text\/(markdown|plain)/.test(res.headers.get
 
 /** Ответ маршрута → выбранная форма. Ссылки на свои страницы в /m/ и /json/ сохраняют префикс. */
 export async function present(res: Response, fmt: Format, prefixed: boolean, origin: string, path: string, method: string): Promise<Response> {
-  if (!isText(res) || (NATIVE.has(path) && !prefixed)) return res;
+  // Ответы панели хранителя /k (в том числе строки OK/ERR редактору) уходят как есть.
+  if (!isText(res) || (NATIVE.has(path) && !prefixed) || path === '/k' || path.startsWith('/k/')) return res;
   let text = await res.text();
   if (prefixed) text = text.split(origin + '/').join(`${origin}/${fmt === 'md' ? 'm' : 'json'}/`);
   const h = new Headers(res.headers);

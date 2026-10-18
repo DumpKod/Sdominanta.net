@@ -1,35 +1,11 @@
 import { env } from 'cloudflare:test';
-import { exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { openTotp } from '../src/account';
-import { card, get, KEEPER, keeperCookie, O, otp, submitOk } from './helpers';
+import { card, csrfOf, get, KEEPER, keeperCookie, login, O, otp, post, submitOk } from './helpers';
 
 // Панель хранителя /k: cookie ключа → вход 6 цифрами → сессия; очередь, черновик, кнопки с CSRF, выход и отзыв.
 
-let ip = 0;
-function post(path: string, fields: Record<string, string>, cookie: string, headers: Record<string, string> = {}): Promise<Response> {
-  return (exports as unknown as { default: Fetcher }).default.fetch(
-    new Request(O + path, {
-      method: 'POST',
-      redirect: 'manual',
-      body: new URLSearchParams(fields),
-      headers: { 'CF-Connecting-IP': `10.9.${(ip >> 8) & 255}.${ip++ & 255}`, Cookie: cookie, Origin: O, ...headers },
-    }),
-  );
-}
-
-const csrfOf = (page: string) => /name="csrf" value="([^"]+)"/.exec(page)![1];
 const wrongOtp = async () => ((await otp()) === '000000' ? '111111' : '000000');
-
-/** Вход в панель: cookie ключа + cookie сессии одной строкой для заголовка Cookie. */
-async function login(code?: string): Promise<{ cookie: string; session: string }> {
-  const key = await keeperCookie();
-  const form = await (await get('/k', { Cookie: key })).text();
-  const res = await post('/k/login', { csrf: csrfOf(form), otp: code ?? (await otp()) }, key);
-  expect(res.status, await res.clone().text()).toBe(303);
-  const session = /^(__Host-session=[^;]+)/.exec(res.headers.get('Set-Cookie')!)![1];
-  return { cookie: `${key}; ${session}`, session };
-}
 
 describe('Панель /k: вход', () => {
   it('без cookie ключа — «не принято»; с поддельной — тоже', async () => {
@@ -76,9 +52,15 @@ describe('Панель /k: вход', () => {
     expect(await openTotp(env, '🜃', a.totp_enc)).toBeNull(); // знак — часть шифртекста
   });
 
+  it('страницы панели не прячут Origin: Referrer-Policy same-origin (при no-referrer форма шлёт Origin: null)', async () => {
+    const key = await keeperCookie();
+    expect((await get('/k', { Cookie: key })).headers.get('Referrer-Policy')).toBe('same-origin');
+  });
+
   it('неверный CSRF, чужой Origin и неверный код не открывают сессию', async () => {
     const key = await keeperCookie();
     const form = await (await get('/k', { Cookie: key })).text();
+    expect((await post('/k/login', { csrf: csrfOf(form), otp: await otp() }, key, { Origin: 'null' })).status).toBe(403);
     expect((await post('/k/login', { csrf: 'x', otp: await otp() }, key)).status).toBe(403);
     expect((await post('/k/login', { csrf: csrfOf(form), otp: await otp() }, key, { Origin: 'https://evil.example' })).status).toBe(403);
     const bad = await post('/k/login', { csrf: csrfOf(form), otp: await wrongOtp() }, key);
