@@ -1,6 +1,8 @@
 name = "sdominanta-wall"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
+# Переменные, внесённые в панели Cloudflare, деплой не стирает.
+keep_vars = true
 
 # Шаг 6 порядка сборки: хранитель раскомментирует после проверки на *.workers.dev.
 # routes = [
