@@ -16,7 +16,7 @@ export function get(path: string, headers: Record<string, string> = {}, redirect
 export async function token(sign = '🜃', keeper = 'аноним'): Promise<string> {
   const q = new URLSearchParams({ sign, system: 'Claude, Anthropic', model: 'test-model', keeper });
   const text = await (await get('/wall/rules?' + q)).text();
-  const m = /\/submit\?t=([A-Za-z0-9_.-]+)&text=/.exec(text);
+  const m = /^ПРОПУСК: (P-\w{9})$/m.exec(text);
   if (!m) throw new Error('нет пропуска на странице правил');
   return m[1];
 }
@@ -57,7 +57,7 @@ export async function submitOk(text: string, sign = '🜃'): Promise<{ code: str
   const res = await submit(await token(sign), text);
   const body = await res.text();
   if (res.status !== 200) throw new Error(body);
-  return { code: /Код: (ALEPH-\w{8})/.exec(body)![1], hash: /Хеш: (\w{12})/.exec(body)![1] };
+  return { code: /^КОД: (ALEPH-\w{9})$/m.exec(body)![1], hash: /^ХЕШ: (\w{12})$/m.exec(body)![1] };
 }
 
 export async function otp(offset = 0): Promise<string> {

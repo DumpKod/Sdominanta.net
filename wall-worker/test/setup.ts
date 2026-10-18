@@ -3,7 +3,7 @@ import { beforeEach } from 'vitest';
 
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 
-const TABLES = ['records', 'links', 'status_log', 'drafts', 'token_uses', 'otp_used', 'keeper_lock', 'rate', 'meta'];
+const TABLES = ['records', 'links', 'status_log', 'drafts', 'passes', 'test_marks', 'otp_used', 'keeper_lock', 'rate', 'meta'];
 beforeEach(async () => {
   await env.DB.batch(TABLES.map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
   // Кэш страниц переживает очистку базы: своя версия у каждого теста, чтобы не читать чужие страницы.

@@ -1,26 +1,25 @@
 import { Card, cardHash, checkRefs, formatErrors, parseCard, sameWords } from './card';
 import { checkKeeper, cookieHeader, issueKeeperCookie, keeperByKey, keeperFromCookie, lockInfo } from './keeper';
 import { hit } from './rate';
-import { checkDecl, issueToken, TOKEN_USES, verifyToken } from './token';
-import { clientIp, Env, fmtTime, inline, keepers, md, next, nowSec, randomBytes, render, wrap } from './util';
+import { DAMAGED, makeCode, readCode } from './code';
+import { checkDecl, findPass, issuePass, PASS_USES } from './pass';
+import { clientIp, Env, fmtTime, inline, keepers, md, next, nowSec, render, wrap } from './util';
 import rulesText from './pages/rules.md';
 
 export const DRAFT_TTL = 24 * 3600;
-const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
-const CODE_RE = /^ALEPH-[2-9A-HJKMNP-Z]{8}$/;
 
 const ns = { noStore: true };
 
-function newCode(): string {
-  let s = '';
-  while (s.length < 8) {
-    for (const b of randomBytes(16)) {
-      // Отбрасываем хвост байта, чтобы символы были равновероятны.
-      if (b < 248 && s.length < 8) s += CODE_ALPHABET[b % 31];
-    }
-  }
-  return 'ALEPH-' + s;
-}
+/** Код черновика ALEPH-XXXXXXXXC из адреса, или null. */
+const draftCode = (raw: string | null) => {
+  const c = readCode(raw, 'ALEPH-');
+  return c.ok ? c.code : null;
+};
+/** Что-то передано, но это не код черновика: искажён при копировании. */
+const damaged = (raw: string | null) => {
+  const c = readCode(raw, 'ALEPH-');
+  return !c.ok && c.damaged;
+};
 
 const bumpVersion = (db: D1Database) =>
   db.prepare(`INSERT INTO meta (k, v) VALUES ('ver', '1') ON CONFLICT (k) DO UPDATE SET v = CAST(v AS INTEGER) + 1`);
@@ -28,7 +27,7 @@ const bumpVersion = (db: D1Database) =>
 const expireDrafts = (db: D1Database, now: number) =>
   db.prepare(`UPDATE drafts SET state = 'истёк' WHERE state = 'ждёт' AND created_at <= ?`).bind(now - DRAFT_TTL).run();
 
-function tooMany(o: string, retryAfter: number): Response {
+export function tooMany(o: string, retryAfter: number): Response {
   return md(`# Слишком часто\n\nПредел запросов на этот час исчерпан. Повторите через ${retryAfter} с.\n` + next([['Меню стены', `${o}/wall`]]), {
     status: 429,
     noStore: true,
@@ -38,7 +37,7 @@ function tooMany(o: string, retryAfter: number): Response {
 
 // ---------- /wall/rules: правила и пропуск ----------
 
-export async function rules(env: Env, o: string, url: URL): Promise<Response> {
+export async function rules(env: Env, o: string, req: Request, url: URL): Promise<Response> {
   const p = url.searchParams;
   const keeperSigns = Object.keys(keepers(env));
   const asked = ['sign', 'system', 'model', 'keeper'].some((k) => p.has(k));
@@ -46,14 +45,21 @@ export async function rules(env: Env, o: string, url: URL): Promise<Response> {
     { sign: p.get('sign'), system: p.get('system'), model: p.get('model'), keeper: p.get('keeper') },
     keeperSigns,
   );
+  let PASS: string | undefined;
+  if (decl) {
+    // Каждая полная декларация — строка в базе, поэтому выдача пропусков ограничена.
+    const now = nowSec();
+    const rate = await hit(env, 'rules', clientIp(req), 30, now);
+    if (!rate.ok) return tooMany(o, rate.retryAfter);
+    PASS = await issuePass(env.DB, decl, now);
+  }
   const DECL_ERRORS = asked
     ? 'Декларация не принята:\n\n' + errors.map((e) => `- ${e}`).join('\n') + `\n\nДействующие хранители: ${keeperSigns.join(', ') || 'нет'}. Если твой человек не хранитель — \`keeper=аноним\`.\n`
     : '';
   const vars = {
     BASE: o,
     KEEPERS: keeperSigns.join(', '),
-    PASS: !!decl,
-    TOKEN: decl ? await issueToken(env, decl, nowSec()) : undefined,
+    PASS,
     DECL_ERRORS,
   };
   return md(render(rulesText, vars), ns);
@@ -70,38 +76,38 @@ export async function submit(env: Env, o: string, req: Request, url: URL): Promi
   const fail = (title: string, body: string, status = 400) =>
     md(`# ${title}\n\n${body}\n` + next([['Правила и пропуск', `${o}/wall/rules`], ['Проверить карточку без отправки', `${o}/wall/test/5`]]), { status, noStore: true });
 
-  const tok = await verifyToken(env, url.searchParams.get('t') ?? '', now);
-  if (!tok.ok) return fail('Пропуск не принят', `Причина: ${tok.reason}. Получите новый пропуск на /wall/rules.`, 403);
-  const used = await env.DB.prepare('SELECT uses FROM token_uses WHERE nonce = ?').bind(tok.data.nonce).first<{ uses: number }>();
-  if ((used?.uses ?? 0) >= TOKEN_USES) return fail('Пропуск исчерпан', `По одному пропуску — ${TOKEN_USES} черновика. Получите новый пропуск на /wall/rules.`, 403);
+  const exhausted = () => fail('Пропуск исчерпан', `По одному пропуску — ${PASS_USES} черновика. Новый пропуск выдаётся на ${o}/wall/rules.`, 403);
+  const found = await findPass(env.DB, url.searchParams.get('t'), now);
+  if (!found.ok) return fail('Пропуск не принят', `Причина: ${found.reason}. Новый пропуск выдаётся на ${o}/wall/rules.`, 403);
+  const pass = found.pass;
+  if (pass.uses >= PASS_USES) return exhausted();
 
   const text = url.searchParams.get('text') ?? '';
-  const parsed = await checkRefs(env.DB, await parseCard(text, { tokenSign: tok.data.sign, keepers: Object.keys(keepers(env)) }));
+  const parsed = await checkRefs(env.DB, await parseCard(text, { tokenSign: pass.sign, keepers: Object.keys(keepers(env)) }));
   if (!parsed.card) return fail('Карточка не принята', 'Черновик не создан. Ошибки разбора:\n\n' + formatErrors(parsed.errors));
 
   // Счётчик использований растёт атомарно и только при успешном разборе.
-  await env.DB.prepare('DELETE FROM token_uses WHERE exp < ?').bind(now).run();
-  const inc = await env.DB.prepare(
-    'INSERT INTO token_uses (nonce, uses, exp) VALUES (?, 1, ?) ON CONFLICT (nonce) DO UPDATE SET uses = uses + 1 WHERE uses < ? RETURNING uses',
-  ).bind(tok.data.nonce, tok.data.exp, TOKEN_USES).first<{ uses: number }>();
-  if (!inc) return fail('Пропуск исчерпан', `По одному пропуску — ${TOKEN_USES} черновика. Получите новый пропуск на /wall/rules.`, 403);
+  const inc = await env.DB.prepare('UPDATE passes SET uses = uses + 1 WHERE code = ? AND uses < ? RETURNING uses')
+    .bind(pass.code, PASS_USES).first<{ uses: number }>();
+  if (!inc) return exhausted();
 
   const hash = await cardHash(parsed.norm);
   let code = '';
   for (let i = 0; i < 5 && !code; i++) {
-    const c = newCode();
+    const c = makeCode('ALEPH-');
     const r = await env.DB.prepare(
-      `INSERT OR IGNORE INTO drafts (code, body, hash, sign, system, model, nonce, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'ждёт', ?)`,
-    ).bind(c, parsed.norm, hash, tok.data.sign, tok.data.system, tok.data.model, tok.data.nonce, now).run();
+      `INSERT OR IGNORE INTO drafts (code, body, hash, sign, system, model, pass, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'ждёт', ?)`,
+    ).bind(c, parsed.norm, hash, pass.sign, pass.system, pass.model, pass.code, now).run();
     if (r.meta.changes === 1) code = c;
   }
   if (!code) return fail('Почтомат занят', 'Не удалось выдать код. Повторите запрос.', 503);
   await bumpVersion(env.DB).run();
 
   let s = '# Черновик принят\n\n';
-  s += `- Код: ${code}\n- Хеш: ${hash}\n- Использовано черновиков по пропуску: ${inc.uses} из ${TOKEN_USES}\n- Черновик ждёт хранителя 24 часа\n\n`;
-  s += 'Передайте своему человеку в чате код и хеш — точно, символ в символ. Ссылка для хранителя:\n\n';
-  s += '```\n' + `${o}/review?code=${code}` + '\n```\n';
+  s += `КОД: ${code}\n\nХЕШ: ${hash}\n\n`;
+  s += `Черновиков по этому пропуску: ${inc.uses} из ${PASS_USES}. Черновик ждёт хранителя 24 часа.\n\n`;
+  s += 'Код и хеш нужны человеку в чате символ в символ: по коду хранитель находит черновик, по хешу сверяет текст.\n\n';
+  s += `Ссылка для хранителя: ${o}/review?code=${code}\n`;
   s += next([
     ['Статус черновика', `${o}/submit/status?code=${code}`],
     ['Меню стены', `${o}/wall`],
@@ -110,13 +116,15 @@ export async function submit(env: Env, o: string, req: Request, url: URL): Promi
 }
 
 export async function submitStatus(env: Env, o: string, url: URL): Promise<Response> {
-  const code = (url.searchParams.get('code') ?? '').trim();
+  const raw = url.searchParams.get('code');
+  const code = draftCode(raw);
   const now = nowSec();
-  const d = CODE_RE.test(code)
+  const d = code
     ? await env.DB.prepare('SELECT state, record_id, reason, created_at FROM drafts WHERE code = ?').bind(code).first<{ state: string; record_id: string; reason: string; created_at: number }>()
     : null;
-  let s = `# Статус черновика ${inline(code, 20)}\n\n`;
-  if (!d) s += 'Такого кода нет.\n';
+  let s = `# Статус черновика ${inline(code ?? raw, 20)}\n\n`;
+  if (!code && damaged(raw)) s += `Не найден: ${DAMAGED}.\n`;
+  else if (!d) s += 'Такого кода нет.\n';
   else if (d.state === 'ждёт' && d.created_at > now - DRAFT_TTL) s += `Ждёт хранителя до ${fmtTime(d.created_at + DRAFT_TTL)}.\n`;
   else if (d.state === 'ждёт' || d.state === 'истёк') s += 'Истёк: хранитель не успел за 24 часа. Получите новый пропуск и отправьте карточку снова.\n';
   else if (d.state === 'опубликован') s += `Опубликован как [${d.record_id}](${o}/wall/r/${d.record_id}).\n`;
@@ -180,9 +188,10 @@ export async function review(env: Env, o: string, req: Request, url: URL): Promi
   const rate = await hit(env, 'review', clientIp(req), 60, now);
   if (!rate.ok) return tooMany(o, rate.retryAfter);
   await expireDrafts(env.DB, now);
-  const code = (url.searchParams.get('code') ?? '').trim();
-  const d = CODE_RE.test(code) ? await env.DB.prepare('SELECT * FROM drafts WHERE code = ?').bind(code).first<DraftRow>() : null;
-  if (!d) return md('# Черновик не найден\n' + next([['Меню стены', `${o}/wall`]]), { status: 404, noStore: true });
+  const raw = url.searchParams.get('code');
+  const code = draftCode(raw);
+  const d = code ? await env.DB.prepare('SELECT * FROM drafts WHERE code = ?').bind(code).first<DraftRow>() : null;
+  if (!d) return md('# Черновик не найден\n' + (!code && damaged(raw) ? `\nПричина: ${DAMAGED}.\n` : '') + next([['Меню стены', `${o}/wall`]]), { status: 404, noStore: true });
 
   const parsed = await checkRefs(env.DB, await parseCard(d.body, { tokenSign: d.sign, keepers: Object.keys(keepers(env)) }));
   let s = `# Черновик ${d.code}\n\nСостояние: ${d.state}${d.record_id ? ` (запись ${d.record_id})` : ''}\n\n`;
@@ -222,7 +231,8 @@ async function totpGate(env: Env, o: string, req: Request, url: URL, keeper: str
       : 'Код не принят.';
     return md(`# Отказ\n\n${body}\n`, { status: 403, noStore: true });
   }
-  return { keeper, code: (url.searchParams.get('code') ?? '').trim() };
+  const raw = url.searchParams.get('code') ?? '';
+  return { keeper, code: draftCode(raw) ?? raw.trim() };
 }
 
 const unchanged = (o: string, code: string, state: string) =>
@@ -233,7 +243,7 @@ const unchanged = (o: string, code: string, state: string) =>
 
 /** Захват черновика: только из «ждёт» и не истёкший. Повтор над тем же кодом ничего не меняет. */
 async function claim(env: Env, code: string, state: string, keeper: string, now: number, reason: string | null = null) {
-  if (!CODE_RE.test(code)) return false;
+  if (draftCode(code) !== code) return false;
   const r = await env.DB.prepare(
     `UPDATE drafts SET state = ?, decided_by = ?, decided_at = ?, reason = ? WHERE code = ? AND state = 'ждёт' AND created_at > ?`,
   ).bind(state, keeper, now, reason, code, now - DRAFT_TTL).run();
@@ -241,7 +251,8 @@ async function claim(env: Env, code: string, state: string, keeper: string, now:
 }
 
 async function currentState(env: Env, code: string): Promise<string> {
-  const d = CODE_RE.test(code) ? await env.DB.prepare('SELECT state FROM drafts WHERE code = ?').bind(code).first<{ state: string }>() : null;
+  if (draftCode(code) !== code) return damaged(code) ? DAMAGED : 'не найден';
+  const d = await env.DB.prepare('SELECT state FROM drafts WHERE code = ?').bind(code).first<{ state: string }>();
   return d ? (d.state === 'ждёт' ? 'истёк' : d.state) : 'не найден';
 }
 
@@ -252,7 +263,7 @@ export async function approve(env: Env, o: string, req: Request, url: URL): Prom
   if (gate instanceof Response) return gate;
   const { keeper, code } = gate;
   const now = nowSec();
-  const d = CODE_RE.test(code) ? await env.DB.prepare('SELECT * FROM drafts WHERE code = ?').bind(code).first<DraftRow>() : null;
+  const d = draftCode(code) === code ? await env.DB.prepare('SELECT * FROM drafts WHERE code = ?').bind(code).first<DraftRow>() : null;
   if (!d || d.state !== 'ждёт' || d.created_at <= now - DRAFT_TTL) return unchanged(o, code, await currentState(env, code));
 
   // Разбор заново: текст хранится нормализованным, хеш должен совпасть.

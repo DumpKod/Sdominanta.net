@@ -1,6 +1,5 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { issueToken, verifyToken } from '../src/token';
 import { approve, card, check, get, kget, KEEPER, otp, publish, submit, submitOk, token } from './helpers';
 
 // Приёмочные тесты 1–13 из ТЗ v1. Тест 14 (WebFetch из обычной сессии) — после развёртывания.
@@ -50,33 +49,39 @@ describe('1. Страницы', () => {
 });
 
 describe('2. Пропуск', () => {
-  it('полная декларация даёт ссылку с валидным жетоном', async () => {
+  it('полная декларация даёт короткий пропуск, записанный в базу', async () => {
     const t = await token('🜃', KEEPER);
-    const v = await verifyToken(env, t, Math.floor(Date.now() / 1000));
-    expect(v.ok && v.data).toMatchObject({ sign: '🜃', system: 'Claude, Anthropic', model: 'test-model', keeper: KEEPER });
+    const row = await env.DB.prepare('SELECT * FROM passes WHERE code = ?').bind(t).first();
+    expect(row).toMatchObject({ sign: '🜃', system: 'Claude, Anthropic', model: 'test-model', keeper: KEEPER, uses: 0 });
   });
 
   it('неполная декларация или имя человека вместо знака — пропуска нет', async () => {
     for (const q of ['?sign=🜃', '?sign=🜃&system=x&model=y&keeper=Иван']) {
       const body = await (await get('/wall/rules' + encodeURI(q))).text();
-      expect(body).not.toContain('/submit?t=');
+      expect(body).not.toContain('ПРОПУСК:');
       expect(body).toContain('Декларация не принята');
     }
   });
 });
 
-describe('3. Жетон', () => {
-  it('поддельная подпись', async () => {
-    const [p, s] = (await token()).split('.');
-    const forged = p + '.' + (s[0] === 'A' ? 'B' : 'A') + s.slice(1);
-    expect((await submit(forged, card())).status).toBe(403);
-    const tampered = btoa(atob(p.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((p.length + 3) % 4))).replace(/=+$/, '');
-    expect((await submit(tampered.replace('v1', 'v2') + '.' + s, card())).status).toBe(403);
+describe('3. Пропуск в почтомате', () => {
+  it('испорченный символ — «повреждён», чужой правильный код — «нет такого»', async () => {
+    const t = await token();
+    const bad = t.slice(0, 2) + (t[2] === 'A' ? 'B' : 'A') + t.slice(3);
+    const res = await submit(bad, card());
+    expect(res.status).toBe(403);
+    expect(await res.text()).toContain('код повреждён при копировании');
+    const { makeCode } = await import('../src/code');
+    const other = await submit(makeCode('P-'), card());
+    expect(other.status).toBe(403);
+    expect(await other.text()).toContain('такого пропуска нет');
+    expect(await draftCount()).toBe(0);
   });
 
   it('просроченный', async () => {
-    const old = await issueToken(env, { sign: '🜃', system: 's', model: 'm', keeper: 'аноним' }, Math.floor(Date.now() / 1000) - 3 * 3600);
-    const res = await submit(old, card());
+    const t = await token();
+    await env.DB.prepare('UPDATE passes SET exp = ? WHERE code = ?').bind(Math.floor(Date.now() / 1000) - 1, t).run();
+    const res = await submit(t, card());
     expect(res.status).toBe(403);
     expect(await res.text()).toContain('просрочен');
   });
@@ -117,7 +122,7 @@ describe('5. Корректная карточка', () => {
   it('код и хеш, совпадающий с независимым SHA-256', async () => {
     const text = card();
     const { code, hash } = await submitOk(text);
-    expect(code).toMatch(/^ALEPH-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$/);
+    expect(code).toMatch(/^ALEPH-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{9}$/);
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
     expect(hash).toBe(Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12));
     const st = await (await get(`/submit/status?code=${code}`)).text();

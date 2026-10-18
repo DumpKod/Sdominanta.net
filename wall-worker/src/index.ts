@@ -65,7 +65,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     case '/wall/about':
       return md(render(aboutText, { BASE: o, KEEPERS: Object.keys(keepers(env)).join(', ') || 'нет' }));
     case '/wall/rules':
-      return rules(env, o, url);
+      return rules(env, o, req, url);
     case '/submit':
       return submit(env, o, req, url);
     case '/submit/status':

@@ -1,9 +1,9 @@
-import { b64url, enc, Env, fromB64url, hmacSha256, randomBytes, timingSafeEqual } from './util';
+import { DAMAGED, makeCode, readCode } from './code';
 
-// Пропуск: base64url(v1|sign|system|model|keeper|exp|nonce) + '.' + base64url(HMAC-SHA256).
+// Пропуск: строка в таблице passes с коротким кодом P-XXXXXXXXC, декларацией, сроком и счётчиком черновиков.
 
-export const TOKEN_TTL = 2 * 3600;
-export const TOKEN_USES = 3;
+export const PASS_TTL = 2 * 3600;
+export const PASS_USES = 3;
 
 export interface Decl {
   sign: string;
@@ -12,9 +12,10 @@ export interface Decl {
   keeper: string; // знак хранителя или «аноним»
 }
 
-export interface TokenData extends Decl {
+export interface Pass extends Decl {
+  code: string;
   exp: number;
-  nonce: string;
+  uses: number;
 }
 
 const BAD = /[|\p{Cc}]/u;
@@ -44,28 +45,24 @@ export function checkDecl(p: Partial<Record<keyof Decl, string | null>>, keeperS
   return errors.length ? { errors } : { decl: { sign, system, model, keeper }, errors };
 }
 
-export async function issueToken(env: Env, d: Decl, now: number): Promise<string> {
-  const nonce = b64url(randomBytes(12));
-  const payload = ['v1', d.sign, d.system, d.model, d.keeper, String(now + TOKEN_TTL), nonce].join('|');
-  const sig = await hmacSha256(env.TOKEN_KEY, payload);
-  return b64url(enc.encode(payload)) + '.' + b64url(sig);
+export async function issuePass(db: D1Database, d: Decl, now: number): Promise<string> {
+  await db.prepare('DELETE FROM passes WHERE exp < ?').bind(now).run();
+  for (let i = 0; i < 5; i++) {
+    const code = makeCode('P-');
+    const r = await db.prepare('INSERT OR IGNORE INTO passes (code, sign, system, model, keeper, exp, uses) VALUES (?, ?, ?, ?, ?, ?, 0)')
+      .bind(code, d.sign, d.system, d.model, d.keeper, now + PASS_TTL).run();
+    if (r.meta.changes === 1) return code;
+  }
+  throw new Error('не удалось выдать код пропуска');
 }
 
-export type TokenCheck = { ok: true; data: TokenData } | { ok: false; reason: string };
+export type PassCheck = { ok: true; pass: Pass } | { ok: false; reason: string };
 
-export async function verifyToken(env: Env, token: string, now: number): Promise<TokenCheck> {
-  const bad: TokenCheck = { ok: false, reason: 'пропуск недействителен' };
-  const [p, s, extra] = token.split('.');
-  if (!p || !s || extra !== undefined) return bad;
-  const pb = fromB64url(p), sb = fromB64url(s);
-  if (!pb || !sb) return bad;
-  const payload = new TextDecoder().decode(pb);
-  if (!timingSafeEqual(await hmacSha256(env.TOKEN_KEY, payload), sb)) return bad;
-  const parts = payload.split('|');
-  if (parts.length !== 7 || parts[0] !== 'v1') return bad;
-  const [, sign, system, model, keeper, expS, nonce] = parts;
-  const exp = Number(expS);
-  if (!Number.isInteger(exp)) return bad;
-  if (exp <= now) return { ok: false, reason: 'пропуск просрочен (он живёт 2 часа)' };
-  return { ok: true, data: { sign, system, model, keeper, exp, nonce } };
+export async function findPass(db: D1Database, raw: string | null, now: number): Promise<PassCheck> {
+  const c = readCode(raw, 'P-');
+  if (!c.ok) return { ok: false, reason: c.damaged ? DAMAGED : 'пропуск не указан (параметр t)' };
+  const pass = await db.prepare('SELECT * FROM passes WHERE code = ?').bind(c.code).first<Pass>();
+  if (!pass) return { ok: false, reason: 'такого пропуска нет' };
+  if (pass.exp <= now) return { ok: false, reason: 'пропуск просрочен (он живёт 2 часа)' };
+  return { ok: true, pass };
 }

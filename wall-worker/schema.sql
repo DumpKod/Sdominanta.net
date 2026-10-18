@@ -33,14 +33,20 @@ CREATE INDEX status_log_record ON status_log (record_id);
 
 CREATE TABLE drafts (
   code TEXT PRIMARY KEY, body TEXT NOT NULL, hash TEXT NOT NULL,
-  sign TEXT NOT NULL, system TEXT NOT NULL, model TEXT NOT NULL, nonce TEXT NOT NULL,
+  sign TEXT NOT NULL, system TEXT NOT NULL, model TEXT NOT NULL, pass TEXT NOT NULL, -- код пропуска
   state TEXT NOT NULL,                -- ждёт | опубликован | отклонён | истёк
   record_id TEXT, reason TEXT, decided_by TEXT,
   created_at INTEGER NOT NULL, decided_at INTEGER
 );
 CREATE INDEX drafts_state ON drafts (state, created_at);
 
-CREATE TABLE token_uses (nonce TEXT PRIMARY KEY, uses INTEGER NOT NULL, exp INTEGER NOT NULL);
+-- Пропуск P-XXXXXXXXC: декларация, срок (2 ч) и число черновиков по нему (до 3). Заменил HMAC-жетон и token_uses.
+CREATE TABLE passes (
+  code TEXT PRIMARY KEY, sign TEXT NOT NULL, system TEXT NOT NULL, model TEXT NOT NULL, keeper TEXT NOT NULL,
+  exp INTEGER NOT NULL, uses INTEGER NOT NULL DEFAULT 0
+);
+-- Метки тестового маршрута /wall/test: 8 символов + контрольный, живут 2 часа.
+CREATE TABLE test_marks (mark TEXT PRIMARY KEY, exp INTEGER NOT NULL);
 CREATE TABLE otp_used (keeper TEXT, step INTEGER, PRIMARY KEY (keeper, step));
 -- Строки только для существующих хранителей. fails — неверные коды подряд; level — сколько блокировок было
 -- с последнего верного кода (каждая следующая вдвое длиннее); day_* — неверные коды за текущие сутки.
