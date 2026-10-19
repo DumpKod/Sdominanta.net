@@ -33,7 +33,9 @@ export interface Track {
 }
 
 /** Адрес для виджета: api.soundcloud.com/tracks/N или /playlists/N. */
-export const widgetUrl = (t: Pick<Track, 'kind' | 'sc_id'>) => `https://api.soundcloud.com/${t.kind === 'set' ? 'playlists' : 'tracks'}/${t.sc_id}`;
+// Номер неизвестен (плейлист, подписанный виджетом в браузере хранителя) — виджет берёт адрес страницы на SoundCloud.
+export const widgetUrl = (t: Pick<Track, 'kind' | 'sc_id' | 'url'>) =>
+  t.sc_id > 0 ? `https://api.soundcloud.com/${t.kind === 'set' ? 'playlists' : 'tracks'}/${t.sc_id}` : t.url;
 
 export const hasKey = (env: Env) => !!(env.SC_CLIENT_ID && env.SC_CLIENT_SECRET);
 
@@ -67,7 +69,7 @@ export async function resolveTrack(url: string): Promise<Omit<Track, 'id' | 'add
   const kind = url.includes('/sets/') ? 'set' : 'track';
   let res: Response;
   try {
-    res = await sc.send(`${SC_OEMBED}?format=json&url=${encodeURIComponent(url)}`, { headers: { Accept: 'application/json' } });
+    res = await sc.send(`${SC_OEMBED}?format=json&url=${encodeURIComponent(url)}`, { headers: { Accept: 'application/json', 'User-Agent': UA } });
   } catch {
     return { error: 'SoundCloud не ответил' };
   }
@@ -88,6 +90,22 @@ export async function resolveTrack(url: string): Promise<Omit<Track, 'id' | 'add
   const artistUrl = normProfile(j.author_url) ?? url.split('/').slice(0, 4).join('/');
   if (!title || !artist) return { error: 'у трека нет названия или автора' };
   return { url, sc_id: Number(m[1]), title, artist, artist_url: artistUrl, kind };
+}
+
+const UA = 'Mozilla/5.0 (compatible; sdominanta-wall/1.0; +https://sdominanta.net)';
+
+/**
+ * Подпись, которую нашёл браузер хранителя (oEmbed или виджет SoundCloud у него в вкладке): SoundCloud отвечает
+ * серверу Cloudflare отказом (403), а браузеру — нет. Поля проверяются как свои; номер 0 — неизвестен (плейлист из виджета).
+ */
+export function trackFromBrowser(url: string, f: Record<string, string>): Omit<Track, 'id' | 'added_at' | 'by_sign'> | null {
+  const kind = url.includes('/sets/') ? 'set' : 'track';
+  if (f.kind !== kind || !/^\d{1,16}$/.test(f.sc_id ?? '')) return null;
+  const sc_id = Number(f.sc_id);
+  if (!Number.isSafeInteger(sc_id) || (sc_id === 0 && kind === 'track')) return null;
+  const artist = clean(f.artist, 120), title = clean(f.title, 200);
+  if (!title || !artist) return null;
+  return { url, sc_id, title, artist, artist_url: normProfile(f.artist_url) ?? url.split('/').slice(0, 4).join('/'), kind };
 }
 
 function normProfile(raw: unknown): string | null {

@@ -7,7 +7,7 @@ import { bumpVersion } from './post';
 import { jsonResponse, liveScene, sceneOut, spaceUrl, vitrinaPage } from './vitrina';
 import { b64url, clientIp, enc, Env, fmtTime, hmacSha256, html, nowSec, plain, randomBytes, sha256hex, timingSafeEqual } from './util';
 import { dropRecovery, editorFile, getRecovery, saveRecovery, spacesTree } from './editor';
-import { BANDS_MAX, currentTrack, hasKey, normTrackUrl, resolveTrack, saveBands, Track } from './music';
+import { BANDS_MAX, currentTrack, hasKey, normTrackUrl, resolveTrack, saveBands, Track, trackFromBrowser } from './music';
 
 // Панель хранителя /k — простой HTML без скриптов.
 // Вход в два слоя, как у старых адресов: cookie ключа (__Host-keeper) → форма с 6 цифрами из аутентификатора →
@@ -531,8 +531,9 @@ async function sceneAction(env: Env, o: string, req: Request, path: string, f: R
 
 // ---------- музыка витрины ----------
 
-// Страница музыки — единственная в панели со скриптом: спектр трека считает браузер хранителя (/vitrina/bands-k.js).
-const CSP_MUSIC = CSP + "; script-src 'self'";
+// Страница музыки — единственная в панели со скриптом: спектр трека считает браузер хранителя (/vitrina/bands-k.js),
+// подпись трека находит он же (/vitrina/music-k.js): oEmbed SoundCloud, иначе скрытый виджет.
+const CSP_MUSIC = CSP + "; script-src 'self' https://w.soundcloud.com; connect-src https://soundcloud.com; frame-src https://w.soundcloud.com";
 
 const mmss = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
 
@@ -556,7 +557,9 @@ async function musicPage(env: Env, top: string, csrf: string, note = ''): Promis
   b += '<p><b>Трек без спектра</b> ' + (hasKey(env)
     ? 'тоже играет виджет, а частоты слушает беззвучная тень по ключу API: браузер берёт тот же поток у SoundCloud кусками и анализирует его, не выводя в колонки.'
     : 'играет виджет без частот: <span class="warn">ключ API SoundCloud не внесён</span> (Secrets SC_CLIENT_ID и SC_CLIENT_SECRET).') + '</p></div>\n';
-  b += `<form method="post" action="/k/music/add" class="row">${hidden}<label>Адрес трека или плейлиста на SoundCloud <input name="url" size="48" placeholder="https://soundcloud.com/автор/трек" required></label><button type="submit">Добавить</button></form>\n`;
+  b += `<form method="post" action="/k/music/add" class="row add-form">${hidden}` +
+    '<input type="hidden" name="sc_id"><input type="hidden" name="title"><input type="hidden" name="artist"><input type="hidden" name="artist_url"><input type="hidden" name="kind">' +
+    `<label>Адрес трека или плейлиста на SoundCloud <input name="url" size="48" placeholder="https://soundcloud.com/автор/трек" required></label><button type="submit">Добавить</button> <span class="add-note muted" aria-live="polite"></span></form>\n`;
   if (!rows.length) b += '<p>Треков ещё нет.</p>';
   else {
     b += '<table><tr><th>Трек</th><th>Автор</th><th>Спектр</th><th></th></tr>\n';
@@ -580,7 +583,7 @@ async function musicPage(env: Env, top: string, csrf: string, note = ''): Promis
     }
     b += '</table>';
   }
-  b += '\n<script type="module" src="/vitrina/bands-k.js"></script>';
+  b += '\n<script type="module" src="/vitrina/bands-k.js"></script><script type="module" src="/vitrina/music-k.js"></script>';
   return page('Музыка', b, { csp: CSP_MUSIC });
 }
 
@@ -603,7 +606,8 @@ async function musicAction(env: Env, path: string, f: Record<string, string>, me
   if (path === '/music/add') {
     const url = normTrackUrl(f.url ?? '');
     if (!url) return back('Нужен адрес трека https://soundcloud.com/автор/трек или плейлиста https://soundcloud.com/автор/sets/имя (не профиль).', 400);
-    const t = await resolveTrack(url);
+    // подпись из браузера хранителя (music-k.js) — без запроса сервера к SoundCloud; нет её — сервер спрашивает oEmbed сам
+    const t = trackFromBrowser(url, f) ?? (await resolveTrack(url));
     if ('error' in t) return back(`Не добавлено: ${t.error}.`, 400);
     await env.DB.prepare('INSERT INTO tracks (url, sc_id, title, artist, artist_url, added_at, by_sign, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (url) DO UPDATE SET sc_id = excluded.sc_id, title = excluded.title, artist = excluded.artist, artist_url = excluded.artist_url, kind = excluded.kind')
       .bind(t.url, t.sc_id, t.title, t.artist, t.artist_url, now, me, t.kind).run();

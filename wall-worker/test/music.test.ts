@@ -121,6 +121,32 @@ describe('Музыка: админка и витрина', () => {
     expect((await get(`/music/stream/${row!.id}`)).status).toBe(404);
   });
 
+  it('подпись из браузера хранителя: сервер не спрашивает SoundCloud; плохие поля — сервер спрашивает сам', async () => {
+    await env.DB.prepare('DELETE FROM tracks').run();
+    const { cookie } = await login();
+    const calls = mock(() => new Response('', { status: 403 }));
+    const got = { sc_id: '42', title: 'Континуум', artist: 'Sdominanta', artist_url: 'https://soundcloud.com/sdominanta', kind: 'track' };
+    expect((await musicForm(cookie, 'add', { url: TRACK + '?si=x', ...got })).status).toBe(200);
+    expect(calls).toHaveLength(0);
+    expect(await env.DB.prepare('SELECT url, sc_id, title, artist, kind FROM tracks').first()).toMatchObject({ url: TRACK, sc_id: 42, title: 'Континуум', kind: 'track' });
+    // вид не совпадает с адресом, нулевой номер у трека, пустое название — поля не берутся, сервер получает 403
+    for (const bad of [{ kind: 'set' }, { sc_id: '0' }, { sc_id: '1e5' }, { title: ' ' }]) {
+      const r = await musicForm(cookie, 'add', { url: TRACK + '-2', ...got, ...bad });
+      expect(r.status).toBe(400);
+      expect(await r.text()).toContain('SoundCloud ответил 403');
+    }
+    expect(calls.length).toBe(4);
+    expect((calls[0].init!.headers as Record<string, string>)['User-Agent']).toMatch(/sdominanta/);
+    // плейлист из виджета: номера нет — витрина даёт виджету адрес страницы плейлиста
+    const SET = 'https://soundcloud.com/sdominanta/sets/nol';
+    expect((await musicForm(cookie, 'add', { url: SET, ...got, sc_id: '0', kind: 'set', title: 'nol' })).status).toBe(200);
+    const row = await env.DB.prepare('SELECT id FROM tracks WHERE url = ?').bind(SET).first<{ id: number }>();
+    await musicForm(cookie, 'choose', { id: String(row!.id) });
+    expect(await (await get('/', HTML)).text()).toContain(`data-sc="0" data-bands="0" data-widget="${SET}"`);
+    const page = await (await get('/k/music', { Cookie: cookie })).text();
+    expect(page).toContain('<script type="module" src="/vitrina/music-k.js"></script>');
+  });
+
   it('без сессии хранителя /k/music закрыт', async () => {
     expect((await get('/k/music')).status).toBe(403);
   });
