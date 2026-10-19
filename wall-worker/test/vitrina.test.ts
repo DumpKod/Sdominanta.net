@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:test';
+import { buildId } from '../src/util';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SCENE, validateScene } from '../src/scene';
 import * as M from '../public/vitrina/model.js';
@@ -64,7 +65,7 @@ describe('Витрина: страница', () => {
     const { cookie } = await login();
     const res = await get('/', { ...HTML, Cookie: cookie });
     const page = await res.text();
-    expect(page).toContain('<html lang="ru" data-keeper="1">');
+    expect(page).toContain(`<html lang="ru" data-build="${buildId(env as never)}" data-keeper="1">`);
     expect(page).toContain('<script src="/k/editor.js" defer></script>');
     expect(page).toMatch(/<meta name="k-csrf" content="[A-Za-z0-9_-]{43}">/);
     expect(res.headers.get('Cache-Control')).toContain('no-store');
@@ -149,7 +150,7 @@ describe('Редактор и версии сцены', () => {
   it('пустая база — встроенная сцена; сохранить → опубликовать → scene.json отдаёт новую версию', async () => {
     const s0 = await get('/vitrina/scene.json');
     expect(s0.headers.get('Content-Type')).toContain('application/json');
-    expect(s0.headers.get('Cache-Control')).toBe('public, max-age=30');
+    expect(s0.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate, s-maxage=30');
     expect(JSON.parse(await s0.text())).toEqual(DEFAULT_SCENE);
 
     const { cookie } = await login();

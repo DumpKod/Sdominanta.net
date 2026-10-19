@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:test';
+import { buildId } from '../src/util';
 import { exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { card, get, token } from './helpers';
@@ -87,8 +88,19 @@ describe('Лишние параметры (utm_source…)', () => {
     await get('/wall/now?utm_source=b&utm_medium=c');
     const ver = (await env.DB.prepare(`SELECT v FROM meta WHERE k = 'ver'`).first<{ v: string }>())!.v;
     const cache = caches.default;
-    expect(await cache.match(`https://sdominanta.net/wall/now?__v=${ver}`)).toBeTruthy();
+    expect(await cache.match(`https://sdominanta.net/wall/now?__v=${ver}&__b=${buildId(env as never)}`)).toBeTruthy();
     expect(await cache.match(`https://sdominanta.net/wall/now?utm_source=a&__v=${ver}`)).toBeUndefined();
+  });
+
+  it('деплой: браузер сверяется со страницей каждый раз, кэш Cloudflare — по номеру выкладки; /build — номер', async () => {
+    const res = await get('/wall/now');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate, s-maxage=60');
+    const b = await get('/build');
+    // как есть, без обёртки HTML: витрина сравнивает строку (браузер шлёт Accept: */*)
+    expect(await (await get('/build', { Accept: '*/*' })).text()).toBe(buildId(env as never) + '\n');
+    expect(await b.text()).toBe(buildId(env as never) + '\n');
+    expect(buildId(env as never)).toMatch(/^[0-9a-f-]{36}$/);
+    expect(b.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('HTML-ответ с Content-Length', async () => {

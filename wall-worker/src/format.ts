@@ -23,7 +23,7 @@ export function pickFormat(req: Request): { fmt: Format; prefixed: boolean; req:
 }
 
 /** Адреса, которые всегда в своём формате: соглашения llms.txt и robots.txt, витрина и статические файлы. */
-const NATIVE = new Set(['/robots.txt', '/llms.txt', `/${INDEXNOW_KEY}.txt`]);
+const NATIVE = new Set(['/robots.txt', '/llms.txt', '/build', `/${INDEXNOW_KEY}.txt`]);
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 

@@ -4,7 +4,7 @@ import { parentOf, publicScene, publishedScene, Scene, sceneNav } from './scene'
 import { nodeParent, visibleNodes, withNodes } from './nodes';
 import { publishedDocs } from './docs';
 import { currentTrack, hasKey, widgetUrl } from './music';
-import { Env, html, inline, md, next, nowSec, render } from './util';
+import { Env, buildId, html, inline, md, next, nowSec, render } from './util';
 import showcase from './pages/index.html';
 import llmsText from './pages/llms.txt';
 
@@ -72,6 +72,7 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
     VERSION: opts.version !== undefined ? String(opts.version) : '',
     ENTRY,
     NAV: sceneNav(o, scene, space === 'main' ? undefined : spaceUrl(parent ? parent.space : 'main')),
+    BUILD: buildId(env),
     MUSIC: !!t,
     TRACK_ID: t ? String(t.id) : '',
     KEY: hasKey(env) ? '1' : '0',
@@ -111,7 +112,7 @@ export function jsonResponse(json: string, o: { maxAge?: number; version?: numbe
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'Content-Security-Policy': "default-src 'none'",
-    'Cache-Control': o.noStore ? 'no-store' : `public, max-age=${o.maxAge ?? 30}`,
+    'Cache-Control': o.noStore ? 'no-store' : `public, max-age=0, must-revalidate, s-maxage=${o.maxAge ?? 30}`,
   });
   if (o.version !== undefined) h.set('X-Scene-Version', String(o.version));
   return new Response(json, { headers: h });

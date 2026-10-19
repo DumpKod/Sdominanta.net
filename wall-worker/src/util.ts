@@ -7,7 +7,12 @@ export interface Env {
   /** Ключ API SoundCloud (Secrets хранителя): поток трека витрины. Нет — музыка только ссылкой. */
   SC_CLIENT_ID?: string;
   SC_CLIENT_SECRET?: string;
+  /** Версия выкладки (version_metadata в wrangler.toml); в тестах нет — 'dev'. */
+  CF_VERSION_METADATA?: { id: string };
 }
+
+/** Номер выкладки: меняется с каждым деплоем. */
+export const buildId = (env: Env) => env.CF_VERSION_METADATA?.id ?? 'dev';
 
 export const enc = new TextEncoder();
 
@@ -106,7 +111,9 @@ function respond(body: string, type: string, csp: string, o: RespOpts = {}): Res
     h.set('Cache-Control', 'no-store');
     h.set('X-Robots-Tag', 'noindex, nofollow');
   } else {
-    h.set('Cache-Control', `public, max-age=${o.maxAge ?? 60}`);
+    // Браузер каждый раз сверяется с сайтом (max-age=0): после деплоя никто не видит старую страницу.
+    // Кэш на стороне Cloudflare (caches.default) живёт s-maxage секунд, и его ключ включает номер выкладки.
+    h.set('Cache-Control', `public, max-age=0, must-revalidate, s-maxage=${o.maxAge ?? 60}`);
   }
   return new Response(body, { status: o.status ?? 200, headers: h });
 }

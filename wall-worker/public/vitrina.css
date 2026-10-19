@@ -174,3 +174,10 @@ html:not(.js) .music-play { display: none; }
 .kp[hidden], .kp-back[hidden] { display: none; }
 .kp-back { position: fixed; left: 14px; top: 14px; z-index: 5; }
 .kp-preview .keeper { visibility: hidden; }
+
+/* Плашка «Вышла новая версия» (fresh.js): гостю с музыкой и хранителю — без принудительного обновления. */
+.fresh {
+  position: fixed; right: 14px; top: 14px; z-index: 6; padding: 6px 8px 6px 12px; border: 1px solid rgba(0, 242, 254, 0.35);
+  border-radius: 10px; background: rgba(2, 8, 20, 0.9); color: #cbd5e1; font: 12px/1.4 ui-monospace, monospace;
+}
+.fresh button { font: inherit; color: #cffafe; background: rgba(0, 242, 254, 0.12); border: 1px solid rgba(0, 242, 254, 0.45); border-radius: 6px; padding: 2px 8px; cursor: pointer; }

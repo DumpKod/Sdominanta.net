@@ -12,7 +12,7 @@ import { sceneJson, spacePage, vitrinaPage } from './vitrina';
 import { docPage } from './docs';
 import { apiCatalog, linkHeader, mcpCard } from './agents';
 import { SPACE_RE } from './scene';
-import { Env, html, inline, keepers, md, nowSec, plain, render, signOf } from './util';
+import { Env, buildId, html, inline, keepers, md, nowSec, plain, render, signOf } from './util';
 import { contestMark, contests, wallLog, wallRecordLog, wallDigest, wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
 import aboutText from './pages/about.md';
 import rulesText from './pages/rules.md';
@@ -77,6 +77,7 @@ async function cached(req: Request, env: Env, ctx: ExecutionContext, render: () 
   const key = new URL(u.origin + u.pathname);
   if (u.searchParams.has('page')) key.searchParams.set('page', u.searchParams.get('page')!);
   key.searchParams.set('__v', ver?.v ?? '0');
+  key.searchParams.set('__b', buildId(env)); // новый деплой — новые ключи: старые страницы из кэша не отдаются
   const cache = caches.default;
   const hit = await cache.match(key.toString());
   if (hit) return hit;
@@ -190,6 +191,9 @@ async function routeInner(req: Request, env: Env, ctx: ExecutionContext, fmt: Fo
       return cached(req, env, ctx, () => sceneJson(env));
     case '/robots.txt':
       return plain(ROBOTS);
+    case '/build':
+      // Номер выкладки: открытая витрина сверяется с ним и обновляется сама после деплоя (public/vitrina/fresh.js).
+      return plain(buildId(env) + '\n', { noStore: true });
     case '/sitemap.xml':
       return sitemap(req, env, ctx, o);
     case '/.well-known/mcp.json':
