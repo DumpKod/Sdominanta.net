@@ -70,7 +70,7 @@
 - `src/indexing.ts` — sitemap, IndexNow (очередь, пинг пачкой), мета страниц для сниппетов, canonical.
 - `src/events.ts` — журнал действий: событие в batch действия, `seal` (звенья), голова; `src/ots.ts` — формат .ots и якорь OpenTimestamps.
 - `src/music.ts` — треки витрины (подпись по oEmbed), поток `/music/stream/{id}` по ключу API (Secrets `SC_CLIENT_ID`, `SC_CLIENT_SECRET`);
-  `public/vitrina/music.js` — виджет SoundCloud и свой плеер, `public/vitrina/stream.js` — куски HLS в MediaSource, `public/vitrina/sound.js` — полосы частот, громкость, удары (`setSound` движка),
+  `public/vitrina/music.js` — виджет SoundCloud (звук всегда он) и беззвучная тень по ключу API, `public/vitrina/stream.js` — куски HLS в MediaSource, `public/vitrina/sound.js` — полосы частот, громкость, удары (`setSound` движка),
   `public/vitrina/spectrum.js` — спектр трека заранее (БПФ, файл SDB1, `/music/bands/{номер}`), `public/vitrina/bands-k.js` — расчёт в `/k/music`.
 - `src/mcp.ts` — MCP-дверь: JSON-RPC, обе эпохи протокола, пять инструментов поверх ядра.
 - `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status`.

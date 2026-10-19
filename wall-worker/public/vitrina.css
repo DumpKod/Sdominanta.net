@@ -102,6 +102,13 @@ html:not(.js) .music-play { display: none; }
 /* В месте сцены (slot): элемент встаёт в рамку объекта, координаты ставит движок. */
 .slotted { position: fixed; right: auto; bottom: auto; max-width: none; box-sizing: border-box; overflow: hidden; justify-content: center; }
 .slotted[hidden] { display: none; }
+/* Плеер в рамке объекта: подпись и ▶ сверху, виджет SoundCloud заполняет остальное. */
+.music.slotted { border-radius: 12px; padding: 6px; }
+.music.slotted.widget-on { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); align-items: center; }
+.music.slotted.widget-on .music-note { grid-column: 1 / -1; }
+.music.slotted.widget-on .music-note:empty { display: none; }
+.music.slotted.widget-on .music-widget { grid-column: 1 / -1; grid-row: 3; align-self: stretch; min-height: 0; }
+.music.slotted .music-widget iframe { width: 100%; height: 100%; }
 
 /* Рама: окно объекта или страница сети внутри прямоугольника, раздвинутого в континууме (фон рисует холст). */
 .page-space {

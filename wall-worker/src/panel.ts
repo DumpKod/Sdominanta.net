@@ -526,7 +526,7 @@ async function musicPage(env: Env, top: string, csrf: string, note = ''): Promis
     'Файл должен быть тем же мастером, что на SoundCloud, иначе частоты разойдутся со звуком.</p>';
   b += '<p><b>Плейлист:</b> частоты слышны у тех его треков, для которых посчитан спектр. Добавьте такие треки сюда отдельно и посчитайте спектр у каждого.</p>';
   b += '<p><b>Трек без спектра</b> ' + (hasKey(env)
-    ? 'играет свой плеер по ключу API: браузер собирает поток SoundCloud кусками и слушает его сам; не вышло — играет виджет без частот.'
+    ? 'тоже играет виджет, а частоты слушает беззвучная тень по ключу API: браузер берёт тот же поток у SoundCloud кусками и анализирует его, не выводя в колонки.'
     : 'играет виджет без частот: <span class="warn">ключ API SoundCloud не внесён</span> (Secrets SC_CLIENT_ID и SC_CLIENT_SECRET).') + '</p></div>\n';
   b += `<form method="post" action="/k/music/add" class="row">${hidden}<label>Адрес трека или плейлиста на SoundCloud <input name="url" size="48" placeholder="https://soundcloud.com/автор/трек" required></label><button type="submit">Добавить</button></form>\n`;
   if (!rows.length) b += '<p>Треков ещё нет.</p>';

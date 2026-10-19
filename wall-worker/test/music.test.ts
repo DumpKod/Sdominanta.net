@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test';
 import { afterEach, describe, expect, it } from 'vitest';
 import { normTrackUrl, parsePlaylist, sc, streamRoute } from '../src/music';
 import { segmentAt, segmentStart } from '../public/vitrina/stream.js';
-import { BANDS, Clock, Ear, LEAD, Lag, bandEdges, bandsOf } from '../public/vitrina/sound.js';
+import { BANDS, Clock, Ear, LEAD, bandEdges, bandsOf } from '../public/vitrina/sound.js';
 import { bandsAt, packBands, spectrumOf, unpackBands } from '../public/vitrina/spectrum.js';
 import { csrfOf, get, login, post } from './helpers';
 import mig11 from '../migrations/0011-music.sql?raw';
@@ -175,13 +175,7 @@ describe('Музыка: поток', () => {
     expect(c.now(900)).toBe(7000);
   });
 
-  it('синхрон: полосы с задержкой выхода звука; ухо отстаёт от шага меньше, чем опережение LEAD', () => {
-    const lag = new Lag(2, 8);
-    for (let t = 0; t <= 100; t += 16) lag.push(new Float32Array([t, 0]), t);
-    expect(lag.at(100, 0)![0]).toBe(96);
-    expect(lag.at(100, 40)![0]).toBe(48);
-    expect(lag.at(100, 1000)).toBeNull();
-    // Шаг громкости: через сколько ухо доходит до половины (кадры по 1/60 с).
+  it('синхрон: ухо отстаёт от шага меньше, чем опережение LEAD', () => {    // Шаг громкости: через сколько ухо доходит до половины (кадры по 1/60 с).
     const ear = new Ear(BANDS), ones = new Float32Array(BANDS).fill(1);
     ear.update(ones, 1 / 60);
     expect(ear.beat).toBe(1); // удар — в тот же кадр

@@ -435,6 +435,19 @@
       select([id]);
       changed(false);
     });
+    // Плеер SoundCloud — объект-рамка с местом «плеер»: виджет встаёт в неё и ездит с камерой. Один на пространство.
+    button(objRow, 'Плеер SoundCloud', () => {
+      const had = E.objects.find((o) => o.slot === 'player');
+      if (had) { select([had.id]); note.textContent = 'Плеер уже есть: выбран. Двигайте и тяните его рамку.'; return; }
+      const [cx, cy] = E.toWorld(E.W / 2, E.H / 2), w = 420 / E.cam.zoom, h = 200 / E.cam.zoom, r = (x) => Math.round(x * 10) / 10;
+      const pts = [[cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2], [cx + w / 2, cy + h / 2], [cx - w / 2, cy + h / 2], [cx - w / 2, cy - h / 2]].map(([x, y]) => [r(x), r(y)]);
+      const id = E.scene.newId();
+      E.objects.push(new M.SceneObject({ id, label: 'Плеер', slot: 'player', strokes: [{ r: Math.round((4 / E.cam.zoom) * 100) / 100, pts }] }));
+      E.rebuild();
+      select([id]);
+      note.textContent = 'Плеер поставлен в центр. После публикации виджет SoundCloud встанет в эту рамку.';
+      changed(false);
+    });
     button(objRow, 'Удалить', deleteSelected);
 
     function deleteSelected() {
