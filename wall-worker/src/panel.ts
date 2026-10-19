@@ -57,13 +57,17 @@ function page(title: string, body: string, o: { status?: number; headers?: Recor
     // Строгая оболочка (как у графических редакторов): слева разделы, справа рабочая область из панелей с шапками.
     ':root{--bg:#0b0d10;--panel:#14171b;--head:#1c2026;--line:#2a3038;--text:#c9d1d9;--dim:#7d8590;--acc:#67e8f9;--warn:#fcd34d}\n' +
     'body{margin:0;font:14px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--text)}\n' +
-    '.app{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:100vh}\n' +
-    '.side{background:var(--panel);border-right:1px solid var(--line);padding:10px 0;font-size:13px}\n' +
-    '.side b{display:block;padding:10px 14px 4px;font:600 11px/1.4 system-ui;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}\n' +
-    '.side a{display:block;padding:4px 14px;color:var(--text);text-decoration:none;border-left:2px solid transparent}\n' +
-    '.side a:hover{background:var(--head)}.side a.on{border-left-color:var(--acc);background:var(--head);color:#fff}\n' +
-    '.side .who{padding:12px 14px 4px;color:var(--dim)}.side form{margin:4px 14px}.side button{width:100%}\n' +
-    '.work{padding:16px 20px;max-width:1100px}.solo{margin:0 auto;max-width:860px;padding:16px}\n' +
+    '.app{display:grid;grid-template:"bar bar bar" 34px "tools work dock" 1fr/44px minmax(0,1fr) 230px;min-height:100vh}\n' +
+    '.bar{grid-area:bar;display:flex;align-items:stretch;background:var(--head);border-bottom:1px solid var(--line);font-size:13px;position:relative;z-index:2}\n' +
+    '.brand{padding:0 14px;display:flex;align-items:center;color:#e6edf3;border-right:1px solid var(--line)}\n' +
+    '.menu{position:relative;display:flex;align-items:center;padding:0 12px;cursor:default;outline:0}.menu>span.on{color:var(--acc)}\n' +
+    '.menu:hover,.menu:focus-within{background:var(--panel)}.drop{display:none;position:absolute;top:100%;left:0;min-width:220px;background:var(--panel);border:1px solid var(--line);box-shadow:0 6px 18px #0008}\n' +
+    '.menu:hover .drop,.menu:focus-within .drop{display:block}.drop a{display:block;padding:6px 14px;color:var(--text);text-decoration:none}.drop a:hover{background:var(--head)}.drop a.on{color:var(--acc)}\n' +
+    '.tools{grid-area:tools;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:6px 0;gap:2px}\n' +
+    '.tools a{width:32px;height:30px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text);text-decoration:none;border:1px solid transparent;border-radius:3px}\n' +
+    '.tools a:hover{background:var(--head)}.tools a.on{background:var(--head);border-color:var(--acc);color:#fff}\n' +
+    '.dock{grid-area:dock;background:var(--panel);border-left:1px solid var(--line);padding:0 8px 8px;font-size:13px}.dock h2{margin-top:10px}.dock .box{line-height:1.9}.dock button{width:100%}\n' +
+    '.work{grid-area:work;padding:14px 20px;min-width:0}.solo{margin:0 auto;max-width:860px;padding:16px}\n' +
     'a{color:var(--acc)}h1{font-size:18px;font-weight:600;color:#e6edf3;margin:4px 0 14px}\n' +
     'h2{margin:18px 0 0;padding:5px 10px;font:600 11px/1.6 system-ui;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);background:var(--head);border:1px solid var(--line);border-bottom:0}\n' +
     'h2+*{margin-top:0}.box{background:var(--panel);border:1px solid var(--line);padding:10px 12px;margin-bottom:4px}\n' +
@@ -73,10 +77,10 @@ function page(title: string, body: string, o: { status?: number; headers?: Recor
     'input,textarea,select,button{font:inherit;font-size:13px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:3px;padding:4px 8px}\n' +
     'button{cursor:pointer;background:var(--head)}button:hover{border-color:var(--acc)}form{margin:6px 0}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row form{margin:0}\n' +
     '.warn{color:var(--warn)}.muted{color:var(--dim)}textarea{width:100%;box-sizing:border-box}\n' +
-    '@media (max-width:720px){.app{grid-template-columns:1fr}.side{display:flex;flex-wrap:wrap;gap:2px;padding:8px;border-right:0;border-bottom:1px solid var(--line)}' +
-    '.side b,.side .who{display:none}.side a{padding:4px 8px;border-left:0;border-bottom:2px solid transparent}.side a.on{border-bottom-color:var(--acc)}.side form{margin:0}.side button{width:auto}' +
+    '@media (max-width:760px){.app{grid-template:"bar" auto "tools" auto "work" 1fr "dock" auto/1fr}.bar{flex-wrap:wrap}' +
+    '.tools{flex-direction:row;justify-content:center;border-right:0;border-bottom:1px solid var(--line)}.dock{border-left:0;border-top:1px solid var(--line)}' +
     '.work{padding:12px 16px}table{display:block;overflow-x:auto}}\n' +
-    '</style>\n</head>\n<body>\n' + (body.startsWith('<aside') ? `<div class="app">${body}\n</main></div>` : `<div class="solo">${body}</div>`) + '\n</body>\n</html>\n';
+    '</style>\n</head>\n<body>\n' + (body.startsWith('<header') ? `<div class="app">${body}\n</main></div>` : `<div class="solo">${body}</div>`) + '\n</body>\n</html>\n';
   // same-origin, а не no-referrer: при no-referrer браузер шлёт с формы «Origin: null», и проверка своего адреса отказала бы.
   return html(doc, { status: o.status ?? 200, noStore: true, csp: CSP, headers: { 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'same-origin', ...o.headers } });
 }
@@ -122,21 +126,36 @@ const SECTIONS: [string, [string, string][]][] = [
   ['Снаружи', [['/', 'Витрина'], ['/wall/log', 'Журнал действий'], ['/wall/compat', 'Совместимость'], ['/llms.txt', 'Вход для моделей']]],
 ];
 
-/** Левая колонка панели: разделы, кто вошёл, выход. Открывает <main>, page() закрывает. */
-function header(sign: string, csrf: string, path = ''): string {
+/** Короткие метки разделов на панели инструментов слева (как значки инструментов в графическом редакторе). */
+const TOOL: Record<string, string> = { '/k': 'Оч', '/k/vitrina': 'Пр', '/k/music': 'Му', '/k/nodes': 'Уз', '/k/docs': 'Дк' };
+
+/**
+ * Оболочка панели вокруг рабочей области: сверху меню (группы разделов), слева инструменты (разделы одним знаком),
+ * справа док (кто вошёл, что ждёт решения, выход). Открывает <main>, page() закрывает.
+ */
+async function header(env: Env, sign: string, csrf: string, path = '', now = nowSec()): Promise<string> {
   const cur = '/k' + path;
-  let b = '<aside class="side">';
+  const on = (href: string) => href !== '/' && (cur === href || (href !== '/k' && cur.startsWith(href + '/')) || (href === '/k' && cur.startsWith('/k/d/')));
+  let b = '<header class="bar"><span class="brand">🜄 Панель</span>';
   for (const [group, items] of SECTIONS) {
-    b += `<b>${esc(group)}</b>`;
-    for (const [href, name] of items) {
-      const on = href !== '/' && (cur === href || (href !== '/k' && cur.startsWith(href + '/')) || (href === '/k' && cur.startsWith('/k/d/')));
-      b += `<a href="${href}"${on ? ' class="on"' : ''}>${esc(name)}</a>`;
-    }
+    b += `<div class="menu" tabindex="0"><span${items.some(([h]) => on(h)) ? ' class="on"' : ''}>${esc(group)}</span><div class="drop">`;
+    for (const [href, name] of items) b += `<a href="${href}"${on(href) ? ' class="on"' : ''}>${esc(name)}</a>`;
+    b += '</div></div>';
   }
+  b += '</header><nav class="tools" aria-label="Разделы">';
+  for (const [, items] of SECTIONS) for (const [href, name] of items) if (TOOL[href]) b += `<a href="${href}" title="${esc(name)}"${on(href) ? ' class="on"' : ''}>${TOOL[href]}</a>`;
+  b += '</nav><aside class="dock">';
+  const q = (await waitingDrafts(env, now)).length;
+  const st = (await env.DB.batch([
+    env.DB.prepare(`SELECT count(*) AS n FROM nodes WHERE state = 'черновик'`),
+    env.DB.prepare(`SELECT count(*) AS n FROM docs WHERE state = 'черновик'`),
+  ])).map((r) => (r.results[0] as { n: number }).n);
+  b += '<h2>Ждёт решения</h2><div class="box">';
+  b += `<a href="/k">Черновики карточек: ${q}</a><br><a href="/k/nodes">Узлы-черновики: ${st[0]}</a><br><a href="/k/docs">Документы-черновики: ${st[1]}</a></div>`;
   const hidden = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
-  b += `<div class="who">Хранитель ${esc(sign)}</div>`;
+  b += `<h2>Сессия</h2><div class="box"><span class="muted">Хранитель ${esc(sign)}</span>`;
   b += `<form method="post" action="/k/logout">${hidden}<button type="submit">Выйти</button></form>`;
-  b += `<form method="post" action="/k/logout-all">${hidden}<button type="submit">Выйти везде</button></form>`;
+  b += `<form method="post" action="/k/logout-all">${hidden}<button type="submit">Выйти везде</button></form></div>`;
   return b + '</aside><main class="work">';
 }
 
@@ -210,7 +229,7 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   }
 
   const csrf = await csrfFor(env, 'session', session.id);
-  const top = header(me, csrf, path);
+  const top = await header(env, me, csrf, path, now);
 
   if (post) {
     const f = await readForm(req, path === '/vitrina/save' ? SCENE_FORM_MAX : FORM_MAX);
