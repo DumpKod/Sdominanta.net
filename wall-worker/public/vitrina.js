@@ -1387,11 +1387,17 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   const sceneUrl = (sp) => (keeper ? `/k/vitrina/live/${sp}.json` : sp === 'main' ? '/vitrina/scene.json' : `/vitrina/scene/${sp}.json`);
   const spaceUrl = (sp) => (sp === 'main' ? '/' : `/in/${sp}`);
   // Пространства без опубликованной сцены нет (404): гость упирается, хранитель входит в пустое, чтобы нарисовать.
-  const loadScene = (sp) => fetch(sceneUrl(sp), { credentials: 'same-origin' }).then((r) => {
-    if (r.status === 404 && keeper) return { v: 2, objects: [] };
-    if (!r.ok) throw new Error('scene ' + r.status);
-    return r.json();
-  });
+  // Редактор подставляет свои несохранённые слои (setLoader): переход в слой с правками берёт их, а не сайт.
+  let loader = null;
+  const loadScene = (sp) => {
+    const own = loader && loader(sp);
+    if (own) return Promise.resolve(own);
+    return fetch(sceneUrl(sp), { credentials: 'same-origin' }).then((r) => {
+      if (r.status === 404 && keeper) return { v: 2, objects: [] };
+      if (!r.ok) throw new Error('scene ' + r.status);
+      return r.json();
+    });
+  };
 
   function stepFade(dt) {
     fade.veil += (fade.veilTo - fade.veil) * Math.min(1, dt * 9);
@@ -1491,6 +1497,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
 
   /** Сменить сцену пространства на месте: камера, поле, ссылки, редактор (событие vitrina:space). */
   function swapScene(json, sp, parent, from) {
+    // редактор забирает уходящий слой целиком (с правками), пока сцена ещё та
+    document.dispatchEvent(new CustomEvent('vitrina:leaving', { detail: { space: SPACE, scene } }));
     scene = Scene.from(json);
     SPACE = sp; parentSpace = parent; fromId = from;
     cv.dataset.space = sp;
@@ -2459,7 +2467,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     cam: {
       get x() { return cam.x; }, set x(v) { cam.x = v; },
       get y() { return cam.y; }, set y(v) { cam.y = v; },
-      get zoom() { return cam.zoom * VK; }, set zoom(v) { cam.zoom = v / VK; },
+      get zoom() { return cam.zoom / VK; }, set zoom(v) { cam.zoom = v * VK; },
       view(w, h) { return cam.view(w * VK, h * VK); },
     },
     get scene() { return scene; },
@@ -2508,6 +2516,24 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     /** Сцена изменилась на месте (правка объектов): пересобрать жилы, камеру не трогать. */
     rebuild(n) { readSpace(); bindNav(); ensureView(true); refresh(n || 30); },
     settle() { ensureView(true); refresh(4); },
+    /** Редактор: свои несохранённые слои вместо сайта при любом переходе (null — сайт). */
+    setLoader(f) { loader = f; },
+    /** Редактор: открыть слой сразу, без полёта и провала; камера — на весь слой. */
+    openSpace(sp, parent) {
+      return loadScene(sp).then((j) => {
+        if (rama) closeFrameNow();
+        if (win) closeWindow();
+        if (sp === SPACE) history.replaceState({ space: sp }, '', spaceUrl(sp));
+        else history.pushState({ space: sp }, '', spaceUrl(sp));
+        swapScene(j, sp, sp === 'main' ? null : parent || j.up || 'main', null);
+        ups.length = 0; threads = [];
+        resize();
+        fitAll();
+        return true;
+      });
+    },
+    /** Закрыть раскрытое окно или провал (выход из предпросмотра). */
+    closeAll() { if (rama) closeFrameNow(); if (win) closeWindow(); },
     /** Заменить сцену целиком (отмена, повтор, JSON): камера остаётся. */
     load(json) { scene = Scene.from(json); hl = -1; readSpace(); bindNav(); ensureView(true); refresh(30); },
   };

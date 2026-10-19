@@ -29,38 +29,6 @@ html:not(.js) .objects a { color: #a8a8b0; }
 html:not(.js) #scene { display: none; }
 html:not(.js) body { overflow: auto; }
 
-/* Панель хранителя: её строит редактор /k/editor.js, который отдаётся только в сессии хранителя. */
-.kp {
-  position: fixed; top: 12px; right: 12px; z-index: 2; width: min(320px, calc(100vw - 24px));
-  padding: 10px; border: 1px solid rgba(0, 242, 254, 0.28); border-radius: 10px;
-  background: rgba(2, 8, 20, 0.88); color: #cbd5e1; font: 12px/1.4 ui-monospace, monospace;
-  max-height: calc(100vh - 24px); overflow-y: auto; box-sizing: border-box;
-}
-.kp-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
-.kp-b {
-  flex: 1 1 auto; font: inherit; color: #94a3b8; background: rgba(15, 23, 42, 0.6);
-  border: 1px solid #1e293b; border-radius: 6px; padding: 5px 6px; cursor: pointer;
-}
-.kp-b:hover, .kp-b.on { color: #cffafe; border-color: rgba(0, 242, 254, 0.55); background: rgba(0, 242, 254, 0.12); }
-.kp-sel, .kp-json {
-  width: 100%; box-sizing: border-box; font: inherit; color: #e2e8f0; background: #020617;
-  border: 1px solid #164e63; border-radius: 6px; padding: 5px; margin-bottom: 6px;
-}
-.kp-json { height: 30vh; resize: vertical; }
-.kp-note { margin: 0 0 6px; color: #64748b; }
-.kp-f { display: block; margin-bottom: 6px; color: #94a3b8; }
-.kp-f span { display: block; margin-bottom: 2px; }
-.kp-in {
-  width: 100%; box-sizing: border-box; font: inherit; color: #e2e8f0; background: #020617;
-  border: 1px solid #164e63; border-radius: 6px; padding: 4px 6px; resize: vertical;
-}
-.kp-b:disabled { opacity: 0.4; cursor: default; }
-.kp-sec { margin: 0 0 6px; border-top: 1px solid #1e293b; padding-top: 4px; }
-.kp-sec summary { cursor: pointer; color: #a5f3fc; margin-bottom: 4px; }
-.kp-sl span { display: flex; gap: 6px; align-items: center; }
-.kp-out { margin-left: auto; color: #e2e8f0; }
-.kp-x { font: inherit; color: #94a3b8; background: none; border: 0; padding: 0 2px; cursor: pointer; }
-.kp-range { width: 100%; accent-color: #22d3ee; }
 
 /* Музыка: подпись трека и ▶ внизу слева. Автор, трек и SoundCloud — всегда на виду и ссылками. */
 .music {
@@ -169,11 +137,6 @@ html:not(.js) .music-play { display: none; }
 .page-space.dive .page-body pre { padding: 0.8em 1em; background: rgba(0, 242, 254, 0.04); border-left: 2px solid rgba(0, 242, 254, 0.3); border-radius: 4px; }
 .page-space.dive .page-body pre.page-row { padding: 0 1em; background: none; border: 0; overflow-x: auto; white-space: pre; }
 .page-space.dive .widget-frame { height: calc(100vh - 13em); }
-
-/* Предпросмотр хранителя: витрина как у гостя, одна кнопка возврата к правке. */
-.kp[hidden], .kp-back[hidden] { display: none; }
-.kp-back { position: fixed; left: 14px; top: 14px; z-index: 5; }
-.kp-preview .keeper { visibility: hidden; }
 
 /* Плашка «Вышла новая версия» (fresh.js): гостю с музыкой и хранителю — без принудительного обновления. */
 .fresh {

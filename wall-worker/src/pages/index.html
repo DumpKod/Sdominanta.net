@@ -9,7 +9,8 @@
 <script type="module" src="/vitrina.js"></script>
 <script type="module" src="/vitrina/fresh.js"></script>
 {{#KEEPER}}<meta name="k-csrf" content="{{CSRF}}">
-<script src="/k/editor.js" defer></script>
+<link rel="stylesheet" href="/k/ed/editor.css">
+<script type="module" src="/k/ed/main.js"></script>
 {{/KEEPER}}</head>
 <body>
   <!-- Сцена: объекты, нарисованные кистью, на ограниченном холсте с камерой (движок — /vitrina.js, сцена — data-scene). Ссылки объектов — в <nav> ниже. -->

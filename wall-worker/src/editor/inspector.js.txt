@@ -1,0 +1,312 @@
+// Панель «Свойства» (правый док) — меняется от выделения:
+// ничего — слой (состояние, черновик новее, аварийная копия, параметры пространства);
+// объект — основное, вход (область и что внутри), связи, переход, жилы; узел сети — только посмотреть.
+// Поле меняет объект сразу (видно на холсте), в отмену правка записывается, когда поле отпущено.
+
+import { Win, button, el, field, options, section, slider } from './dom.js';
+
+const WIDGET_NAMES = { player: 'плеер SoundCloud', keeper: 'вход хранителя', queue: 'очередь (хранителю)', music: 'музыка (хранителю)', vitrina: 'витрина (хранителю)' };
+const STYLE_NAMES = { tubeR: 'Радиус новых мазков', thick: 'Толщина', resonance: 'Резонанс', tact: 'Такты', flow: 'Течение', wobble: 'Волнистость', fill: 'Заливка жилы', sound: 'Реакция на звук' };
+const FRAME_NAMES = {
+  push: 'Напор до взрыва (сила колёсика)', depth: 'Глубина провала', width: 'Ширина колонки текста, px',
+  far: 'Поле под текстом тише', round: 'Форма портала: прямоугольник — овал', ring: 'Кольцо узлов портала, px', aspect: 'Высота к ширине (старая рамка)',
+};
+const SPACE_NAMES = { drift: 'Дрейф поля', density: 'Плотность', glow: 'Свечение', haze: 'Дымка под линиями', sound: 'Реакция поля на звук', reach: 'Радиус музыки вокруг плеера', horizon: 'Горизонт уровня выше (0 — чистый холст)' };
+const PAGES = ['/wall', '/wall/now', '/wall/rules', '/wall/about', '/wall/log', '/wall/digest', '/wall/compat', '/wall/t/toe', '/llms.txt', '/compose'];
+const PAGE_RE = /^\/(?!\/)/;
+const SPACE_RE = /^[a-z0-9-]{1,32}$/;
+
+export function makeInspector(E, doc, ui) {
+  const M = E.M;
+  const win = new Win({ id: 'props', title: 'Свойства', dock: 'right', grow: true });
+  const lists = el('div');
+  lists.hidden = true;
+  const dlSpaces = el('datalist'); dlSpaces.id = 'ed-spaces';
+  const dlPages = el('datalist'); dlPages.id = 'ed-pages';
+  for (const p of PAGES) dlPages.append(new Option(p, p));
+  lists.append(dlSpaces, dlPages);
+  document.body.append(lists);
+  let self = false; // правка из самой панели: не перерисовывать её (фокус остаётся в поле)
+
+  const commit = (label, rebuild = true) => { self = true; doc.commit(label, doc.sel, rebuild); self = false; };
+  const live = (vein) => (vein ? E.rebuild(4) : E.cameraChanged(1));
+  const kindOf = (t) => (t.inner ? 'space' : t.widget ? 'widget' : t.window ? 'window' : t.href ? 'page' : '');
+
+  function render() {
+    const b = win.body;
+    b.textContent = '';
+    dlSpaces.textContent = '';
+    for (const it of ui.spaces()) dlSpaces.append(new Option(it.label, it.space));
+    const o = doc.first;
+    if (o) return objectView(b, o);
+    if (doc.peeked) { const n = doc.any(doc.peeked); if (n) return nodeView(b, n); }
+    layerView(b);
+  }
+
+  /* ---------------- слой ---------------- */
+  function layerView(b) {
+    const l = doc.cur, it = ui.info(E.space);
+    win.setTitle('Свойства слоя');
+    b.append(el('h3', 'ed-h', it ? it.label : E.space));
+    const st = [];
+    st.push(it && it.version ? `На сайте версия ${it.version}` : E.space === 'main' ? 'На сайте встроенная сцена' : 'На сайте пусто');
+    if (l && l.version && (!it || l.version !== it.version)) st.push(`правка от черновика ${l.version}`);
+    if (l && l.dirty) st.push('есть несохранённые правки');
+    b.append(el('p', 'ed-note', st.join(' · ') + '.'));
+    if (it && it.last > (it.version || 0) && l && l.version !== it.last && !l.dirty) {
+      const box = el('div', 'ed-banner');
+      box.append(el('p', '', `Есть черновик ${it.last}, новее того, что на сайте.`), button(`Открыть черновик ${it.last}`, () => ui.openDraft(it.last), { cls: 'ed-primary' }));
+      b.append(box);
+    }
+    const rec = ui.recovery(E.space);
+    if (rec) {
+      const box = el('div', 'ed-banner warn');
+      box.append(
+        el('p', '', `Аварийная копия правок от ${new Date(rec.at * 1000).toLocaleString('ru-RU')}: страница закрылась, не сохранив их.`),
+        button('Восстановить', () => ui.restore(), { cls: 'ed-primary' }), button('Выбросить', () => ui.dropRecovery()),
+      );
+      b.append(box);
+    }
+    const n = E.objects.filter((x) => !x.auto).length, nodes = E.objects.length - n;
+    b.append(el('p', 'ed-note', `Объектов ${n}${nodes ? `, узлов сети ${nodes}` : ''}. Ничего не выделено: здесь параметры всего пространства.`));
+    const sec = section('Пространство', 'space');
+    for (const [k, [lo, hi]] of Object.entries(M.SPACE)) {
+      const s = slider(SPACE_NAMES[k] || k, lo, hi, {
+        input(v) { E.scene.space = { ...(E.scene.space || {}), [k]: v }; E.rebuild(4); },
+        change() { commit('Пространство: ' + (SPACE_NAMES[k] || k), false); },
+        reset() { if (!E.scene.space) return; delete E.scene.space[k]; if (!Object.keys(E.scene.space).length) E.scene.space = null; E.rebuild(4); commit('Пространство: по умолчанию', false); render(); },
+      });
+      s.set(E.scene.get(k), !!(E.scene.space && typeof E.scene.space[k] === 'number'));
+      sec.body.append(s.root);
+    }
+    b.append(sec.root);
+    b.append(el('p', 'ed-hint', '«+» или I — вставить · V B A L — инструменты · Tab — предпросмотр · Ctrl+S — черновик'));
+  }
+
+  /* ---------------- узел сети ---------------- */
+  function nodeView(b, n) {
+    win.setTitle('Узел сети');
+    b.append(el('h3', 'ed-h', n.label || n.id));
+    b.append(el('p', 'ed-note', `id ${n.id}. Узел строится из базы сети: здесь его можно только посмотреть. Текст и публикация — в панели, раздел «Узлы и кластеры».`));
+    if (n.window && n.window.text) b.append(el('p', 'ed-quote', n.window.text.slice(0, 600) + (n.window.text.length > 600 ? '…' : '')));
+    if (n.inner) b.append(button(`Открыть его пространство`, () => ui.openLayer(n.inner, E.space), { cls: 'ed-primary' }));
+  }
+
+  /* ---------------- объект ---------------- */
+  function objectView(b, o) {
+    const many = doc.sel.length;
+    win.setTitle(many > 1 ? `Выбрано ${many}` : 'Объект');
+    if (many > 1) b.append(el('p', 'ed-note', `Выбрано ${many}: поля ниже — у первого («${o.label}»). Двигать, тянуть, слои, копировать и удалять — все сразу.`));
+    const t = doc.target();
+
+    // основное
+    const main = section('Основное', 'main');
+    const fLabel = field('Подпись (видят модели в списке ссылок)');
+    fLabel.input.value = o.label || '';
+    fLabel.input.addEventListener('input', () => { o.label = fLabel.input.value.trim() || o.id; E.rebuild(1); });
+    fLabel.input.addEventListener('change', () => commit('Подпись', false));
+    const fId = field('id: латиница, цифры, дефис');
+    fId.input.value = o.id;
+    fId.input.addEventListener('change', () => {
+      const id = fId.input.value.trim();
+      if (id === o.id) return;
+      if (!SPACE_RE.test(id) || doc.any(id)) { ui.say(`id «${id}» не подходит: латиница, цифры, дефис, без повторов.`); fId.input.value = o.id; return; }
+      // связи других объектов слоя идут за переименованием
+      for (const x of E.objects) for (const ln of x.links || []) if (ln.to === o.id) ln.to = id;
+      doc.sel = doc.sel.map((s) => (s === o.id ? id : s));
+      o.id = id;
+      self = true; doc.commit('Новый id', null); self = false;
+    });
+    const fZ = field('Слой (−100…100): выше — поверх и первым ловит клик', 'number');
+    fZ.input.min = '-100'; fZ.input.max = '100'; fZ.input.step = '1';
+    fZ.input.value = String(o.z || 0);
+    fZ.input.addEventListener('change', () => { o.z = Math.max(-100, Math.min(100, Math.round(+fZ.input.value || 0))); commit('Слой'); });
+    const fSlot = field('На холсте: чужой виджет стоит в рамке объекта, как картинка', 'select');
+    options(fSlot.input, [['', '— ничего —'], ['player', 'плеер SoundCloud'], ['keeper', 'вход хранителя']], o.slot || '');
+    fSlot.input.addEventListener('change', () => {
+      const v = fSlot.input.value || null;
+      if (v && E.objects.some((x) => x !== o && x.slot === v)) { ui.say('Такое место в слое уже есть: одно на слой.'); fSlot.input.value = o.slot || ''; return; }
+      o.slot = v; commit('Место виджета');
+    });
+    main.body.append(fLabel.root, fId.root, fZ.root, fSlot.root);
+    b.append(main.root);
+
+    // вход: область и что внутри
+    const door = section('Вход: область и что внутри', 'door');
+    const chips = el('div', 'ed-row ed-chips');
+    const areas = [o.area, ...(o.doors || []).map((d) => d.area)];
+    areas.forEach((a, i) => {
+      const k = i - 1, c = button(String(i + 1), () => doc.select(doc.sel, k), { cls: 'ed-chip' + (doc.door === k ? ' on' : '') + (a ? '' : ' empty'), title: i ? `Вход ${i + 1}` : 'Основная область' });
+      chips.append(c);
+    });
+    chips.append(button('+', () => {
+      if ((o.doors || []).length >= M.DOORS_MAX) { ui.say(`У объекта до ${M.DOORS_MAX} областей-входов.`); return; }
+      o.doors = o.doors || [];
+      o.doors.push({});
+      doc.select(doc.sel, o.doors.length - 1);
+      ui.tool('area');
+      ui.say('Новая область: закрасьте её кистью «Область» по узлам, затем задайте, что внутри.');
+    }, { cls: 'ed-chip', title: 'Ещё область-вход' }));
+    door.body.append(chips);
+    door.body.append(el('p', 'ed-note', state(t)));
+    const aRow = el('div', 'ed-row');
+    aRow.append(
+      button('Закрасить', () => ui.tool('area'), { title: 'Кисть «Область» (A): по узлам, Alt — стереть' }),
+      button(doc.door >= 0 ? 'Убрать вход' : 'Стереть область', () => {
+        if (doc.door >= 0) { o.doors.splice(doc.door, 1); if (!o.doors.length) o.doors = null; doc.door = -1; }
+        else o.area = null;
+        commit('Область убрана');
+        render();
+      }),
+      button('Проверить', () => ui.check(doc.door >= 0 ? `${o.id}.${doc.door + 1}` : o.id), { title: 'Предпросмотр: долететь к области и раскрыть её' }),
+    );
+    door.body.append(aRow);
+    if (doc.door >= 0) {
+      const fDl = field('Подпись входа (пусто — заголовок окна или подпись объекта)');
+      fDl.input.value = t.label || '';
+      fDl.input.addEventListener('input', () => { t.label = fDl.input.value.trim() || null; });
+      fDl.input.addEventListener('change', () => commit('Подпись входа'));
+      door.body.append(fDl.root);
+    }
+    const fKind = field('Что внутри', 'select');
+    options(fKind.input, [['', '— ничего —'], ['space', 'Пространство (алеф-нуль)'], ['widget', 'Виджет'], ['window', 'Окно с текстом'], ['page', 'Страница сайта']], kindOf(t));
+    fKind.input.addEventListener('change', () => {
+      const k = fKind.input.value;
+      t.inner = k === 'space' ? t.inner || ui.freeSpace() : null;
+      t.widget = k === 'widget' ? t.widget || 'player' : null;
+      t.window = k === 'window' ? t.window || { title: o.label, text: '' } : null;
+      t.href = k === 'page' ? t.href || '/wall' : null;
+      commit('Что внутри');
+      render();
+    });
+    door.body.append(fKind.root);
+    const kind = kindOf(t);
+    if (kind === 'space') {
+      const f = field('Имя пространства внутри (латиница, цифры, дефис)');
+      f.input.setAttribute('list', 'ed-spaces');
+      f.input.value = t.inner;
+      f.input.addEventListener('change', () => {
+        const v = f.input.value.trim().toLowerCase();
+        if (!SPACE_RE.test(v) || v === E.space) { ui.say('Имя: латиница, цифры, дефис, до 32; не само это пространство.'); f.input.value = t.inner; return; }
+        t.inner = v; commit('Пространство внутри', false);
+      });
+      const r = el('div', 'ed-row');
+      r.append(button(`Открыть «${t.inner}»`, () => ui.openLayer(t.inner, E.space), { cls: 'ed-primary' }));
+      door.body.append(f.root, r);
+    } else if (kind === 'widget') {
+      const f = field('Виджет', 'select');
+      options(f.input, M.WIDGETS.map((w) => [w, WIDGET_NAMES[w] || w]), t.widget);
+      f.input.addEventListener('change', () => { t.widget = f.input.value; commit('Виджет', false); });
+      door.body.append(f.root);
+    } else if (kind === 'window') {
+      const w = t.window;
+      const fT = field('Заголовок окна'), fX = field('Текст: по абзацу на строку', 'textarea', { rows: 6 }), fL = field('Ссылки: по строке «подпись | /путь»', 'textarea', { rows: 3 });
+      fT.input.value = w.title || '';
+      fX.input.value = w.text || '';
+      fL.input.value = (w.links || []).map((l) => `${l.label} | ${l.href}`).join('\n');
+      const read = () => {
+        const links = fL.input.value.split('\n').map((s) => s.split('|').map((x) => x.trim())).filter((s) => s[0] && s[1]).map(([label, href]) => ({ label, href }));
+        const nw = {};
+        if (fT.input.value.trim()) nw.title = fT.input.value.trim();
+        if (fX.input.value.trim()) nw.text = fX.input.value.trim();
+        if (links.length) nw.links = links;
+        t.window = Object.keys(nw).length ? nw : { title: o.label };
+      };
+      for (const f of [fT, fX, fL]) { f.input.addEventListener('input', read); f.input.addEventListener('change', () => commit('Окно', false)); }
+      door.body.append(fT.root, fX.root, fL.root);
+    } else if (kind === 'page') {
+      const f = field('Адрес страницы: путь на сайте, например /wall/rules');
+      f.input.setAttribute('list', 'ed-pages');
+      f.input.value = t.href || '';
+      f.input.addEventListener('change', () => {
+        const v = f.input.value.trim();
+        if (v && !PAGE_RE.test(v)) { ui.say('Адрес — путь на сайте, начинается с /.'); f.input.value = t.href || ''; return; }
+        t.href = v || null; commit('Адрес', false); render();
+      });
+      door.body.append(f.root);
+    }
+    const fNote = field('Заметка: что задумано (видит только хранитель)', 'textarea', { rows: 2 });
+    fNote.input.value = t.note || '';
+    fNote.input.addEventListener('input', () => { t.note = fNote.input.value.trim() || null; });
+    fNote.input.addEventListener('change', () => commit('Заметка', false));
+    door.body.append(fNote.root);
+    b.append(door.root);
+
+    // переход (рама входа)
+    const fr = section('Переход: взрыв и провал', 'frame', false);
+    for (const k of ['push', 'depth', 'width', 'far', 'round', 'ring', 'aspect']) {
+      const [lo, hi] = M.FRAME[k];
+      const s = slider(FRAME_NAMES[k], lo, hi, {
+        input(v) { t.frame = { ...(t.frame || {}), [k]: v }; },
+        change() { commit('Переход: ' + FRAME_NAMES[k], false); },
+        reset() { if (!t.frame) return; delete t.frame[k]; if (!Object.keys(t.frame).length) t.frame = null; commit('Переход: по умолчанию', false); render(); },
+      });
+      s.set(t.frame && typeof t.frame[k] === 'number' ? t.frame[k] : M.FRAME[k][2], !!(t.frame && typeof t.frame[k] === 'number'));
+      fr.body.append(s.root);
+    }
+    b.append(fr.root);
+
+    // связи
+    const ln = section(`Связи · ${(o.links || []).length}`, 'links');
+    const targets = E.objects.filter((x) => x !== o).map((x) => [x.id, (x.auto ? '⊙ ' : '') + (x.label || x.id)]);
+    (o.links || []).forEach((l, i) => {
+      const row = el('div', 'ed-link');
+      const s = el('select', 'ed-in');
+      options(s, targets.some(([id]) => id === l.to) ? targets : [[l.to, l.to + ' (не в этом слое)'], ...targets], l.to);
+      s.addEventListener('change', () => { l.to = s.value; commit('Связь', false); });
+      const w = el('input', 'ed-range');
+      w.type = 'range'; w.min = '0'; w.max = '1'; w.step = '0.05'; w.value = String(l.w ?? 0.5);
+      w.title = 'вес';
+      const out = el('output', 'ed-out', String(l.w ?? 0.5));
+      w.addEventListener('input', () => { l.w = Math.round(+w.value * 100) / 100; out.textContent = String(l.w); E.cameraChanged(1); });
+      w.addEventListener('change', () => commit('Вес связи', false));
+      row.append(s, w, out, button('×', () => { o.links.splice(i, 1); if (!o.links.length) o.links = null; commit('Связь убрана', false); render(); }, { cls: 'ed-ico', title: 'Убрать связь' }));
+      ln.body.append(row);
+    });
+    const lr = el('div', 'ed-row');
+    lr.append(button('+ связь', () => {
+      const free = targets.find(([id]) => !(o.links || []).some((l) => l.to === id));
+      if (!free) { ui.say('Связать не с кем: в слое нет других объектов.'); return; }
+      if ((o.links || []).length >= 10) { ui.say('У объекта до 10 связей.'); return; }
+      o.links = [...(o.links || []), { to: free[0], w: 0.5 }];
+      commit('Связь', false);
+      render();
+    }), button('Тянуть мышью (L)', () => ui.tool('link')));
+    ln.body.append(lr, el('p', 'ed-hint', 'При входе внутрь связи видны нитями сквозь горизонт.'));
+    b.append(ln.root);
+
+    // жилы
+    const st = section('Жилы', 'style', false);
+    for (const [k, [lo, hi]] of Object.entries(M.STYLE)) {
+      const s = slider(STYLE_NAMES[k] || k, lo, hi, {
+        input(v) { o.style = { ...(o.style || {}), [k]: v }; live(true); },
+        change() { commit('Жилы: ' + (STYLE_NAMES[k] || k), false); },
+        reset() { if (!o.style) return; delete o.style[k]; if (!Object.keys(o.style).length) o.style = null; commit('Жилы: по умолчанию'); render(); },
+      });
+      s.set(k === 'tubeR' ? o.tubeR() : o.get(k), !!(o.style && typeof o.style[k] === 'number'));
+      st.body.append(s.root);
+    }
+    st.body.append(button('Радиус — всем жилам объекта', () => {
+      const r = o.tubeR();
+      for (const s of o.strokes) { s.r = r; for (const p of s.pts) p.length = 2; }
+      commit('Радиус всем жилам');
+    }));
+    b.append(st.root);
+  }
+
+  /** Что раскроется: та же очерёдность, что у движка (алеф-нуль, виджет, окно, страница). */
+  function state(t) {
+    const has = t.area && t.area.length >= 3;
+    const what = t.inner ? `пространство «${t.inner}»` : t.widget ? `виджет «${WIDGET_NAMES[t.widget] || t.widget}»` : t.window ? 'окно с текстом' : t.href && PAGE_RE.test(t.href) && !/^\/(k|in)(\/|$)/.test(t.href) ? `страница ${t.href}` : null;
+    if (!has && !what) return 'Входа нет: закрасьте область и выберите, что внутри.';
+    if (!has) return `Внутри — ${what}, но области нет: закрасьте её («Закрасить», A).`;
+    if (!what) return 'Область есть, внутри ничего: выберите ниже.';
+    return `Готово: напор колёсика над областью раскроет ${what}.`;
+  }
+
+  doc.on('sel', render);
+  doc.on('layer', render);
+  doc.on('change', () => { if (!self) render(); });
+  doc.on('saved', render);
+  return { win, render };
+}

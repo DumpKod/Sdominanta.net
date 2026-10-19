@@ -1,0 +1,437 @@
+// Оболочка редактора (решения хранителя 19.10): как в обычных программах — слева сверху «Выход» и меню,
+// по центру сверху путь по слоям, справа сверху состояние и «Сохранить» / «Опубликовать»; инструменты — снизу по центру;
+// слева панель «Слои», справа «Свойства». Tab прячет всё и включает предпросмотр: сначала неподвижный,
+// первый клик мыши делает его живым (как у гостя: клики — обычные переходы), Tab ещё раз — назад к правке того же слоя.
+// Автосохранения нет: раз в минуту, и только пока есть несохранённые правки, — аварийная копия слоя на сервер (одна ячейка).
+
+import { Win, ask, button, dock, el, menuBar, store, toast, typing } from './dom.js';
+import { Doc } from './doc.js';
+import * as io from './io.js';
+import { TOOLS, makeTools } from './tools.js';
+import { makeLayers } from './layers.js';
+import { makeInspector } from './inspector.js';
+import { makeInsert } from './insert.js';
+
+const KEEP_EVERY = 60000;
+
+export function boot(E) {
+  const doc = new Doc(E);
+  const root = document.documentElement;
+  let open = false, built = false, preview = 0, saved = null;
+  let items = [];
+  const recs = new Map(); // слой → аварийная копия | null (уже спрошено)
+  const parents = new Map(); // слой → откуда открыт (для слоёв, которых ещё нет на сервере)
+  let brushPx = store.get('brush', 4), mini = store.get('mini', true);
+  let tools, layers, insp, ins, top, bar, crumbs, stateEl, bPub, bSave, zoomEl, brushBox, toolBtns = {}, shield, menus, jsonWin = null;
+
+  /* ---------- вход в редактор ---------- */
+  const keeperBox = document.querySelector('aside.keeper');
+  const opener = button('Редактор', () => enter(), { cls: 'ed-open', title: 'Открыть редактор витрины' });
+  if (keeperBox) keeperBox.prepend(opener); else document.body.append(opener);
+
+  const ui = {
+    brush: () => brushPx,
+    mini: () => mini,
+    hidden: () => !open || preview > 0,
+    insets() {
+      const l = document.querySelector('.ed-dock-left'), r = document.querySelector('.ed-dock-right');
+      const vis = (d) => (d && d.querySelector('.ed-win:not([hidden])') ? d.offsetWidth : 0);
+      return { l: vis(l), r: vis(r), t: 40, b: 60 };
+    },
+    center() {
+      const s = ui.insets();
+      return E.toWorld((s.l + E.W - s.r) / 2, (s.t + E.H - s.b) / 2);
+    },
+    toolChanged(t) {
+      for (const [k, b] of Object.entries(toolBtns)) b.classList.toggle('on', k === t);
+      if (brushBox) brushBox.hidden = !(t === 'brush' || t === 'area');
+    },
+    say: (t) => toast(t),
+    tool: (t) => tools.set(t),
+    spaces: () => items,
+    spaceNames: () => items.map((i) => i.space),
+    info: (sp) => items.find((i) => i.space === sp) || null,
+    recovery: (sp) => (doc.layer(sp) && doc.layer(sp).dirty ? null : recs.get(sp) || null),
+    freeSpace: () => ins.freeSpace(),
+    openLayer, openDraft, restore, dropRecovery, check,
+    fit(o) { const b = o.bounds(); if (!E.M.isEmpty(b)) E.flyTo(E.M.expand(b, Math.max(b.x1 - b.x0, b.y1 - b.y0) * 0.2)); },
+  };
+
+  function build() {
+    built = true;
+    /* верх */
+    top = el('header', 'ed-top');
+    const left = el('div', 'ed-top-l');
+    left.append(button('⏻ Выход', exit, { cls: 'ed-exit', title: 'Выйти из редактора' }));
+    menus = menuBar(MENUS());
+    left.append(menus);
+    crumbs = el('nav', 'ed-crumbs');
+    crumbs.setAttribute('aria-label', 'Путь по слоям');
+    const right = el('div', 'ed-top-r');
+    stateEl = el('span', 'ed-state');
+    bSave = button('Сохранить', () => saveAll(), { title: 'Черновик всех изменённых слоёв (Ctrl+S)' });
+    bPub = button('Опубликовать', () => publish(), { cls: 'ed-primary', title: 'Сделать сохранённое видимым на сайте' });
+    right.append(stateEl, button('Предпросмотр', () => previewOn(), { title: 'Tab' }), bSave, bPub);
+    top.append(left, crumbs, right);
+    /* низ: инструменты */
+    bar = el('div', 'ed-bar');
+    for (const t of TOOLS) {
+      const b = button(t.ico, () => tools.set(t.id), { cls: 'ed-tool', title: `${t.name} (${t.key})` });
+      toolBtns[t.id] = b;
+      bar.append(b);
+    }
+    bar.append(el('span', 'ed-sep'), button('+', () => ins.open(), { cls: 'ed-tool ed-add', title: 'Вставить (I или /)' }));
+    brushBox = el('label', 'ed-brush');
+    const br = el('input', 'ed-range');
+    br.type = 'range'; br.min = '1'; br.max = '60'; br.step = '0.5'; br.value = String(brushPx);
+    const bo = el('span', '', `${brushPx} px`);
+    br.addEventListener('input', () => { brushPx = +br.value; bo.textContent = `${brushPx} px`; store.set('brush', brushPx); });
+    brushBox.append(el('span', '', 'Кисть'), br, bo);
+    zoomEl = button('100%', () => E.fitAll(), { cls: 'ed-zoom', title: 'Масштаб; нажать — вся сцена (Shift+1)' });
+    bar.append(el('span', 'ed-sep'), brushBox, zoomEl);
+    shield = el('div', 'ed-shield');
+    shield.hidden = true;
+    shield.title = 'Предпросмотр: нажмите, чтобы ожил. Tab — назад к правке';
+    shield.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); shield.hidden = true; preview = 2; root.classList.add('ed-live'); });
+    shield.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
+    document.body.append(top, dock('left'), dock('right'), bar, shield);
+
+    ins = makeInsert(E, doc, ui);
+    tools = makeTools(E, doc, ui);
+    layers = makeLayers(E, doc, ui);
+    insp = makeInspector(E, doc, ui);
+    E.onCamera(() => { if (zoomEl) zoomEl.textContent = Math.round(E.cam.zoom * 100) + '%'; });
+    doc.on('change', status);
+    doc.on('saved', status);
+    doc.on('layer', () => { status(); drawCrumbs(); askRecovery(E.space); });
+    addEventListener('keydown', onKey);
+    addEventListener('beforeunload', (e) => { if (open && doc.dirtyLayers().length) { e.preventDefault(); e.returnValue = ''; } });
+    setInterval(keep, KEEP_EVERY);
+  }
+
+  async function enter() {
+    if (open) return;
+    if (!built) build();
+    open = true;
+    root.classList.add('ed-on');
+    try { sessionStorage.setItem('ed:open', '1'); } catch { /* без памяти вкладки */ }
+    E.closeAll();
+    doc.start();
+    tools.set(store.get('tool', 'select'));
+    refreshSpaces();
+  }
+
+  async function exit() {
+    if (preview) await previewOff();
+    const d = doc.dirtyLayers();
+    if (d.length) {
+      const v = await ask('Выйти из редактора?', `Не сохранены правки: ${d.map((l) => name(l.space)).join(', ')}.`, [
+        { label: 'Сохранить черновик и выйти', value: 'save', primary: true },
+        { label: 'Выйти без сохранения', value: 'drop', danger: true },
+        { label: 'Остаться', value: null },
+      ]);
+      if (!v) return;
+      if (v === 'save' && !(await saveAll())) return;
+      if (v === 'drop') for (const l of d) { io.drop(l.space); recs.delete(l.space); }
+    }
+    store.set('tool', tools.tool);
+    tools.cancel();
+    E.setTool('view');
+    const touched = doc.layers.size > 0;
+    doc.stop();
+    open = false;
+    root.classList.remove('ed-on');
+    try { sessionStorage.removeItem('ed:open'); } catch { /* без памяти вкладки */ }
+    // хранитель видит сайт как есть (опубликованное), а не черновик правки
+    if (touched) E.openSpace(E.space);
+  }
+
+  /* ---------- слои ---------- */
+  const name = (sp) => (ui.info(sp) ? ui.info(sp).label : sp === 'main' ? 'Главная' : sp);
+  async function refreshSpaces() {
+    const j = await io.spaces();
+    items = j.spaces;
+    layers.setSpaces(items);
+    drawCrumbs();
+    insp.render();
+  }
+  async function openLayer(sp, parent) {
+    if (!sp || sp === E.space) return;
+    if (parent) parents.set(sp, parent);
+    tools.cancel();
+    await E.openSpace(sp, parent || (ui.info(sp) && ui.info(sp).parent) || parents.get(sp));
+  }
+  function drawCrumbs() {
+    if (!crumbs) return;
+    crumbs.textContent = '';
+    const path = [];
+    const seen = new Set();
+    for (let sp = E.space; sp && !seen.has(sp); ) {
+      seen.add(sp);
+      path.unshift(sp);
+      sp = (ui.info(sp) && ui.info(sp).parent) || parents.get(sp) || (sp === 'main' ? null : 'main');
+    }
+    path.forEach((sp, i) => {
+      if (i) crumbs.append(el('span', 'ed-crumb-s', '›'));
+      const l = doc.layer(sp);
+      const b = button((l && l.dirty ? '● ' : '') + name(sp), () => openLayer(sp), { cls: 'ed-crumb' + (sp === E.space ? ' on' : ''), title: sp });
+      crumbs.append(b);
+    });
+  }
+  function status() {
+    if (!stateEl) return;
+    const d = doc.dirtyLayers();
+    stateEl.textContent = d.length ? `● Изменено${d.length > 1 ? ` (${d.length} слоя)` : ''}` : 'Сохранено';
+    stateEl.title = d.length ? d.map((l) => name(l.space)).join(', ') : '';
+    stateEl.classList.toggle('dirty', d.length > 0);
+    bSave.disabled = !d.length;
+    bPub.disabled = !d.length && !pubList().length;
+    drawCrumbs();
+  }
+
+  /* ---------- черновик, публикация ---------- */
+  async function saveAll() {
+    if (document.activeElement && typing({ target: document.activeElement })) document.activeElement.blur();
+    const d = doc.dirtyLayers();
+    if (!d.length) { toast('Изменений нет.'); return true; }
+    bSave.disabled = true;
+    const done = [];
+    for (const l of d) {
+      const r = await io.save(l.space, doc.saved(l));
+      if (r.error) { toast(`${name(l.space)}: не сохранено — ${r.error}`, true); status(); return false; }
+      doc.markSaved(l, r.version);
+      recs.delete(l.space);
+      done.push(`${name(l.space)} — черновик ${r.version}`);
+    }
+    toast('Сохранено: ' + done.join(', ') + '. На сайте — после «Опубликовать».');
+    refreshSpaces();
+    return true;
+  }
+  /** Что можно опубликовать: сохранённые здесь (или открытые) черновики, которых ещё нет на сайте. */
+  function pubList() {
+    return [...doc.layers.values()].filter((l) => l.version && !(ui.info(l.space) && ui.info(l.space).version === l.version));
+  }
+  async function publish() {
+    if (doc.dirtyLayers().length && !(await saveAll())) return;
+    const list = pubList();
+    if (!list.length) { toast('Публиковать нечего: всё сохранённое уже на сайте.'); return; }
+    const v = await ask('Опубликовать?', `На сайте станет видно: ${list.map((l) => `${name(l.space)} (версия ${l.version})`).join(', ')}.`, [
+      { label: 'Опубликовать', value: true, primary: true }, { label: 'Отмена', value: null },
+    ]);
+    if (!v) return;
+    for (const l of list) {
+      const r = await io.publish(l.version);
+      if (r.error) { toast(`${name(l.space)}: не опубликовано — ${r.error}`, true); break; }
+    }
+    toast('Опубликовано.');
+    await refreshSpaces();
+    status();
+  }
+  async function unpublish() {
+    const it = ui.info(E.space);
+    if (!it || !it.version) { toast('У этого слоя нет публикации.'); return; }
+    const v = await ask('Снять публикацию слоя?', `«${name(E.space)}»: на сайте вернётся предыдущая опубликованная версия (или пусто). Черновики остаются.`, [
+      { label: 'Снять', value: true, danger: true }, { label: 'Отмена', value: null },
+    ]);
+    if (!v) return;
+    const r = await io.rollback(E.space);
+    toast(r.error ? 'Не снято: ' + r.error : `Снято. На сайте: ${r.to}.`, !!r.error);
+    refreshSpaces();
+  }
+  async function openDraft(v) {
+    if (doc.dirty) { toast('Сначала сохраните или отмените правки этого слоя.', true); return; }
+    const j = await io.version(v);
+    if (!j) { toast('Черновик не загрузился.', true); return; }
+    doc.replace(j, null, true);
+    doc.cur.version = v;
+    toast(`Открыт черновик ${v}: правка продолжается от него.`);
+    insp.render();
+    status();
+  }
+
+  /* ---------- аварийная копия ---------- */
+  async function askRecovery(sp) {
+    if (recs.has(sp)) return;
+    recs.set(sp, null);
+    const r = await io.recovery(sp);
+    if (r && r.json) { recs.set(sp, r); if (sp === E.space) insp.render(); }
+  }
+  function restore() {
+    const r = recs.get(E.space);
+    if (!r) return;
+    try { doc.replace(JSON.parse(r.json), 'Восстановлено из аварийной копии'); } catch { toast('Копия не читается.', true); return; }
+    recs.delete(E.space);
+    toast('Правки восстановлены. Сохраните черновик — тогда копия на сервере уйдёт.');
+  }
+  async function dropRecovery() {
+    recs.delete(E.space);
+    await io.drop(E.space);
+    insp.render();
+  }
+  async function keep() {
+    if (!open) return;
+    for (const l of doc.dirtyLayers()) {
+      if (l.recAt === l.at) continue;
+      if (await io.keep(l.space, doc.saved(l))) l.recAt = l.at;
+    }
+  }
+
+  /* ---------- предпросмотр ---------- */
+  function previewOn() {
+    if (!open || preview) return;
+    saved = { tool: tools.tool, space: E.space, cam: { x: E.cam.x, y: E.cam.y, zoom: E.cam.zoom } };
+    tools.cancel();
+    if (menus) menus.close();
+    E.setTool('view');
+    root.classList.add('ed-preview');
+    shield.hidden = false;
+    preview = 1;
+  }
+  async function previewOff() {
+    if (!preview) return;
+    E.closeAll();
+    shield.hidden = true;
+    root.classList.remove('ed-preview', 'ed-live');
+    preview = 0;
+    if (E.space !== saved.space) await E.openSpace(saved.space, (ui.info(saved.space) && ui.info(saved.space).parent) || parents.get(saved.space));
+    E.cam.x = saved.cam.x; E.cam.y = saved.cam.y; E.cam.zoom = saved.cam.zoom;
+    E.cameraChanged();
+    tools.set(saved.tool);
+  }
+  async function check(id) {
+    previewOn();
+    shield.hidden = true;
+    preview = 2;
+    root.classList.add('ed-live');
+    if (!E.openFrameOf(id)) { await previewOff(); toast('Входу нужны область и содержимое.', true); }
+  }
+
+  /* ---------- правка ---------- */
+  function del() {
+    if (tools.tool === 'points' && tools.point) { tools.deletePoint(); return; }
+    const ids = new Set(doc.sel);
+    if (!ids.size) return;
+    for (let i = E.objects.length - 1; i >= 0; i--) if (ids.has(E.objects[i].id)) E.objects.splice(i, 1);
+    doc.select([]);
+    doc.commit('Удаление', null);
+  }
+  function undo() { const l = doc.undo(); toast(l ? 'Отменено: ' + l : 'Отменять нечего.'); }
+  function redo() { const l = doc.redo(); toast(l ? 'Повторено: ' + l : 'Повторять нечего.'); }
+  function enterInner() {
+    const t = doc.target();
+    const sp = t && t.inner ? t.inner : doc.peeked && doc.any(doc.peeked) && doc.any(doc.peeked).inner;
+    if (sp) openLayer(sp, E.space); else toast('У выделенного нет пространства внутри.');
+  }
+  function up() {
+    const p = (ui.info(E.space) && ui.info(E.space).parent) || parents.get(E.space) || (E.space === 'main' ? null : 'main');
+    if (p) openLayer(p);
+  }
+  function showJson() {
+    if (!jsonWin) {
+      jsonWin = new Win({ id: 'json', title: 'JSON слоя', at: { x: Math.max(16, innerWidth / 2 - 280), y: 70, w: 560 }, closable: true });
+      const ta = el('textarea', 'ed-in ed-json');
+      ta.spellcheck = false;
+      const r = el('div', 'ed-row');
+      r.append(
+        button('Из слоя', () => { ta.value = JSON.stringify(E.savedScene()); }),
+        button('Применить', () => {
+          try {
+            const j = JSON.parse(ta.value);
+            if (!j || !Array.isArray(j.objects)) throw new Error('нужно { "v": 2, "objects": [...] }');
+            doc.replace(j, 'JSON применён');
+            toast('JSON применён: отменяется Ctrl+Z. Сервер проверит его при сохранении.');
+          } catch (e) { toast('Ошибка JSON: ' + e.message, true); }
+        }, { cls: 'ed-primary' }),
+      );
+      jsonWin.body.append(ta, r);
+      jsonWin.ta = ta;
+    }
+    jsonWin.ta.value = JSON.stringify(E.savedScene());
+    jsonWin.show();
+  }
+
+  function MENUS() {
+    const has = () => doc.sel.length > 0;
+    return [
+      { label: 'Файл', items: () => [
+        { label: 'Сохранить черновик', key: 'Ctrl+S', fn: saveAll, off: !doc.dirtyLayers().length },
+        { label: 'Опубликовать…', fn: publish, off: !doc.dirtyLayers().length && !pubList().length },
+        { label: 'Снять публикацию слоя…', fn: unpublish, off: !(ui.info(E.space) && ui.info(E.space).version) },
+        '-',
+        { label: 'JSON слоя…', fn: showJson },
+        { label: 'Все версии (панель)', fn: () => window.open('/k/vitrina', '_blank', 'noopener') },
+        '-',
+        { label: 'Выйти из редактора', fn: exit },
+      ] },
+      { label: 'Правка', items: () => [
+        { label: 'Отменить' + (doc.canUndo ? ': ' + doc.cur.undo[doc.cur.undo.length - 1].label : ''), key: 'Ctrl+Z', fn: undo, off: !doc.canUndo },
+        { label: 'Повторить', key: 'Ctrl+Shift+Z', fn: redo, off: !doc.canRedo },
+        '-',
+        { label: 'Вырезать', key: 'Ctrl+X', fn: () => ins.cut(), off: !has() },
+        { label: 'Копировать', key: 'Ctrl+C', fn: () => ins.copy(), off: !has() },
+        { label: 'Вставить', key: 'Ctrl+V', fn: () => ins.paste(), off: !ins.clip },
+        { label: 'Дублировать', key: 'Ctrl+D', fn: () => ins.duplicate(), off: !has() },
+        { label: 'Удалить', key: 'Del', fn: del, off: !has() },
+        '-',
+        { label: 'Выделить всё', key: 'Ctrl+A', fn: () => doc.select(E.objects.filter((o) => !o.auto).map((o) => o.id)) },
+        { label: 'Снять выделение', key: 'Esc', fn: () => doc.select([]), off: !has() },
+      ] },
+      { label: 'Вставка', items: () => [
+        { label: 'Каталог…', key: 'I', fn: () => ins.open() },
+        '-',
+        ...ins.ITEMS.map((it) => ({ label: it.name, fn: () => ins.insert(it) })),
+      ] },
+      { label: 'Вид', items: () => [
+        { label: 'Предпросмотр', key: 'Tab', fn: previewOn },
+        { label: 'Вся сцена', key: 'Shift+1', fn: () => E.fitAll() },
+        { label: 'К выделенному', key: 'Shift+2', fn: () => tools.fitSelection(), off: !has() },
+        '-',
+        { label: (layers.win.open ? '✓ ' : '') + 'Панель «Слои»', fn: () => layers.win.toggle() },
+        { label: (insp.win.open ? '✓ ' : '') + 'Панель «Свойства»', fn: () => insp.win.toggle() },
+        { label: (mini ? '✓ ' : '') + 'Мини-карта', fn: () => { mini = !mini; store.set('mini', mini); E.cameraChanged(1); } },
+      ] },
+      { label: 'Слой', items: () => [
+        { label: 'Выше', key: ']', fn: () => layers.z('up'), off: !has() },
+        { label: 'Ниже', key: '[', fn: () => layers.z('down'), off: !has() },
+        { label: 'Наверх', key: 'Shift+]', fn: () => layers.z('top'), off: !has() },
+        { label: 'Вниз', key: 'Shift+[', fn: () => layers.z('bottom'), off: !has() },
+        '-',
+        { label: 'Открыть пространство внутри', key: 'Enter', fn: enterInner },
+        { label: 'На уровень выше', key: 'Alt+↑', fn: up, off: E.space === 'main' },
+        { label: 'Главная', fn: () => openLayer('main'), off: E.space === 'main' },
+      ] },
+    ];
+  }
+
+  /* ---------- клавиши ---------- */
+  function onKey(e) {
+    if (!open) return;
+    if (preview) {
+      if (e.key === 'Tab') { e.preventDefault(); previewOff(); }
+      return;
+    }
+    const mod = e.ctrlKey || e.metaKey, k = e.key.length === 1 ? e.key.toLowerCase() : e.key, code = e.code;
+    if (mod && code === 'KeyS') { e.preventDefault(); saveAll(); return; }
+    if (typing(e) || document.querySelector('.ed-modal-bg')) return;
+    if (e.key === 'Tab') { e.preventDefault(); previewOn(); return; }
+    if (mod) {
+      const act = { KeyZ: () => (e.shiftKey ? redo() : undo()), KeyY: redo, KeyD: () => ins.duplicate(), KeyC: () => ins.copy(), KeyX: () => ins.cut(), KeyV: () => ins.paste(), KeyA: () => doc.select(E.objects.filter((o) => !o.auto).map((o) => o.id)) }[code];
+      if (act) { e.preventDefault(); act(); }
+      return;
+    }
+    if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); up(); return; }
+    if (e.key === 'Escape') { tools.cancel(); doc.select([]); doc.peek(null); return; }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); del(); return; }
+    if (e.key === 'Enter') { enterInner(); return; }
+    if (code === 'Digit2' && e.shiftKey) { e.preventDefault(); tools.fitSelection(); return; }
+    if (code === 'BracketRight' || code === 'BracketLeft') { e.preventDefault(); layers.z(code === 'BracketRight' ? (e.shiftKey ? 'top' : 'up') : e.shiftKey ? 'bottom' : 'down'); return; }
+    const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (arrows && doc.sel.length) { e.preventDefault(); const s = e.shiftKey ? 10 : 1; tools.nudge(arrows[0] * s, arrows[1] * s); return; }
+    if (k === 'i' || k === '/') { e.preventDefault(); ins.open(); return; }
+    const t = TOOLS.find((x) => x.key.toLowerCase() === k || code === 'Key' + x.key);
+    if (t && !e.shiftKey && !e.altKey) tools.set(t.id);
+  }
+
+  try { if (sessionStorage.getItem('ed:open') === '1') enter(); } catch { /* без памяти вкладки */ }
+  return { enter, exit, doc };
+}

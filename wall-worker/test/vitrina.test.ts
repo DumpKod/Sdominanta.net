@@ -6,7 +6,7 @@ import * as M from '../public/vitrina/model.js';
 import { csrfOf, get, keeperCookie, login, O, otp, post } from './helpers';
 
 // Витрина: движок кисти — статический /vitrina.js, сцена — /vitrina/scene.json из базы (пусто — встроенная),
-// <nav> — из той же сцены. Редактор — /k/editor.js, только в сессии хранителя; версии сцены — в /k/vitrina.
+// <nav> — из той же сцены. Редактор — модули /k/ed/…, только в сессии хранителя; версии сцены — в /k/vitrina.
 
 const HTML = { Accept: 'text/html' };
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'self'";
@@ -15,7 +15,18 @@ const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 's
 import vitrinaJs from '../public/vitrina.js?raw';
 import vitrinaCss from '../public/vitrina.css?raw';
 import fontJson from '../public/vitrina/font.json?raw';
-import editorJs from '../src/pages/editor.js.txt?raw';
+import edMain from '../src/editor/main.js.txt?raw';
+import edDom from '../src/editor/dom.js.txt?raw';
+import edDoc from '../src/editor/doc.js.txt?raw';
+import edGeom from '../src/editor/geom.js.txt?raw';
+import edIo from '../src/editor/io.js.txt?raw';
+import edShell from '../src/editor/shell.js.txt?raw';
+import edLayers from '../src/editor/layers.js.txt?raw';
+import edInspector from '../src/editor/inspector.js.txt?raw';
+import edInsert from '../src/editor/insert.js.txt?raw';
+import edTools from '../src/editor/tools.js.txt?raw';
+import edCss from '../src/editor/editor.css.txt?raw';
+const editorJs = [edMain, edDom, edDoc, edGeom, edIo, edShell, edLayers, edInspector, edInsert, edTools].join('\n');
 import modelJs from '../public/vitrina/model.js?raw';
 import mig6 from '../migrations/0006-scenes.sql?raw';
 import mig7 from '../migrations/0007-world.sql?raw';
@@ -53,7 +64,7 @@ describe('Витрина: страница', () => {
     for (const headers of [HTML, { ...HTML, Cookie: await keeperCookie() }, { ...HTML, Cookie: '__Host-keeper=abc.def' }]) {
       const page = await (await get('/', headers)).text();
       expect(page).not.toContain('data-keeper');
-      expect(page).not.toContain('/k/editor.js');
+      expect(page).not.toContain('/k/ed/');
       expect(page).not.toContain('k-csrf');
     }
     const res = await get('/', HTML);
@@ -61,12 +72,13 @@ describe('Витрина: страница', () => {
     expect(res.headers.get('Vary')).toContain('Cookie');
   });
 
-  it('в сессии хранителя — <html data-keeper="1">, токен CSRF, /k/editor.js, no-store', async () => {
+  it('в сессии хранителя — <html data-keeper="1">, токен CSRF, редактор /k/ed/main.js, no-store', async () => {
     const { cookie } = await login();
     const res = await get('/', { ...HTML, Cookie: cookie });
     const page = await res.text();
     expect(page).toContain(`<html lang="ru" data-build="${buildId(env as never)}" data-keeper="1">`);
-    expect(page).toContain('<script src="/k/editor.js" defer></script>');
+    expect(page).toContain('<link rel="stylesheet" href="/k/ed/editor.css">');
+    expect(page).toContain('<script type="module" src="/k/ed/main.js"></script>');
     expect(page).toMatch(/<meta name="k-csrf" content="[A-Za-z0-9_-]{43}">/);
     expect(res.headers.get('Cache-Control')).toContain('no-store');
   });
@@ -94,7 +106,7 @@ describe('Витрина: файлы', () => {
     const page = await (await get('/', HTML)).text();
     expect(external(page)).toEqual([]);
     expect(page).not.toMatch(/<style|style="|@import|<link[^>]+href="(?!\/)/i);
-    for (const [name, text] of [['vitrina.js', vitrinaJs], ['model.js', modelJs], ['vitrina.css', vitrinaCss], ['editor.js', editorJs], ['font.json', fontJson]] as const) {
+    for (const [name, text] of [['vitrina.js', vitrinaJs], ['model.js', modelJs], ['vitrina.css', vitrinaCss], ['editor', editorJs], ['editor.css', edCss], ['font.json', fontJson]] as const) {
       expect(external(text.replace("'http://www.w3.org/2000/svg'", '')), name).toEqual([]); // пространство имён SVG — не адрес загрузки
       expect(text, name).not.toMatch(/fonts\.googleapis|fonts\.gstatic|@font-face|@import/i);
       expect(text, name).not.toMatch(/\burl\(/); // CSS url(…): ни картинок, ни шрифтов извне
@@ -111,7 +123,7 @@ describe('Витрина: файлы', () => {
     expect(vitrinaJs).toContain('document.hidden');
     expect(vitrinaJs).toContain("matchMedia('(prefers-reduced-motion: reduce)')");
     expect(vitrinaJs).not.toMatch(/shadowBlur\s*=/);
-    expect(vitrinaJs).not.toMatch(/\/k\/vitrina\/(?:save|publish|rollback)/); // читает хранителю сцену целиком (/k/vitrina/live), но правка и сохранение живут только в /k/editor.js
+    expect(vitrinaJs).not.toMatch(/\/k\/vitrina\/(?:save|publish|rollback)/); // читает хранителю сцену целиком (/k/vitrina/live), но правка и сохранение живут только в редакторе /k/ed/
     expect(vitrinaJs).not.toContain('localStorage');
     expect(editorJs).toContain("fetch(path, { method: 'POST'");
     expect(vitrinaJs).toContain("import * as M from '/vitrina/model.js'");
@@ -132,19 +144,28 @@ describe('Витрина: файлы', () => {
 });
 
 describe('Редактор и версии сцены', () => {
-  it('/k/editor.js — только в сессии: без cookie, с одной cookie ключа и с отозванной сессией — нет', async () => {
-    expect((await get('/k/editor.js')).status).toBe(403);
-    const key = await (await get('/k/editor.js', { Cookie: await keeperCookie() })).text();
-    expect(key).not.toContain('setInput');
+  it('редактор /k/ed/… — только в сессии: без cookie, с одной cookie ключа и с отозванной сессией — нет', async () => {
+    expect((await get('/k/ed/main.js')).status).toBe(403);
+    const key = await (await get('/k/ed/main.js', { Cookie: await keeperCookie() })).text();
+    expect(key).not.toContain('boot');
     const { cookie } = await login();
-    const res = await get('/k/editor.js', { Cookie: cookie });
+    const res = await get('/k/ed/main.js', { Cookie: cookie });
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('text/javascript');
-    expect(res.headers.get('Cache-Control')).toBe('no-store');
-    expect(await res.text()).toContain('E.setInput({');
+    expect(res.headers.get('Cache-Control')).toBe('private, no-cache');
+    const tag = res.headers.get('ETag')!;
+    expect(tag).toBe(`"ed-${buildId(env as never)}"`);
+    expect(await res.text()).toContain("import { boot } from './shell.js'");
+    // до нового деплоя браузер получает 304 — файлы редактора не качаются заново
+    expect((await get('/k/ed/main.js', { Cookie: cookie, 'If-None-Match': tag })).status).toBe(304);
+    const css = await get('/k/ed/editor.css', { Cookie: cookie });
+    expect(css.headers.get('Content-Type')).toContain('text/css');
+    for (const f of ['dom', 'doc', 'geom', 'io', 'shell', 'layers', 'inspector', 'insert', 'tools']) expect((await get(`/k/ed/${f}.js`, { Cookie: cookie })).status, f).toBe(200);
+    expect((await get('/k/ed/nope.js', { Cookie: cookie })).status).toBe(404);
+    expect((await get('/k/editor.js', { Cookie: cookie })).status).toBe(404); // старого редактора больше нет
     const csrf = csrfOf(await (await get('/k', { Cookie: cookie })).text());
     await post('/k/logout', { csrf }, cookie);
-    expect((await get('/k/editor.js', { Cookie: cookie })).status).toBe(403);
+    expect((await get('/k/ed/main.js', { Cookie: cookie })).status).toBe(403);
   });
 
   it('пустая база — встроенная сцена; сохранить → опубликовать → scene.json отдаёт новую версию', async () => {
@@ -413,7 +434,7 @@ describe('Бесконечный холст: модель (public/vitrina/model.
   });
 
   it('редактор: отмена/повтор, Shift+1/Shift+2, пробел и средняя кнопка, мини-карта, точки, слой и параметры', () => {
-    for (const s of ['new M.History()', 'hist.undo()', 'hist.redo()', "e.code === 'Digit2' && e.shiftKey", 'drawMini', 'nearSegment', 'deletePoint', 'rectFrom', 'fZ', 'M.STYLE', 'startHandle', 'applyHandle', '.stretch(', '.rotate('])
+    for (const s of ['undo()', 'redo()', "code === 'Digit2' && e.shiftKey", 'drawMini', 'nearSegment', 'deletePoint', 'rectFrom', 'fZ', 'M.STYLE', 'applyHandle', '.stretch(', '.rotate('])
       expect(editorJs, s).toContain(s);
     for (const s of ["e.code === 'Space'", 'e.button === 1', "e.code === 'Digit1' && e.shiftKey", 'clampTo', 'pinch', 'cull()'])
       expect(vitrinaJs, s).toContain(s);
@@ -480,7 +501,7 @@ describe('Алеф-нули: пространства внутри объект�
   it('движок: вход колёсиком вглубь, дрожь в упор, выход наружу, адрес через history; редактор помнит пространство', () => {
     for (const s of ['function goIn(', 'function goOut(', 'function depthWheel(', 'history.pushState', "addEventListener('popstate'", 'vitrina:space', 'pulse(', 'rim'])
       expect(vitrinaJs, s).toContain(s);
-    for (const s of ["space: E.space || 'main'", "addEventListener('vitrina:space'", 'fInner'])
+    for (const s of ["addEventListener('vitrina:space'", "addEventListener('vitrina:leaving'", 'setLoader(', 'openSpace('])
       expect(editorJs, s).toContain(s);
     const o = new M.SceneObject({ id: 'a', label: 'A', inner: 'deep', strokes: [] });
     expect(o.toJSON()).toMatchObject({ inner: 'deep' });
@@ -629,8 +650,8 @@ describe('Страницы сети внутри алеф-нуля и предп
     expect(res.headers.get('Content-Type')).toContain('text/markdown');
   });
 
-  it('предпросмотр в редакторе: панель прячется, витрина как у гостя', () => {
-    for (const s of ['function setPreview(', 'Вернуться к правке', "classList.toggle('kp-preview', on)", 'if (preview) return;']) expect(editorJs, s).toContain(s);
+  it('предпросмотр в редакторе: Tab прячет всё, первый клик оживляет, Tab — назад к правке', () => {
+    for (const s of ['function previewOn(', 'function previewOff(', "classList.add('ed-preview')", "e.key === 'Tab'", 'ed-shield']) expect(editorJs, s).toContain(s);
   });
 });
 

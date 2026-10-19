@@ -1,0 +1,171 @@
+// Вставка — дело секунды: каталог с поиском («+», I или /), дублирование, копирование и вставка между слоями.
+// Всё вставленное встаёт в центр видимой части холста, размером в пикселях экрана, и сразу выделено.
+// Виджеты SoundCloud и подобные чужие окна — просто «картинки» в рамке объекта; всё остальное — жилы континуума.
+
+import { Win, el, toast } from './dom.js';
+import { circle, r1, r2, rect, ring } from './geom.js';
+
+const NAME_RE = /^[a-z0-9-]{1,32}$/;
+
+export function makeInsert(E, doc, ui) {
+  const M = E.M;
+  /** Размер в пикселях экрана → мир. */
+  const px = (v) => v / E.cam.zoom;
+  const vein = (v) => r2(px(v));
+  const frame = (cx, cy, w, h, r) => ({ r: vein(r), pts: rect(cx, cy, px(w), px(h)), closed: true });
+  const has = (k, v) => E.objects.some((o) => o[k] === v);
+
+  /** Новое имя пространства внутри: не занятое ни слоем, ни узлом сети. */
+  function freeSpace() {
+    const taken = new Set([...ui.spaceNames(), ...E.objects.map((o) => o.id)]);
+    for (const o of E.objects) { if (o.inner) taken.add(o.inner); for (const d of o.doors || []) if (d.inner) taken.add(d.inner); }
+    const base = E.space === 'main' ? 'space' : E.space.slice(0, 24);
+    let n = 1;
+    while (taken.has(`${base}-${n}`)) n++;
+    return `${base}-${n}`;
+  }
+
+  const ITEMS = [
+    { group: 'Основа', name: 'Объект', desc: 'Кольцо жилой: дальше рисуйте кистью', make: (x, y) => ({ label: 'Новый объект', strokes: [{ r: vein(8), pts: ring(x, y, px(120)) }] }) },
+    { group: 'Основа', name: 'Рамка', desc: 'Прямоугольник жилой, с областью входа внутри', make: (x, y) => ({ label: 'Рамка', strokes: [frame(x, y, 360, 220, 4)], area: rect(x, y, px(360), px(220), px(10)) }) },
+    { group: 'Содержимое', name: 'Окно с текстом', desc: 'Рамка: приближение в неё раскрывает текст', make: (x, y) => ({ label: 'Окно', strokes: [frame(x, y, 360, 240, 4)], area: rect(x, y, px(360), px(240), px(10)), window: { title: 'Заголовок', text: 'Текст окна: по абзацу на строку.' } }) },
+    { group: 'Содержимое', name: 'Страница сайта', desc: 'Рамка: внутри — страница по адресу (выберите в свойствах)', make: (x, y) => ({ label: 'Страница', href: '/wall', strokes: [frame(x, y, 360, 240, 4)], area: rect(x, y, px(360), px(240), px(10)) }) },
+    { group: 'Глубина', name: 'Пространство', desc: 'Алеф-нуль: кольцо со своим слоем внутри', make: (x, y) => ({ label: 'Пространство', inner: freeSpace(), strokes: [{ r: vein(10), pts: ring(x, y, px(140)) }], area: circle(x, y, px(110)) }) },
+    { group: 'Живое', name: 'Плеер SoundCloud', desc: 'Виджет SoundCloud стоит в рамке и ездит с холстом (один на слой)', one: ['slot', 'player'], make: (x, y) => ({ label: 'Плеер', slot: 'player', strokes: [frame(x, y, 420, 200, 4)] }) },
+    { group: 'Живое', name: 'Вход хранителя', desc: 'Поле кода или разделы хранителя в рамке (один на слой)', one: ['slot', 'keeper'], make: (x, y) => ({ label: 'Вход хранителя', slot: 'keeper', strokes: [frame(x, y, 360, 120, 4)] }) },
+    { group: 'Живое', name: 'Плеер в окне', desc: 'Виджет плеера открывается приближением в рамку', make: (x, y) => widget(x, y, 'player', 'Плеер') },
+    { group: 'Хранителю', name: 'Очередь', desc: 'Окно очереди черновиков (видит только хранитель)', make: (x, y) => widget(x, y, 'queue', 'Очередь') },
+    { group: 'Хранителю', name: 'Музыка', desc: 'Окно выбора трека (видит только хранитель)', make: (x, y) => widget(x, y, 'music', 'Музыка') },
+    { group: 'Хранителю', name: 'Витрина', desc: 'Окно версий витрины (видит только хранитель)', make: (x, y) => widget(x, y, 'vitrina', 'Витрина') },
+  ];
+  function widget(x, y, w, label) {
+    return { label, widget: w, strokes: [frame(x, y, 360, 240, 4)], area: rect(x, y, px(360), px(240), px(10)) };
+  }
+
+  /** Поставить объект: id новый, слой — над выделенным (или над всеми). */
+  function place(src, label) {
+    if (E.objects.length >= 200) { toast('В слое до 200 объектов.', true); return null; }
+    const top = doc.first ? doc.first.z : 0;
+    const o = new M.SceneObject({ id: E.scene.newId(), z: top, ...src });
+    E.objects.push(o);
+    doc.select([o.id]);
+    doc.commit(label, [o.id]);
+    return o;
+  }
+  function insert(item) {
+    if (item.one && has(item.one[0], item.one[1])) {
+      const had = E.objects.find((o) => o[item.one[0]] === item.one[1]);
+      doc.select([had.id]);
+      toast(`${item.name} уже есть в этом слое: выделен.`);
+      return;
+    }
+    const [x, y] = ui.center();
+    const o = place(item.make(x, y), 'Вставка: ' + item.name);
+    if (o) toast(`${item.name} — в центре вида. Свойства справа.`);
+  }
+
+  /* ---------- каталог ---------- */
+  let win = null, list = null, q = null, cur = 0, shown = [];
+  function render() {
+    const s = q.value.trim().toLowerCase();
+    shown = ITEMS.filter((it) => !s || (it.name + ' ' + it.desc + ' ' + it.group).toLowerCase().includes(s));
+    cur = Math.min(cur, Math.max(0, shown.length - 1));
+    list.textContent = '';
+    let g = '';
+    shown.forEach((it, i) => {
+      if (it.group !== g) { g = it.group; list.append(el('div', 'ed-cat-g', g)); }
+      const b = el('button', 'ed-cat-i' + (i === cur ? ' on' : ''));
+      b.type = 'button';
+      b.append(el('b', '', it.name), el('span', '', it.desc));
+      b.addEventListener('click', () => { insert(it); close(); });
+      b.addEventListener('pointerenter', () => { cur = i; for (const n of list.querySelectorAll('.ed-cat-i')) n.classList.toggle('on', n === b); });
+      list.append(b);
+    });
+    if (!shown.length) list.append(el('p', 'ed-hint', 'Ничего не нашлось.'));
+  }
+  function open() {
+    if (!win) {
+      win = new Win({ id: 'insert', title: 'Вставить', at: { x: Math.max(16, innerWidth / 2 - 180), y: 90, w: 360 }, closable: true, cls: 'ed-cat' });
+      q = el('input', 'ed-in');
+      q.placeholder = 'Поиск: окно, плеер, пространство…';
+      q.spellcheck = false;
+      list = el('div', 'ed-cat-l');
+      win.body.append(q, list);
+      q.addEventListener('input', () => { cur = 0; render(); });
+      q.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); cur = Math.min(shown.length - 1, cur + 1); render(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); cur = Math.max(0, cur - 1); render(); }
+        else if (e.key === 'Enter') { e.preventDefault(); if (shown[cur]) { insert(shown[cur]); close(); } }
+        else if (e.key === 'Escape') { e.preventDefault(); close(); }
+        e.stopPropagation();
+      });
+    }
+    q.value = '';
+    cur = 0;
+    render();
+    win.show();
+    q.focus();
+  }
+  function close() { if (win) win.hide(); }
+
+  /* ---------- дублировать, копировать, вставить (и между слоями) ---------- */
+  let clip = null;
+  const copy = () => {
+    const objs = doc.selected();
+    if (!objs.length) return false;
+    clip = { from: E.space, objs: objs.map((o) => JSON.parse(JSON.stringify(o))) };
+    return true;
+  };
+  /** Копии с новыми id; связи внутри копируемых переводятся на новые id. dx, dy — сдвиг в мире. */
+  function paste(src, dx, dy, label) {
+    if (E.objects.length + src.length > 200) { toast('В слое до 200 объектов.', true); return; }
+    const map = new Map(), ids = [];
+    for (const j of src) {
+      let id = j.id;
+      if (E.objects.some((o) => o.id === id) || map.has(id) || [...map.values()].includes(id)) {
+        const m = /^(.*?)(-\d+)?$/.exec(id), base = (m && m[1]) || 'obj';
+        let n = 2;
+        while (E.objects.some((o) => o.id === `${base}-${n}`) || [...map.values()].includes(`${base}-${n}`)) n++;
+        id = `${base}-${n}`.slice(0, 32);
+      }
+      map.set(j.id, id);
+    }
+    for (const j of src) {
+      const o = new M.SceneObject({ ...j, id: map.get(j.id), auto: null });
+      if (o.links) o.links = o.links.map((l) => ({ ...l, to: map.get(l.to) || l.to }));
+      if (o.slot && E.objects.some((x) => x.slot === o.slot)) o.slot = null; // место плеера и входа — одно на слой
+      o.translate(dx, dy);
+      E.objects.push(o);
+      ids.push(o.id);
+    }
+    doc.select(ids);
+    doc.commit(label, null);
+  }
+  return {
+    open, close, insert, ITEMS, freeSpace,
+    duplicate() { const s = doc.selected(); if (s.length) paste(s.map((o) => JSON.parse(JSON.stringify(o))), px(24), px(24), 'Дублирование'); },
+    copy() { if (copy()) toast(`Скопировано: ${clip.objs.length}. Вставка — Ctrl+V, можно в другом слое.`); },
+    cut() {
+      if (!copy()) return;
+      const ids = new Set(doc.sel);
+      for (let i = E.objects.length - 1; i >= 0; i--) if (ids.has(E.objects[i].id)) E.objects.splice(i, 1);
+      doc.select([]);
+      doc.commit('Вырезать', null);
+      toast(`Вырезано: ${clip.objs.length}. Вставьте в нужном слое — Ctrl+V.`);
+    },
+    paste() {
+      if (!clip) { toast('Буфер пуст: сначала скопируйте (Ctrl+C).'); return; }
+      const same = clip.from === E.space;
+      // в другой слой — в центр вида, в тот же — со сдвигом
+      let dx = px(24), dy = px(24);
+      if (!same) {
+        const b = clip.objs.reduce((a, j) => M.union(a, new M.SceneObject(j).bounds()), { ...M.EMPTY });
+        const [x, y] = ui.center();
+        dx = r1(x - (b.x0 + b.x1) / 2); dy = r1(y - (b.y0 + b.y1) / 2);
+      }
+      paste(clip.objs, dx, dy, 'Вставка из буфера');
+    },
+    get clip() { return clip; },
+    NAME_RE,
+  };
+}

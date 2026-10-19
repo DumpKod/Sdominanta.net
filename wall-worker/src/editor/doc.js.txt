@@ -1,0 +1,254 @@
+// Документ редактора: слои (пространства), правки, отмена, выделение.
+// Слой — сцена одного пространства. Открытый слой живёт в движке (E.scene) и правится на месте; уходя в другой слой,
+// движок отдаёт сцену событием vitrina:leaving — она остаётся здесь строкой и вернётся при повторном входе (setLoader).
+// Отмена хранит не снимки сцены, а разницу: какие объекты были и стали (строками), порядок объектов и параметры
+// пространства — только если они менялись. Сотни шагов отмены стоят столько, сколько сами правки.
+// Объекты, построенные сервером из узлов сети (auto), не правятся и в разницу не входят.
+
+const LIMIT = 300;
+
+class Layer {
+  constructor(space) {
+    this.space = space;
+    /** вся сцена строкой (с узлами сети), пока слой не открыт; null — брать с сайта */
+    this.json = null;
+    this.undo = [];
+    this.redo = [];
+    /** номер последней правки в стопке отмены; совпадает с savedAt — изменений нет */
+    this.at = 0;
+    this.savedAt = 0;
+    /** правка, с которой сделана аварийная копия */
+    this.recAt = 0;
+    /** версия, от которой идёт правка (опубликованная или открытый черновик) */
+    this.version = 0;
+    this.strs = new Map();
+    this.order = [];
+    this.spaceStr = 'null';
+  }
+  get dirty() { return this.at !== this.savedAt; }
+}
+
+export class Doc {
+  constructor(E) {
+    this.E = E;
+    this.M = E.M;
+    this.layers = new Map();
+    this.cur = null;
+    /** выделенные объекты (id) и область первого: -1 — основная, k — doors[k] */
+    this.sel = [];
+    this.door = -1;
+    this.peeked = null;
+    this.n = 0;
+    this.subs = new Map();
+    this.active = false;
+    document.addEventListener('vitrina:leaving', (e) => {
+      if (!this.active) return;
+      const l = this.layers.get(e.detail.space);
+      if (l) l.json = JSON.stringify(e.detail.scene.toJSON());
+    });
+    document.addEventListener('vitrina:space', () => { if (this.active) this.enter(); });
+  }
+
+  /** Редактор открыт: несохранённые слои подставляются вместо сайта при любом переходе (и в предпросмотре). */
+  start() {
+    this.active = true;
+    this.E.setLoader((sp) => {
+      if (sp === this.E.space) return this.E.scene.toJSON();
+      const l = this.layers.get(sp);
+      return l && l.json ? JSON.parse(l.json) : null;
+    });
+    this.enter();
+  }
+  /** Редактор закрыт: правки выброшены, сайт — как у гостя-хранителя. */
+  stop() {
+    this.active = false;
+    this.E.setLoader(null);
+    this.layers.clear();
+    this.cur = null;
+    this.sel = [];
+  }
+
+  on(name, fn) { (this.subs.get(name) || this.subs.set(name, new Set()).get(name)).add(fn); }
+  emit(name, data) { for (const fn of this.subs.get(name) || []) fn(data); }
+
+  get space() { return this.E.space; }
+  get dirty() { return !!this.cur && this.cur.dirty; }
+  dirtyLayers() { return [...this.layers.values()].filter((l) => l.dirty); }
+  layer(sp) { return this.layers.get(sp) || null; }
+
+  /** Вход в слой, который сейчас в движке. */
+  enter() {
+    const sp = this.E.space;
+    let l = this.layers.get(sp);
+    if (!l) { l = new Layer(sp); this.layers.set(sp, l); }
+    this.cur = l;
+    this.snap(l);
+    this.sel = [];
+    this.door = -1;
+    this.peeked = null;
+    this.emit('layer', l);
+    this.emit('sel');
+  }
+  snap(l) {
+    l.strs = new Map();
+    for (const o of this.E.objects) if (!o.auto) l.strs.set(o.id, JSON.stringify(o));
+    l.order = this.E.objects.map((o) => o.id);
+    l.spaceStr = JSON.stringify(this.E.scene.space || null);
+  }
+
+  /* ---------------- выделение ---------------- */
+
+  byId(id) { return this.E.objects.find((o) => o.id === id && !o.auto) || null; }
+  any(id) { return this.E.objects.find((o) => o.id === id) || null; }
+  selected() { return this.sel.map((id) => this.byId(id)).filter(Boolean); }
+  get first() { return this.byId(this.sel[0]); }
+  select(ids, door = -1) {
+    const next = ids.filter((id, i) => ids.indexOf(id) === i && this.byId(id));
+    const same = next.length === this.sel.length && next.every((id, i) => id === this.sel[i]) && door === this.door;
+    this.sel = next;
+    this.door = next.length ? door : -1;
+    if (next.length) this.peeked = null;
+    if (!same) { this.emit('sel'); this.E.cameraChanged(1); }
+  }
+  /** Узел сети под курсором: его можно только посмотреть (свойства без правки). */
+  peek(id) {
+    if (this.peeked === id) return;
+    this.peeked = id;
+    this.emit('sel');
+    this.E.cameraChanged(1);
+  }
+  /** Что правят поля входа: основная область — объект, область-вход — её запись в doors. */
+  target() {
+    const o = this.first;
+    if (!o) return null;
+    if (this.door >= 0 && o.doors && o.doors[this.door]) return o.doors[this.door];
+    this.door = -1;
+    return o;
+  }
+
+  /* ---------------- правки и отмена ---------------- */
+
+  /**
+   * Правка закончена: записать разницу. ids — какие объекты могли измениться (быстрее), без них — сверка всех.
+   * rebuild — пересобрать жилы движка.
+   */
+  commit(label, ids, rebuild = true) {
+    const l = this.cur, E = this.E;
+    if (!l) return false;
+    if (rebuild) E.rebuild(4);
+    const ch = [];
+    if (ids) {
+      for (const id of new Set(ids)) {
+        const o = this.byId(id), s = o ? JSON.stringify(o) : null, b = l.strs.has(id) ? l.strs.get(id) : null;
+        if (s !== b) ch.push({ id, before: b, after: s });
+      }
+    } else {
+      const seen = new Set();
+      for (const o of E.objects) {
+        if (o.auto) continue;
+        seen.add(o.id);
+        const s = JSON.stringify(o), b = l.strs.has(o.id) ? l.strs.get(o.id) : null;
+        if (s !== b) ch.push({ id: o.id, before: b, after: s });
+      }
+      for (const [id, b] of l.strs) if (!seen.has(id)) ch.push({ id, before: b, after: null });
+    }
+    const order = E.objects.map((o) => o.id);
+    const ordCh = order.length !== l.order.length || order.some((id, i) => id !== l.order[i]);
+    const sp = JSON.stringify(E.scene.space || null), spCh = sp !== l.spaceStr;
+    if (!ch.length && !ordCh && !spCh) return false;
+    const e = { n: ++this.n, label, ch, ob: ordCh ? l.order : null, oa: ordCh ? order : null, sb: spCh ? l.spaceStr : null, sa: spCh ? sp : null };
+    for (const c of ch) { if (c.after == null) l.strs.delete(c.id); else l.strs.set(c.id, c.after); }
+    l.order = order;
+    l.spaceStr = sp;
+    l.undo.push(e);
+    if (l.undo.length > LIMIT) l.undo.shift();
+    l.redo = [];
+    l.at = e.n;
+    this.emit('change', e);
+    return true;
+  }
+  get canUndo() { return !!this.cur && this.cur.undo.length > 0; }
+  get canRedo() { return !!this.cur && this.cur.redo.length > 0; }
+  undo() {
+    const l = this.cur, e = l && l.undo.pop();
+    if (!e) return null;
+    this.apply(l, e, true);
+    l.redo.push(e);
+    l.at = l.undo.length ? l.undo[l.undo.length - 1].n : 0;
+    this.after();
+    return e.label;
+  }
+  redo() {
+    const l = this.cur, e = l && l.redo.pop();
+    if (!e) return null;
+    this.apply(l, e, false);
+    l.undo.push(e);
+    l.at = e.n;
+    this.after();
+    return e.label;
+  }
+  apply(l, e, back) {
+    const objs = this.E.objects;
+    for (const c of e.ch) {
+      const want = back ? c.before : c.after;
+      const i = objs.findIndex((o) => o.id === c.id && !o.auto);
+      if (want == null) { if (i >= 0) objs.splice(i, 1); l.strs.delete(c.id); }
+      else {
+        const o = new this.M.SceneObject(JSON.parse(want));
+        if (i >= 0) objs[i] = o; else objs.push(o);
+        l.strs.set(c.id, want);
+      }
+    }
+    const ord = back ? e.ob : e.oa;
+    if (ord) this.reorder(ord);
+    if (e.sb !== null || e.sa !== null) {
+      const s = back ? e.sb : e.sa;
+      this.E.scene.space = JSON.parse(s);
+      l.spaceStr = s;
+    }
+    l.order = objs.map((o) => o.id);
+  }
+  /** Порядок объектов по списку id (кого нет в списке — в конце, как были). */
+  reorder(ids) {
+    const objs = this.E.objects, by = new Map(objs.map((o) => [o.id, o])), out = [];
+    for (const id of ids) { const o = by.get(id); if (o) { out.push(o); by.delete(id); } }
+    for (const o of objs) if (by.has(o.id)) out.push(o);
+    objs.splice(0, objs.length, ...out);
+  }
+  after() {
+    this.sel = this.sel.filter((id) => this.byId(id));
+    this.E.rebuild(4);
+    this.emit('change');
+    this.emit('sel');
+  }
+
+  /** Заменить слой целиком (черновик, аварийная копия, JSON): узлы сети остаются; history — правка или «открыт файл». */
+  replace(json, label, asFile) {
+    const autos = this.E.objects.filter((o) => o.auto).map((o) => o.toJSON());
+    this.E.load({ ...json, objects: [...autos, ...(json.objects || []).filter((o) => !o.auto)] });
+    if (asFile) {
+      const l = this.cur;
+      l.undo = []; l.redo = []; l.at = 0; l.savedAt = 0;
+      this.snap(l);
+      this.sel = [];
+      this.emit('change');
+      this.emit('sel');
+    } else this.commit(label, null, false), this.after();
+  }
+
+  /** Сцена слоя для сохранения: без узлов сети. */
+  saved(l = this.cur) {
+    if (l === this.cur) return this.E.savedScene();
+    const j = JSON.parse(l.json);
+    j.objects = j.objects.filter((o) => !o.auto);
+    return j;
+  }
+  markSaved(l, version) {
+    l.savedAt = l.at;
+    l.recAt = l.at;
+    if (version) l.version = version;
+    this.emit('saved', l);
+  }
+  /** Слой без правок: выбросить (следующий вход возьмёт его с сайта). */
+  forget(sp) { this.layers.delete(sp); }
+}

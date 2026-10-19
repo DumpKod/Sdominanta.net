@@ -137,3 +137,4 @@ CREATE TABLE docs (
   state TEXT NOT NULL, created_at INTEGER NOT NULL, published_at INTEGER
 );
 CREATE INDEX docs_state ON docs (state);
+CREATE TABLE scene_recovery (space TEXT PRIMARY KEY, json TEXT NOT NULL, at INTEGER NOT NULL, by_sign TEXT NOT NULL);

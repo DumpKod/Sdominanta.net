@@ -1,0 +1,236 @@
+// Окна и элементы интерфейса редактора. Система окон общая: по ней же потом встанут разделы хранителя на главной
+// (вход, операционная). Окно — заголовок и тело; живёт в доке у края экрана (left / right) или плавает над холстом.
+// Свёрнутость, ширина доков и место плавающих окон — в localStorage браузера хранителя (гостям этот код не отдаётся).
+
+/** Память раскладки: ошибки хранилища (приватный режим) не мешают работе. */
+export const store = {
+  get(k, d) { try { const v = localStorage.getItem('ed:' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('ed:' + k, JSON.stringify(v)); } catch { /* без памяти */ } },
+};
+
+export function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+export function button(label, fn, o = {}) {
+  const b = el('button', 'ed-b' + (o.cls ? ' ' + o.cls : ''), label);
+  b.type = 'button';
+  if (o.title) b.title = o.title;
+  b.addEventListener('click', (e) => { e.preventDefault(); fn(e); });
+  return b;
+}
+
+/** Поле с подписью: { root, input }. kind — input | textarea | select | number | range. */
+export function field(label, kind = 'input', o = {}) {
+  const root = el('label', 'ed-f' + (o.cls ? ' ' + o.cls : ''));
+  const cap = el('span', 'ed-cap', label);
+  let input;
+  if (kind === 'textarea') { input = el('textarea', 'ed-in'); input.rows = o.rows || 3; }
+  else if (kind === 'select') input = el('select', 'ed-in');
+  else { input = el('input', 'ed-in'); input.type = kind === 'input' ? 'text' : kind; }
+  if (o.placeholder) input.placeholder = o.placeholder;
+  input.spellcheck = false;
+  root.append(cap, input);
+  if (o.hint) root.append(el('small', 'ed-hint', o.hint));
+  return { root, input, cap };
+}
+
+export function options(select, list, value) {
+  select.textContent = '';
+  for (const [v, t] of list) select.append(new Option(t, v));
+  if (value != null) select.value = value;
+}
+
+/** Ползунок с числом и сбросом «по умолчанию»: { root, set(value, own), onInput, onChange, onReset }. */
+export function slider(label, lo, hi, h = {}) {
+  const root = el('label', 'ed-f ed-sl');
+  const top = el('span', 'ed-cap', label);
+  const out = el('output', 'ed-out');
+  const reset = el('button', 'ed-x', '×');
+  reset.type = 'button';
+  reset.title = 'по умолчанию';
+  top.append(out, reset);
+  const r = el('input', 'ed-range');
+  r.type = 'range'; r.min = String(lo); r.max = String(hi); r.step = String((hi - lo) / 200);
+  root.append(top, r);
+  const fmt = (v) => String(Math.round(v * 1000) / 1000);
+  r.addEventListener('input', () => { out.textContent = fmt(+r.value); reset.hidden = false; h.input && h.input(Math.round(+r.value * 1000) / 1000); });
+  r.addEventListener('change', () => h.change && h.change());
+  reset.addEventListener('click', (e) => { e.preventDefault(); h.reset && h.reset(); });
+  return {
+    root, r,
+    set(v, own) { r.value = String(v); out.textContent = fmt(v) + (own ? '' : ' · общий'); reset.hidden = !own; },
+    set disabled(d) { r.disabled = d; },
+  };
+}
+
+/** Раскрываемый раздел: { root, body }. Открытость запоминается по ключу. */
+export function section(title, key, open = true) {
+  const root = el('details', 'ed-sec');
+  root.open = store.get('sec:' + key, open);
+  const sum = el('summary', '', title);
+  const body = el('div', 'ed-sec-b');
+  root.append(sum, body);
+  root.addEventListener('toggle', () => store.set('sec:' + key, root.open));
+  return { root, body, sum };
+}
+
+/* ---------------- доки и окна ---------------- */
+
+const docks = {};
+/** Док у края экрана: колонка окон, ширину тянут за внутренний край. */
+export function dock(side, width = 280) {
+  if (docks[side]) return docks[side];
+  const root = el('div', `ed-dock ed-dock-${side}`);
+  const grip = el('div', 'ed-grip');
+  root.append(grip);
+  let w = store.get('dock:' + side, width);
+  const apply = () => { root.style.width = w + 'px'; };
+  apply();
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    const x0 = e.clientX, w0 = w;
+    const move = (ev) => { w = Math.max(200, Math.min(560, w0 + (side === 'left' ? ev.clientX - x0 : x0 - ev.clientX))); apply(); };
+    const up = () => { grip.removeEventListener('pointermove', move); store.set('dock:' + side, w); window.dispatchEvent(new Event('ed:layout')); };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up, { once: true });
+  });
+  docks[side] = root;
+  return root;
+}
+
+/**
+ * Окно: { root, body, head, show(), hide(), toggle(), open, setTitle() }.
+ * o: { id, title, dock: 'left' | 'right' | null, at: {x, y, w}, closable, grow — тянется по высоте дока }.
+ */
+export class Win {
+  constructor(o) {
+    this.o = o;
+    this.root = el('section', 'ed-win' + (o.dock ? '' : ' ed-float') + (o.grow ? ' ed-grow' : '') + (o.cls ? ' ' + o.cls : ''));
+    this.head = el('header', 'ed-win-h');
+    this.title = el('span', 'ed-win-t', o.title);
+    this.acts = el('span', 'ed-win-a');
+    this.body = el('div', 'ed-win-b');
+    const fold = button('▾', () => this.fold(!this.folded), { cls: 'ed-ico', title: 'Свернуть' });
+    this.acts.append(fold);
+    if (o.closable) this.acts.append(button('×', () => this.hide(), { cls: 'ed-ico', title: 'Закрыть' }));
+    this.head.append(this.title, this.acts);
+    this.root.append(this.head, this.body);
+    this.head.addEventListener('dblclick', (e) => { if (e.target === this.head || e.target === this.title) this.fold(!this.folded); });
+    this.folded = false;
+    this.fold(store.get(`win:${o.id}:fold`, false), true);
+    if (!o.dock) this.floating();
+    (o.dock ? dock(o.dock) : document.body).append(this.root);
+    if (store.get(`win:${o.id}:hidden`, !!o.hidden)) this.root.hidden = true;
+  }
+  fold(on, quiet) {
+    this.folded = on;
+    this.root.classList.toggle('folded', on);
+    if (!quiet) store.set(`win:${this.o.id}:fold`, on);
+  }
+  get open() { return !this.root.hidden; }
+  show() { this.root.hidden = false; store.set(`win:${this.o.id}:hidden`, false); if (!this.o.dock) this.clamp(); window.dispatchEvent(new Event('ed:layout')); return this; }
+  hide() { this.root.hidden = true; store.set(`win:${this.o.id}:hidden`, true); window.dispatchEvent(new Event('ed:layout')); if (this.onhide) this.onhide(); return this; }
+  toggle(on = !this.open) { return on ? this.show() : this.hide(); }
+  setTitle(t) { this.title.textContent = t; }
+  /** Плавающее окно: таскается за заголовок и не уезжает за экран. */
+  floating() {
+    const at = store.get(`win:${this.o.id}:at`, this.o.at || { x: 320, y: 80 });
+    this.x = at.x; this.y = at.y;
+    if (this.o.at && this.o.at.w) this.root.style.width = this.o.at.w + 'px';
+    this.place();
+    this.head.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      e.preventDefault();
+      this.head.setPointerCapture(e.pointerId);
+      const x0 = e.clientX - this.x, y0 = e.clientY - this.y;
+      const move = (ev) => { this.x = ev.clientX - x0; this.y = ev.clientY - y0; this.clamp(); };
+      const up = () => { this.head.removeEventListener('pointermove', move); store.set(`win:${this.o.id}:at`, { x: this.x, y: this.y }); };
+      this.head.addEventListener('pointermove', move);
+      this.head.addEventListener('pointerup', up, { once: true });
+    });
+  }
+  clamp() {
+    const w = this.root.offsetWidth || 300;
+    this.x = Math.max(8 - w + 80, Math.min(innerWidth - 80, this.x));
+    this.y = Math.max(44, Math.min(innerHeight - 40, this.y));
+    this.place();
+  }
+  place() { this.root.style.left = this.x + 'px'; this.root.style.top = this.y + 'px'; }
+}
+
+/** Окно-вопрос посреди экрана: Promise со значением нажатой кнопки (Esc — null). */
+export function ask(title, text, buttons) {
+  return new Promise((done) => {
+    const back = el('div', 'ed-modal-bg');
+    const box = el('div', 'ed-modal');
+    box.setAttribute('role', 'dialog');
+    box.append(el('h2', '', title));
+    if (text) for (const p of String(text).split('\n')) box.append(el('p', '', p));
+    const row = el('div', 'ed-row ed-modal-r');
+    const close = (v) => { back.remove(); removeEventListener('keydown', key, true); done(v); };
+    for (const b of buttons) row.append(button(b.label, () => close(b.value), { cls: b.primary ? 'ed-primary' : b.danger ? 'ed-danger' : '' }));
+    box.append(row);
+    back.append(box);
+    document.body.append(back);
+    const key = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(null); } };
+    addEventListener('keydown', key, true);
+    (row.querySelector('.ed-primary') || row.firstChild).focus();
+  });
+}
+
+/** Короткая строка внизу экрана: что сделано или почему нет. */
+let toastEl = null, toastT = 0;
+export function toast(text, bad) {
+  if (!toastEl) { toastEl = el('div', 'ed-toast'); toastEl.setAttribute('aria-live', 'polite'); document.body.append(toastEl); }
+  toastEl.textContent = text;
+  toastEl.classList.toggle('bad', !!bad);
+  toastEl.classList.add('on');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => toastEl.classList.remove('on'), bad ? 6000 : 3200);
+}
+
+/**
+ * Строка меню как в программах: menus — [{ label, items: () => [{ label, key, fn, off } | '-'] }].
+ * Открытое меню переходит на соседнее при наведении; Esc и клик мимо закрывают.
+ */
+export function menuBar(menus) {
+  const bar = el('nav', 'ed-menus');
+  let open = null;
+  const close = () => { if (open) { open.list.remove(); open.btn.classList.remove('on'); open = null; } };
+  const show = (m, btn) => {
+    close();
+    const list = el('div', 'ed-menu');
+    for (const it of m.items()) {
+      if (it === '-') { list.append(el('hr')); continue; }
+      const b = el('button', 'ed-mi');
+      b.type = 'button';
+      b.append(el('span', '', it.label), el('kbd', '', it.key || ''));
+      b.disabled = !!it.off;
+      b.addEventListener('click', () => { close(); it.fn(); });
+      list.append(b);
+    }
+    const r = btn.getBoundingClientRect();
+    list.style.left = r.left + 'px';
+    list.style.top = r.bottom + 'px';
+    document.body.append(list);
+    btn.classList.add('on');
+    open = { list, btn, m };
+  };
+  for (const m of menus) {
+    const btn = button(m.label, () => (open && open.m === m ? close() : show(m, btn)), { cls: 'ed-mb' });
+    btn.addEventListener('pointerenter', () => { if (open && open.m !== m) show(m, btn); });
+    bar.append(btn);
+  }
+  addEventListener('pointerdown', (e) => { if (open && !e.target.closest('.ed-menu, .ed-mb')) close(); }, true);
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && open) { e.stopPropagation(); close(); } }, true);
+  bar.close = close;
+  return bar;
+}
+
+/** Поле ввода не отдаёт клавиши горячим клавишам редактора и движка. */
+export const typing = (e) => !!(e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable));

@@ -77,7 +77,7 @@
 - `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок кисти хранителя (модуль), `public/vitrina/model.js` —
   мир, камера, объекты, отсечение, история (без DOM, импортируют тесты и `tools/`), `public/vitrina/font.json` — шрифт из жил.
 - `src/scene.ts` — формат, проверка и чтение сцены; `src/scene-default.json` — встроенная сцена; `src/vitrina.ts` — страница витрины.
-- `src/pages/editor.js.txt` — редактор витрины (отдаётся как `/k/editor.js` только в сессии хранителя).
+- `src/editor/*.js.txt` — редактор витрины v2 (модули ES, отдаются как `/k/ed/…` только в сессии хранителя), `src/editor.ts` — его файлы, карта слоёв, аварийная копия.
 - `tools/` — `build-scene.mjs` (сцена по умолчанию и шрифт, Playwright), `upgrade-scene.mjs` (сцена v1 → мир) и `trace.js`
   (автотрассировка движка); в Worker не входят.
 - `src/rate.ts` — лимиты. `src/post.ts` — правила/пропуск, почтомат, review/approve/reject (ядро — `publishDraft`, `declineDraft`).

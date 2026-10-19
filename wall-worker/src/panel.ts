@@ -6,7 +6,7 @@ import { DEFAULT_SCENE, SCENE_MAX, SPACE_RE, publishedScene, SceneRow, validateS
 import { bumpVersion } from './post';
 import { jsonResponse, liveScene, sceneOut, spaceUrl, vitrinaPage } from './vitrina';
 import { b64url, clientIp, enc, Env, fmtTime, hmacSha256, html, nowSec, plain, randomBytes, sha256hex, timingSafeEqual } from './util';
-import editorJs from './pages/editor.js.txt';
+import { dropRecovery, editorFile, getRecovery, saveRecovery, spacesTree } from './editor';
 import { BANDS_MAX, currentTrack, hasKey, normTrackUrl, resolveTrack, saveBands, Track } from './music';
 
 // Панель хранителя /k — простой HTML без скриптов.
@@ -161,6 +161,8 @@ async function header(env: Env, sign: string, csrf: string, path = '', now = now
 
 // Сохранение сцены несёт её JSON в форме: до 256 КБ, а кириллица в urlencoded растёт до 9 раз — потолок с запасом.
 const SCENE_FORM_MAX = SCENE_MAX * 9 + FORM_MAX;
+/** Чтения редактора без лимита панели: его файлы, сцены и версии слоёв, карта слоёв, аварийные копии. */
+const LIGHT_RE = /^\/(?:ed\/[a-z]+\.(?:js|css)|vitrina\/(?:live\/[a-z0-9-]{1,32}\.json|scene\/\d{1,9}\.json|recover\/[a-z0-9-]{1,32}\.json|spaces\.json))$/;
 /** Спектр трека приходит base64url: 4 знака на 3 байта. */
 const BANDS_FORM_MAX = Math.ceil((BANDS_MAX * 4) / 3) + FORM_MAX;
 
@@ -190,18 +192,22 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   const post = req.method === 'POST';
   if (!post && req.method !== 'GET' && req.method !== 'HEAD') return page('Нет', '<h1>Только GET и POST</h1>', { status: 405 });
   if (post && !sameOrigin(req, o)) return refused();
-  const rate = await hit(env, 'panel', clientIp(req), 300, now);
-  if (!rate.ok) return tooMany(o, rate.retryAfter);
+  // Лёгкие чтения редактора (его файлы, сцены слоёв, карта слоёв) идут пачкой при каждом открытии и не тратят лимит панели;
+  // сессия для них нужна так же.
+  const light = !post && LIGHT_RE.test(path);
+  if (!light) {
+    const rate = await hit(env, 'panel', clientIp(req), 300, now);
+    if (!rate.ok) return tooMany(o, rate.retryAfter);
+  }
 
   const s = await sessionFrom(env, req, now);
   const session = s && s.sign === me ? s : null;
 
   // Код редактора витрины отдаётся только в сессии: без неё его нет нигде.
-  if (path === '/editor.js') {
+  const ed = /^\/ed\/([a-z]+\.(?:js|css))$/.exec(path);
+  if (ed || path === '/editor.js') {
     if (!session || post) return plain('// нет сессии хранителя\n', { status: 403, noStore: true });
-    return new Response(editorJs, {
-      headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' },
-    });
+    return (ed && editorFile(env, req, ed[1])) || plain('// нет такого файла\n', { status: 404, noStore: true });
   }
 
   if (!session) {
@@ -234,7 +240,7 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   const top = await header(env, me, csrf, path, now);
 
   if (post) {
-    const f = await readForm(req, path === '/vitrina/save' ? SCENE_FORM_MAX : path === '/music/bands' ? BANDS_FORM_MAX : FORM_MAX);
+    const f = await readForm(req, path === '/vitrina/save' || path === '/vitrina/recover' ? SCENE_FORM_MAX : path === '/music/bands' ? BANDS_FORM_MAX : FORM_MAX);
     if (!f || !(await csrfOk(env, 'session', session.id, f.csrf ?? ''))) return page('Отказ', top + '<h1>Отказ</h1><p>Форма устарела: откройте страницу заново.</p>', { status: 403 });
     if (path === '/logout' || path === '/logout-all') {
       const q = path === '/logout' ? 'UPDATE sessions SET revoked_at = ? WHERE id = ?' : 'UPDATE sessions SET revoked_at = ? WHERE sign = ? AND revoked_at IS NULL';
@@ -292,6 +298,15 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
     const row = await sceneRow(env, +pv[1]);
     if (!row) return page('Не найдено', top + '<h1>Версии нет</h1>', { status: 404 });
     return vitrinaPage(req, env, o, { scene: JSON.parse(row.json) as Scene, sceneUrl: `/k/vitrina/scene/${row.version}.json`, version: row.version, space: row.space });
+  }
+  // Карта слоёв для навигатора редактора: пространства, их родители и состояние.
+  if (path === '/vitrina/spaces.json') return jsonResponse(JSON.stringify({ spaces: await spacesTree(env) }), { noStore: true });
+  // Аварийная копия правок слоя (одна ячейка на пространство): есть — отдаётся, нет — 204 (без ошибки в консоли).
+  const rc = /^\/vitrina\/recover\/([a-z0-9-]{1,32})\.json$/.exec(path);
+  if (rc) {
+    const r = await getRecovery(env, rc[1]);
+    if (!r) return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
+    return jsonResponse(JSON.stringify({ space: rc[1], json: r.json, at: r.at, by: r.by_sign }), { noStore: true });
   }
   // Опубликованная сцена целиком, с заметками хранителя: её берёт движок витрины, когда хранитель вошёл (редактор правит её).
   const lj = /^\/vitrina\/live\/([a-z0-9-]{1,32})\.json$/.exec(path);
@@ -474,10 +489,23 @@ async function sceneAction(env: Env, o: string, req: Request, path: string, f: R
     const space = f.space || 'main';
     if (!SPACE_RE.test(space)) return reply(false, ['ERR SPACE', '- имя пространства: латиница, цифры, дефис, до 32'], 400);
     const json = JSON.stringify(v.scene);
-    const r = await env.DB.prepare(
-      `INSERT INTO scenes (version, json, by_sign, created_at, status, space) VALUES ((SELECT COALESCE(MAX(version), 0) + 1 FROM scenes), ?, ?, ?, 'черновик', ?) RETURNING version`,
-    ).bind(json, me, now, space).first<{ version: number }>();
-    return reply(true, ['OK SAVED', `VERSION: ${r!.version}`, `SPACE: ${space}`, `PREVIEW: ${o}/k/vitrina/v/${r!.version}`]);
+    // черновик сохранён — аварийная копия этого слоя больше не нужна
+    const [r] = await env.DB.batch<{ version: number }>([
+      env.DB.prepare(
+        `INSERT INTO scenes (version, json, by_sign, created_at, status, space) VALUES ((SELECT COALESCE(MAX(version), 0) + 1 FROM scenes), ?, ?, ?, 'черновик', ?) RETURNING version`,
+      ).bind(json, me, now, space),
+      dropRecovery(env, space),
+    ]);
+    const version = r.results[0].version;
+    return reply(true, ['OK SAVED', `VERSION: ${version}`, `SPACE: ${space}`, `PREVIEW: ${o}/k/vitrina/v/${version}`]);
+  }
+  if (path === '/vitrina/recover') {
+    const space = f.space || 'main';
+    if (!SPACE_RE.test(space)) return reply(false, ['ERR SPACE'], 400);
+    if (!f.json) { await dropRecovery(env, space).run(); return reply(true, ['OK DROPPED', `SPACE: ${space}`]); }
+    const errors = await saveRecovery(env, space, f.json, me, now);
+    if (errors) return reply(false, ['ERR SCENE', ...errors.map((e) => '- ' + e)], 400);
+    return reply(true, ['OK KEPT', `SPACE: ${space}`]);
   }
   if (path === '/vitrina/publish') {
     const n = Number(f.version);
