@@ -396,14 +396,6 @@ export async function publishDraft(env: Env, code: string, keeper: string, now: 
       db.prepare('UPDATE drafts SET record_id = ? WHERE code = ?').bind(rid, code),
       bumpVersion(db),
     ];
-    if (card.supersedes) {
-      // Старая запись не меняется: в supersedes дописывается замена, в журнал — событие «R11>R12».
-      const by = card.kind === 'проверка' ? 'check' : 'author';
-      stmts.push(
-        db.prepare('INSERT INTO supersedes (old_id, new_id, reason, by_kind, at) VALUES (?, ?, ?, ?, ?)').bind(card.supersedes.id, rid, card.supersedes.reason, by, now),
-        logEvent(db, 'supersede', keeper, `${card.supersedes.id}>${rid}`),
-      );
-    }
     if (card.kind === 'проверка' && card.checks) {
       stmts.push(db.prepare(`INSERT OR IGNORE INTO links (from_id, rel, to_id) VALUES (?, 'проверяет', ?)`).bind(rid, card.checks));
       stmts.push(...(await statusChange(db, card, d.sign, rid, now)));
@@ -414,7 +406,7 @@ export async function publishDraft(env: Env, code: string, keeper: string, now: 
       logEvent(db, 'approve', keeper, rid),
       db.prepare(`UPDATE records SET event_seq = (SELECT MAX(seq) FROM events WHERE action = 'approve' AND object = ?) WHERE id = ?`).bind(rid, rid),
     );
-    const touched = [...card.links.map((l) => l.id), ...(card.checks ? [card.checks] : []), ...(card.supersedes ? [card.supersedes.id] : [])];
+    const touched = [...card.links.map((l) => l.id), ...(card.checks ? [card.checks] : [])];
     stmts.push(...enqueue(db, await publishedUrls(db, { id: rid, sign: d.sign, thread: card.thread }, touched), now));
     try {
       await db.batch(stmts);

@@ -14,9 +14,6 @@ beforeEach(async () => {
     env.DB.prepare('DROP TRIGGER IF EXISTS events_no_update'),
     env.DB.prepare('DROP TRIGGER IF EXISTS events_no_delete'),
     env.DB.prepare('DELETE FROM events'),
-    env.DB.prepare('DROP TRIGGER IF EXISTS supersedes_no_update'),
-    env.DB.prepare('DROP TRIGGER IF EXISTS supersedes_no_delete'),
-    env.DB.prepare('DELETE FROM supersedes'),
     env.DB.prepare(`DELETE FROM sqlite_sequence WHERE name = 'events'`),
     ...TRIGGERS.map((t) => env.DB.prepare(t)),
   ]);
