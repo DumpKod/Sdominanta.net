@@ -14,9 +14,13 @@ import llmsText from './pages/llms.txt';
 // frame-src 'self': разделы панели хранителя открываются виджетами в окнах витрины (только своё происхождение)
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'self'";
 /** С музыкой плеер берёт звук у SoundCloud (только после ▶ посетителя: до этого адрес потока на странице не запрашивается). */
-// Музыка: официальный виджет SoundCloud (iframe и его скрипт Widget API — только после ▶) и свой плеер по ключу API (поток с sndcdn).
+// Музыка: официальный виджет SoundCloud (iframe и его скрипт Widget API — только после ▶) и свой плеер по ключу API:
+// куски потока HLS с CDN SoundCloud (fetch) собираются в MediaSource (blob:).
 const SC_WIDGET = 'https://w.soundcloud.com';
-const CSP_MUSIC = CSP.replace("script-src 'self'", `script-src 'self' ${SC_WIDGET}`).replace("frame-src 'self'", `frame-src 'self' ${SC_WIDGET}`) + '; media-src https://*.sndcdn.com';
+const SC_CDN = 'https://*.sndcdn.com https://*.soundcloud.cloud';
+const CSP_MUSIC = CSP.replace("script-src 'self'", `script-src 'self' ${SC_WIDGET}`).replace("frame-src 'self'", `frame-src 'self' ${SC_WIDGET}`);
+/** Свой плеер возможен (трек без спектра, ключ внесён): fetch к CDN потоков и blob: для MediaSource. */
+const CSP_STREAM = CSP_MUSIC.replace("connect-src 'self'", `connect-src 'self' ${SC_CDN}`) + '; media-src blob:';
 const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export interface VitrinaOpts {
@@ -52,6 +56,8 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
   const parent = live.parent;
   const ENTRY = htmlText(render(llmsText, { BASE: o }));
   const t = await currentTrack(env);
+  const bands = !!t && !!(await env.DB.prepare('SELECT 1 AS x FROM track_bands WHERE sc_id = ?').bind(t.sc_id).first());
+  const stream = !!t && t.kind === 'track' && !bands && hasKey(env);
   const body = render(showcase, {
     KEEPER: !!s,
     CSRF: s?.csrf ?? '',
@@ -71,7 +77,7 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
     KEY: hasKey(env) ? '1' : '0',
     TRACK_KIND: t ? t.kind : '',
     TRACK_SC: t ? String(t.sc_id) : '',
-    TRACK_BANDS: t && (await env.DB.prepare('SELECT 1 AS x FROM track_bands WHERE sc_id = ?').bind(t.sc_id).first()) ? '1' : '0',
+    TRACK_BANDS: bands ? '1' : '0',
     WIDGET_URL: t ? widgetUrl(t) : '',
     TRACK_URL: t ? attr(t.url) : '',
     TRACK_TITLE: t ? attr(t.title) : '',
@@ -82,7 +88,7 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
     noStore: !!s || !!door || opts.scene !== undefined,
     // редактор шлёт POST с этой страницы: при no-referrer браузер поставил бы «Origin: null»
     headers: { Vary: 'Accept, Cookie', 'Referrer-Policy': 'same-origin' },
-    csp: t ? CSP_MUSIC : CSP,
+    csp: stream ? CSP_STREAM : t ? CSP_MUSIC : CSP,
   });
 }
 

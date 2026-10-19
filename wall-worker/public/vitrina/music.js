@@ -3,14 +3,17 @@
 // Два источника частот, холсту всё равно какой (ухо sound.js раз в кадр отдаёт движку полосы, громкость и удары):
 // - виджет: официальный плеер SoundCloud играет звук, частоты — из спектра, который хранитель посчитал заранее
 //   из своего файла (/music/bands/{номер трека}); кадр спектра берётся по позиции виджета;
-// - свой плеер по ключу API: звук идёт в анализатор Web Audio (для трека без спектра, если ключ внесён).
+// - свой плеер по ключу API: куски потока HLS собираются в MediaSource (stream.js), звук идёт в анализатор Web Audio
+//   (для трека без спектра, если ключ внесён); не пошёл — тот же трек играет виджет.
 // Если частот нет (нет спектра и ключа, или SoundCloud не разрешил анализ), музыка играет, а холст просто дышит сам.
 
 import { BANDS, Ear, bandEdges, bandsOf } from '/vitrina/sound.js';
 import { bandsAt, unpackBands } from '/vitrina/spectrum.js';
+import { Feed, mediaSource } from '/vitrina/stream.js';
 
 const WIDGET = 'https://w.soundcloud.com/player/';
 const WIDGET_API = 'https://w.soundcloud.com/player/api.js';
+const AAC = 'audio/mp4; codecs="mp4a.40.2"';
 
 const box = document.querySelector('.music');
 if (box) {
@@ -138,7 +141,7 @@ if (box) {
 
   // ---------- свой плеер по ключу API ----------
 
-  let audio = null, ctx = null, an = null, bytes = null, edges = null, tries = 0;
+  let audio = null, ctx = null, an = null, bytes = null, edges = null;
 
   function hearApi(dt) {
     if (an && audio && !audio.paused) {
@@ -148,49 +151,49 @@ if (box) {
     return ear.quiet(dt);
   }
 
-  /** Плеер: src ставится прямо в нажатии (иначе браузер не разрешит звук). analyse — через Web Audio. */
-  function player(analyse) {
-    const a = new Audio();
-    a.loop = true;
-    a.preload = 'auto';
-    if (analyse && ctx) {
-      a.crossOrigin = 'anonymous'; // без него Web Audio получает тишину
-      const src = ctx.createMediaElementSource(a);
-      an = ctx.createAnalyser();
-      an.fftSize = 2048;
-      an.smoothingTimeConstant = 0.55;
-      src.connect(an);
-      an.connect(ctx.destination);
-      bytes = new Uint8Array(an.frequencyBinCount);
-      edges = bandEdges(BANDS, ctx.sampleRate, an.fftSize);
-    } else an = null;
-    a.addEventListener('play', () => show(true));
-    a.addEventListener('pause', () => show(false));
-    a.addEventListener('playing', () => say(an ? '' : 'без частот'));
-    a.addEventListener('error', () => {
-      a.pause();
-      if (a !== audio) return;
-      audio = null;
-      // Первая неудача с анализом — ещё раз без него: может быть, SoundCloud не разрешил чтение звука.
-      if (analyse && tries < 2) { say('нажмите ▶ ещё раз'); show(false); return; }
-      say('звук сейчас недоступен — трек можно послушать по ссылке');
-      show(false);
-    });
-    a.src = box.dataset.stream;
-    return a;
+  /** Адреса кусков потока от Worker'а; отказ — null (текст отказа уходит в подпись). */
+  const loadStream = () => fetch(box.dataset.stream).then((r) => r.json().then((j) => {
+    if (r.ok && Array.isArray(j.segments)) return j;
+    if (j && j.text) say(j.text);
+    return null;
+  })).catch(() => null);
+
+  /** Поток не пошёл — тот же трек официальным виджетом (без частот, если спектра нет). */
+  function toWidget(why) {
+    if (audio) { audio.pause(); audio.removeAttribute('src'); }
+    audio = null; an = null;
+    mode = 'widget';
+    show(false);
+    widgetStart();
+    if (why) setTimeout(() => say('свой плеер не смог (' + why + ') — играет плеер SoundCloud'), 0);
+  }
+
+  /** Всё, что нужно браузеру для звука, — прямо в нажатии: AudioContext, элемент с MediaSource, play(). */
+  function apiStart() {
+    ctx = new AC();
+    ctx.resume();
+    audio = new Audio();
+    audio.loop = true;
+    const src = ctx.createMediaElementSource(audio);
+    an = ctx.createAnalyser();
+    an.fftSize = 2048;
+    an.smoothingTimeConstant = 0.55;
+    src.connect(an);
+    an.connect(ctx.destination);
+    bytes = new Uint8Array(an.frequencyBinCount);
+    edges = bandEdges(BANDS, ctx.sampleRate, an.fftSize);
+    audio.addEventListener('play', () => show(true));
+    audio.addEventListener('pause', () => show(false));
+    audio.addEventListener('playing', () => say(''));
+    audio.addEventListener('error', () => { if (audio) toWidget('ошибка звука'); });
+    say('подключаю…');
+    new Feed(audio, loadStream, (why) => { if (mode === 'api') toWidget(why); });
+    audio.play().catch(() => {});
   }
 
   function apiClick() {
-    if (audio) {
-      if (audio.paused) { audio.play().catch(() => {}); if (ctx) ctx.resume(); } else audio.pause();
-      return;
-    }
-    tries++;
-    if (!ctx && AC) ctx = new AC();
-    if (ctx) ctx.resume();
-    say('подключаю…');
-    audio = player(tries === 1);
-    audio.play().catch(() => {});
+    if (!audio) return apiStart();
+    if (audio.paused) { ctx.resume(); audio.play().catch(() => {}); } else audio.pause();
   }
 
   // Движок спрашивает слух каждый кадр; без звука ухо плавно гаснет.
@@ -201,8 +204,8 @@ if (box) {
 
   btn.addEventListener('click', () => {
     if (!mode) {
-      // Свой плеер — только для трека без спектра и с ключом; всё остальное играет официальный виджет.
-      mode = kind === 'track' && box.dataset.bands !== '1' && box.dataset.key === '1' ? 'api' : 'widget';
+      // Свой плеер — только для трека без спектра, с ключом и в браузере с MediaSource; всё остальное играет официальный виджет.
+      mode = kind === 'track' && box.dataset.bands !== '1' && box.dataset.key === '1' && AC && mediaSource(AAC) ? 'api' : 'widget';
       if (mode === 'widget') widgetStart();
     }
     if (mode === 'api') apiClick();

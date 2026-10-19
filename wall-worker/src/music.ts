@@ -4,7 +4,8 @@ import { hit } from './rate';
 // Музыка витрины: хранитель выбирает трек или плейлист SoundCloud в /k/music, витрина играет его по кругу после ▶ посетителя.
 // Два источника частот для холста:
 // - официальный виджет SoundCloud + спектр, посчитанный заранее браузером хранителя из его файла (только полосы, без звука);
-// - свой плеер по ключу API: браузер берёт поток у SoundCloud и слушает его анализатором (для треков без спектра).
+// - свой плеер по ключу API: браузер берёт куски потока HLS у SoundCloud, собирает их в MediaSource и слушает анализатором
+//   (для треков без спектра).
 // Звук не хранится и не проходит через сайт: Worker по ключу API получает адрес потока, браузер берёт звук у SoundCloud сам.
 // Один адрес потока — один заход (луп крутит его в плеере), повтор — при перезагрузке страницы.
 // До ▶ к SoundCloud не уходит ни одного запроса: подпись трека (название, автор, ссылки) лежит в нашей базе.
@@ -138,10 +139,57 @@ const json = (body: unknown, status = 200, extra: Record<string, string> = {}) =
 /** Отказ: код для плеера и текст для человека (плеер показывает его рядом со ссылкой на трек). */
 const err = (code: string, text: string, status: number, extra: Record<string, string> = {}) => json({ error: code, text }, status, extra);
 
+/** Звук SoundCloud отдаёт только с этих хостов (CDN потоков); страница витрины пускает к ним fetch (connect-src). */
+export const SC_MEDIA = /^https:\/\/([a-z0-9-]+\.)+(sndcdn\.com|soundcloud\.cloud)\//;
+
+/** Потоки HLS в порядке выбора: AAC (основной у SoundCloud), затем mp3, пока он есть. Прогрессивный mp3 SoundCloud выводит из обихода. */
+const HLS = [
+  { key: 'hls_aac_160_url', mime: 'audio/mp4; codecs="mp4a.40.2"' },
+  { key: 'hls_aac_96_url', mime: 'audio/mp4; codecs="mp4a.40.2"' },
+  { key: 'hls_mp3_128_url', mime: 'audio/mpeg' },
+] as const;
+
+export interface Playlist { map: string | null; segments: [string, number][] }
+
 /**
- * GET /music/stream/{id} — только для трека, который сейчас на витрине: это src плеера. Ответ — 302 на адрес звука
- * у SoundCloud (подписанный, временный); браузер идёт туда сам, сайт звук не трогает. Отказ — JSON {error, text}.
- * Плеер ставит src прямо в нажатии ▶: так браузер разрешает звук без второго нажатия.
+ * Плейлист HLS (m3u8) → адрес начала (EXT-X-MAP) и куски [адрес, секунды]. Адреса — абсолютные и только на CDN SoundCloud,
+ * иначе null. Плейлист вариантов (EXT-X-STREAM-INF) и шифрование (EXT-X-KEY) не принимаются.
+ */
+export function parsePlaylist(text: string, base: string): Playlist | null {
+  if (!text.startsWith('#EXTM3U')) return null;
+  const abs = (u: string) => {
+    try {
+      const x = new URL(u, base).href;
+      return SC_MEDIA.test(x) ? x : null;
+    } catch {
+      return null;
+    }
+  };
+  let map: string | null = null, dur = -1;
+  const segments: [string, number][] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const l = raw.trim();
+    if (!l) continue;
+    if (l.startsWith('#EXT-X-STREAM-INF') || (l.startsWith('#EXT-X-KEY') && !/METHOD=NONE/.test(l))) return null;
+    if (l.startsWith('#EXT-X-MAP')) {
+      const m = /URI="([^"]+)"/.exec(l);
+      if (!m || !(map = abs(m[1]))) return null;
+    } else if (l.startsWith('#EXTINF:')) dur = parseFloat(l.slice(8));
+    else if (!l.startsWith('#')) {
+      const u = abs(l);
+      if (!u || !(dur >= 0)) return null;
+      segments.push([u, dur]);
+      dur = -1;
+    }
+  }
+  return segments.length ? { map, segments } : null;
+}
+
+/**
+ * GET /music/stream/{id} — только для трека, который сейчас на витрине. Worker по ключу API берёт у SoundCloud плейлист
+ * потока HLS и отдаёт браузеру JSON {mime, map, segments, duration}: подписанные временные адреса кусков звука на CDN SoundCloud.
+ * Звук браузер берёт сам (SoundCloud разрешает чтение с чужих страниц — проверено хранителем 19.10), собирает его
+ * через MediaSource (public/vitrina/stream.js) и слушает анализатором. Отказ — JSON {error, text}.
  */
 export async function streamRoute(env: Env, req: Request, id: number, now: number): Promise<Response> {
   const t = await currentTrack(env);
@@ -157,13 +205,18 @@ export async function streamRoute(env: Env, req: Request, id: number, now: numbe
     if (s.status === 429) return err('LIMIT', 'Суточный лимит потоков SoundCloud исчерпан: трек можно послушать по ссылке.', 503);
     if (!s.ok) return err('STREAM', `SoundCloud не дал поток (${s.status}).`, 502);
     const urls = (await s.json()) as Record<string, string | undefined>;
-    const api = urls.http_mp3_128_url;
-    if (!api || !api.startsWith(SC_API + '/')) return err('STREAM', 'У трека нет потока mp3 для сторонних плееров.', 502);
-    // Адрес потока API требует ключ: Worker спрашивает его сам и отдаёт браузеру только итоговый адрес звука.
-    const r = await sc.send(api, { headers: auth, redirect: 'manual' });
+    const pick = HLS.find((h) => urls[h.key]?.startsWith(SC_API + '/'));
+    if (!pick) return err('STREAM', 'У трека нет потока HLS для сторонних плееров.', 502);
+    // Адрес потока API требует ключ: Worker спрашивает его сам и отдаёт браузеру только адреса кусков на CDN.
+    const r = await sc.send(urls[pick.key]!, { headers: auth, redirect: 'manual' });
     const loc = r.headers.get('Location');
-    if (r.status < 300 || r.status >= 400 || !loc || !/^https:\/\/[a-z0-9.-]+\.sndcdn\.com\//.test(loc)) return err('STREAM', 'SoundCloud не дал адрес звука.', 502);
-    return new Response(null, { status: 302, headers: { Location: loc, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
+    if (r.status < 300 || r.status >= 400 || !loc || !SC_MEDIA.test(loc)) return err('STREAM', 'SoundCloud не дал адрес потока.', 502);
+    const pl = await sc.send(loc, { redirect: 'manual' });
+    if (!pl.ok) return err('STREAM', `SoundCloud не отдал плейлист (${pl.status}).`, 502);
+    const p = parsePlaylist(await pl.text(), loc);
+    if (!p) return err('STREAM', 'Плейлист SoundCloud не разобрался.', 502);
+    const duration = Math.round(p.segments.reduce((a, [, d]) => a + d, 0) * 1000) / 1000;
+    return json({ mime: pick.mime, map: p.map, segments: p.segments, duration });
   } catch {
     return err('STREAM', 'SoundCloud не ответил.', 502);
   }

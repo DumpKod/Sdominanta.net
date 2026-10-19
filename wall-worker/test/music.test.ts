@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import { afterEach, describe, expect, it } from 'vitest';
-import { normTrackUrl, sc, streamRoute } from '../src/music';
+import { normTrackUrl, parsePlaylist, sc, streamRoute } from '../src/music';
+import { segmentAt, segmentStart } from '../public/vitrina/stream.js';
 import { BANDS, Ear, bandEdges, bandsOf } from '../public/vitrina/sound.js';
 import { bandsAt, packBands, spectrumOf, unpackBands } from '../public/vitrina/spectrum.js';
 import { csrfOf, get, login, post } from './helpers';
@@ -8,7 +9,7 @@ import mig11 from '../migrations/0011-music.sql?raw';
 import mig16 from '../migrations/0016-track-bands.sql?raw';
 
 // Музыка витрины: трек выбирает хранитель в /k/music (подпись — по oEmbed), посетитель слышит его только после ▶.
-// Поток — /music/stream/{id}: 302 на адрес звука SoundCloud, только с ключом API, только для трека на витрине.
+// Поток — /music/stream/{id}: адреса кусков HLS у CDN SoundCloud, только с ключом API, только для трека на витрине.
 
 const HTML = { Accept: 'text/html' };
 const TRACK = 'https://soundcloud.com/sdominanta/kontinuum';
@@ -68,7 +69,8 @@ describe('Музыка: админка и витрина', () => {
     expect(page).toContain(`«<a href="${TRACK}" rel="noopener noreferrer">Континуум</a>» — <a href="https://soundcloud.com/sdominanta" rel="noopener noreferrer">Sdominanta</a>`);
     expect(page).toContain('<script type="module" src="/vitrina/music.js"></script>');
     expect(page).toContain('data-key="0"');
-    expect(res.headers.get('Content-Security-Policy')).toContain('media-src https://*.sndcdn.com');
+    // Без ключа свой плеер невозможен: ни fetch к CDN SoundCloud, ни blob: для звука.
+    expect(res.headers.get('Content-Security-Policy')).not.toMatch(/media-src|connect-src[^;]*soundcloud|sndcdn/);
     // До нажатия на странице нет ничего, что браузер загрузил бы с SoundCloud: только ссылки <a>.
     expect(page).not.toMatch(/<(iframe|img|audio|video|source|link|script)[^>]+soundcloud/i);
     expect(page).not.toContain('sndcdn');
@@ -136,27 +138,69 @@ describe('Музыка: поток', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('с ключом: токен приложения → streams → адрес звука; браузеру — 302 на sndcdn, токен из кэша', async () => {
+  const M3U = (host = 'https://playback.media-streaming.soundcloud.cloud') => [
+    '#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-TARGETDURATION:10', '#EXT-X-PLAYLIST-TYPE:VOD',
+    `#EXT-X-MAP:URI="${host}/a/aac_160k/init.mp4?Policy=p&Key-Pair-Id=k"`,
+    '#EXTINF:9.98,', `${host}/a/aac_160k/data001.m4s?expires=1&Policy=p&Key-Pair-Id=k`,
+    '#EXTINF:10.0,', 'data002.m4s?expires=1&Policy=p&Key-Pair-Id=k',
+    '#EXTINF:4.5,', `${host}/a/aac_160k/data003.m4s?expires=1&Policy=p&Key-Pair-Id=k`,
+    '#EXT-X-ENDLIST', '',
+  ].join('\n');
+  const PL = 'https://playback.media-streaming.soundcloud.cloud/a/aac_160k/playlist.m3u8?Policy=p';
+
+  it('плейлист HLS: начало и куски, относительные адреса — от плейлиста; чужие хосты, варианты и шифрование — отказ', () => {
+    const p = parsePlaylist(M3U(), PL)!;
+    expect(p.map).toBe('https://playback.media-streaming.soundcloud.cloud/a/aac_160k/init.mp4?Policy=p&Key-Pair-Id=k');
+    expect(p.segments.map(([, d]) => d)).toEqual([9.98, 10, 4.5]);
+    expect(p.segments[1][0]).toBe('https://playback.media-streaming.soundcloud.cloud/a/aac_160k/data002.m4s?expires=1&Policy=p&Key-Pair-Id=k');
+    expect(parsePlaylist(M3U('https://evil.example'), PL)).toBeNull();
+    expect(parsePlaylist('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv.m3u8\n', PL)).toBeNull();
+    expect(parsePlaylist('#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="k"\n#EXTINF:1,\na.ts\n', PL)).toBeNull();
+    expect(parsePlaylist('<html>', PL)).toBeNull();
+    // mp3 HLS без EXT-X-MAP: куски на sndcdn.
+    const mp3 = parsePlaylist('#EXTM3U\n#EXTINF:1.0,\nhttps://cf-hls-media.sndcdn.com/media/0/1/x.128.mp3?Policy=p\n#EXT-X-ENDLIST\n', PL)!;
+    expect(mp3).toEqual({ map: null, segments: [['https://cf-hls-media.sndcdn.com/media/0/1/x.128.mp3?Policy=p', 1]] });
+  });
+
+  it('куски по времени: перемотка и луп находят нужный кусок', () => {
+    const segs: [string, number][] = [['a', 10], ['b', 10], ['c', 4.5]];
+    expect([0, 9.99, 10, 19.9, 20, 24.4, 99].map((t) => segmentAt(segs, t))).toEqual([0, 0, 1, 1, 2, 2, 2]);
+    expect(segmentStart(segs, 2)).toBe(20);
+  });
+
+  it('с ключом: токен приложения → streams (AAC HLS) → плейлист; браузеру — адреса кусков, токен из кэша; витрина пускает к CDN', async () => {
     const { id } = await addAndChoose();
     await caches.default.delete('https://sdominanta.net/__cache/sc-token');
     const calls = mock((c) => {
       if (c.url === 'https://secure.soundcloud.com/oauth/token') return Response.json({ access_token: 'tok', expires_in: 3600 });
-      if (c.url === 'https://api.soundcloud.com/tracks/1234567/streams') return Response.json({ http_mp3_128_url: 'https://api.soundcloud.com/tracks/soundcloud:tracks:1234567/stream?x=1' });
-      if (c.url.startsWith('https://api.soundcloud.com/tracks/soundcloud:tracks:1234567/stream')) return new Response(null, { status: 302, headers: { Location: 'https://cf-media.sndcdn.com/abc.128.mp3?Policy=p&Signature=s' } });
+      if (c.url === 'https://api.soundcloud.com/tracks/1234567/streams') {
+        return Response.json({
+          http_mp3_128_url: 'https://api.soundcloud.com/tracks/soundcloud:tracks:1234567/stream',
+          hls_mp3_128_url: 'https://api.soundcloud.com/tracks/soundcloud:tracks:1234567/streams/hls/mp3',
+          hls_aac_160_url: 'https://api.soundcloud.com/tracks/soundcloud:tracks:1234567/streams/hls?x=1',
+        });
+      }
+      if (c.url.startsWith('https://api.soundcloud.com/tracks/soundcloud:tracks:1234567/streams/hls?')) return new Response(null, { status: 302, headers: { Location: PL } });
+      if (c.url === PL) return new Response(M3U());
     });
     const res = await streamRoute(keyed, req(), id, 1);
-    expect(res.status).toBe(302);
-    expect(res.headers.get('Location')).toBe('https://cf-media.sndcdn.com/abc.128.mp3?Policy=p&Signature=s');
+    expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
+    const j = (await res.json()) as { mime: string; map: string; segments: [string, number][]; duration: number };
+    expect(j.mime).toBe('audio/mp4; codecs="mp4a.40.2"');
+    expect(j.segments).toHaveLength(3);
+    expect(j.duration).toBe(24.48);
     const tokenCall = calls.find((c) => c.url.includes('oauth/token'))!;
     expect((tokenCall.init!.headers as Record<string, string>).Authorization).toBe('Basic ' + btoa('test-id:test-secret'));
     expect(calls.filter((c) => c.url.includes('/streams')).every((c) => (c.init!.headers as Record<string, string>).Authorization === 'OAuth tok')).toBe(true);
+    // Ключ к CDN не уходит.
+    expect(calls.find((c) => c.url === PL)!.init!.headers).toBeUndefined();
     // Второй заход: токен уже в кэше.
     await streamRoute(keyed, req(), id, 2);
     expect(calls.filter((c) => c.url.includes('oauth/token'))).toHaveLength(1);
   });
 
-  it('суточный лимит SoundCloud — ERR LIMIT; адрес не на sndcdn — отказ', async () => {
+  it('суточный лимит SoundCloud — ERR LIMIT; только прогрессивный mp3 или адрес не на CDN — отказ', async () => {
     const { id } = await addAndChoose();
     await caches.default.delete('https://sdominanta.net/__cache/sc-token');
     mock((c) => {
@@ -169,9 +213,25 @@ describe('Музыка: поток', () => {
     mock((c) => {
       if (c.url.includes('oauth/token')) return Response.json({ access_token: 'tok', expires_in: 3600 });
       if (c.url.endsWith('/streams')) return Response.json({ http_mp3_128_url: 'https://api.soundcloud.com/tracks/1/stream' });
-      return new Response(null, { status: 302, headers: { Location: 'https://evil.example/x.mp3' } });
+    });
+    expect(await (await streamRoute(keyed, req(), id, 2)).json()).toMatchObject({ error: 'STREAM' });
+    mock((c) => {
+      if (c.url.includes('oauth/token')) return Response.json({ access_token: 'tok', expires_in: 3600 });
+      if (c.url.endsWith('/streams')) return Response.json({ hls_aac_160_url: 'https://api.soundcloud.com/tracks/1/streams/hls' });
+      return new Response(null, { status: 302, headers: { Location: 'https://evil.example/x.m3u8' } });
     });
     expect((await streamRoute(keyed, req(), id, 3)).status).toBe(502);
+  });
+
+  it('ключ внесён и спектра нет — витрина пускает fetch к CDN SoundCloud и blob: для звука', async () => {
+    await addAndChoose();
+    const { default: worker } = await import('../src/index');
+    const ctx = { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext;
+    const res = await worker.fetch(new Request('https://sdominanta.net/', { headers: HTML }), keyed as never, ctx);
+    const csp = res.headers.get('Content-Security-Policy')!;
+    expect(csp).toContain("connect-src 'self' https://*.sndcdn.com https://*.soundcloud.cloud");
+    expect(csp).toContain('media-src blob:');
+    expect(await res.text()).toContain('data-key="1"');
   });
 
   it('миграция 0011 создаёт таблицу треков', () => {
