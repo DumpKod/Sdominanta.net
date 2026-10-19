@@ -80,9 +80,10 @@ html:not(.js) body { overflow: auto; }
 .music-note { flex: none; color: #64748b; }
 html:not(.js) .music-play { display: none; }
 .music.widget-on { flex-wrap: wrap; border-radius: 12px; }
-/* Официальный виджет SoundCloud (мини-плеер): своя подпись, логотип и кнопка — всегда на виду. */
+/* Официальный виджет SoundCloud с обложкой: своя подпись, логотип и кнопки — всегда на виду. В окне объекта — крупнее. */
 .music-widget { flex-basis: 100%; }
-.music-widget iframe { display: block; width: min(420px, calc(100vw - 110px)); height: 20px; border: 0; }
+.music-widget iframe { display: block; width: min(420px, calc(100vw - 110px)); height: 166px; border: 0; border-radius: 8px; }
+.page-body .music-widget iframe { width: 100%; height: min(450px, 60vh); }
 
 /* Место хранителя: разделы панели или поле кода; без места в сцене — вверху слева. */
 .keeper {

@@ -72,9 +72,10 @@ if (box) {
     wrap.className = 'music-widget';
     ifr = document.createElement('iframe');
     ifr.title = 'Плеер SoundCloud';
+    // Вид «с обложкой» (решение хранителя 19.10): фон — обложка трека, белого плеера на витрине нет.
     ifr.allow = 'autoplay; encrypted-media';
     const q = new URLSearchParams({
-      url: box.dataset.widget, auto_play: 'true', visual: 'false', show_artwork: 'false', show_user: 'true',
+      url: box.dataset.widget, auto_play: 'true', visual: 'true', show_artwork: 'true', show_user: 'true',
       hide_related: 'true', show_comments: 'false', show_reposts: 'false', show_teaser: 'false',
       buying: 'false', sharing: 'false', download: 'false', color: '#22d3ee',
     });
