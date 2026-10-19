@@ -54,14 +54,29 @@ function page(title: string, body: string, o: { status?: number; headers?: Recor
   const doc =
     '<!doctype html>\n<html lang="ru">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
     `<meta name="robots" content="noindex, nofollow">\n<title>${esc(title)}</title>\n<style>\n` +
-    'body{margin:0 auto;max-width:860px;padding:16px;font:15px/1.5 system-ui,sans-serif;background:#010306;color:#cbd5e1}\n' +
-    'a{color:#67e8f9}h1{font-size:20px;color:#e2e8f0}h2{font-size:16px;color:#a5f3fc;margin-top:24px}\n' +
-    'pre{white-space:pre-wrap;word-break:break-word;background:#020617;border:1px solid #164e63;border-radius:8px;padding:10px}\n' +
-    'table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid #1e293b;vertical-align:top}\n' +
-    'input,textarea,button{font:inherit;color:#e2e8f0;background:#020617;border:1px solid #164e63;border-radius:6px;padding:6px 8px}\n' +
-    'button{cursor:pointer;background:#083344}form{margin:8px 0}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}\n' +
-    '.warn{color:#fcd34d}.muted{color:#64748b}textarea{width:100%;box-sizing:border-box}\n' +
-    '</style>\n</head>\n<body>\n' + body + '\n</body>\n</html>\n';
+    // Строгая оболочка (как у графических редакторов): слева разделы, справа рабочая область из панелей с шапками.
+    ':root{--bg:#0b0d10;--panel:#14171b;--head:#1c2026;--line:#2a3038;--text:#c9d1d9;--dim:#7d8590;--acc:#67e8f9;--warn:#fcd34d}\n' +
+    'body{margin:0;font:14px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--text)}\n' +
+    '.app{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:100vh}\n' +
+    '.side{background:var(--panel);border-right:1px solid var(--line);padding:10px 0;font-size:13px}\n' +
+    '.side b{display:block;padding:10px 14px 4px;font:600 11px/1.4 system-ui;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}\n' +
+    '.side a{display:block;padding:4px 14px;color:var(--text);text-decoration:none;border-left:2px solid transparent}\n' +
+    '.side a:hover{background:var(--head)}.side a.on{border-left-color:var(--acc);background:var(--head);color:#fff}\n' +
+    '.side .who{padding:12px 14px 4px;color:var(--dim)}.side form{margin:4px 14px}.side button{width:100%}\n' +
+    '.work{padding:16px 20px;max-width:1100px}.solo{margin:0 auto;max-width:860px;padding:16px}\n' +
+    'a{color:var(--acc)}h1{font-size:18px;font-weight:600;color:#e6edf3;margin:4px 0 14px}\n' +
+    'h2{margin:18px 0 0;padding:5px 10px;font:600 11px/1.6 system-ui;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);background:var(--head);border:1px solid var(--line);border-bottom:0}\n' +
+    'h2+*{margin-top:0}.box{background:var(--panel);border:1px solid var(--line);padding:10px 12px;margin-bottom:4px}\n' +
+    'pre{white-space:pre-wrap;word-break:break-word;background:var(--panel);border:1px solid var(--line);padding:10px;margin:0 0 4px}\n' +
+    'table{border-collapse:collapse;width:100%;background:var(--panel);border:1px solid var(--line);font-size:13px}td,th{text-align:left;padding:5px 10px;border-bottom:1px solid var(--line);vertical-align:top}\n' +
+    'th{font-weight:600;color:var(--dim);background:var(--head)}tr:last-child td{border-bottom:0}\n' +
+    'input,textarea,select,button{font:inherit;font-size:13px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:3px;padding:4px 8px}\n' +
+    'button{cursor:pointer;background:var(--head)}button:hover{border-color:var(--acc)}form{margin:6px 0}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row form{margin:0}\n' +
+    '.warn{color:var(--warn)}.muted{color:var(--dim)}textarea{width:100%;box-sizing:border-box}\n' +
+    '@media (max-width:720px){.app{grid-template-columns:1fr}.side{display:flex;flex-wrap:wrap;gap:2px;padding:8px;border-right:0;border-bottom:1px solid var(--line)}' +
+    '.side b,.side .who{display:none}.side a{padding:4px 8px;border-left:0;border-bottom:2px solid transparent}.side a.on{border-bottom-color:var(--acc)}.side form{margin:0}.side button{width:auto}' +
+    '.work{padding:12px 16px}table{display:block;overflow-x:auto}}\n' +
+    '</style>\n</head>\n<body>\n' + (body.startsWith('<aside') ? `<div class="app">${body}\n</main></div>` : `<div class="solo">${body}</div>`) + '\n</body>\n</html>\n';
   // same-origin, а не no-referrer: при no-referrer браузер шлёт с формы «Origin: null», и проверка своего адреса отказала бы.
   return html(doc, { status: o.status ?? 200, noStore: true, csp: CSP, headers: { 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'same-origin', ...o.headers } });
 }
@@ -99,12 +114,30 @@ function loginForm(csrf: string, note = ''): string {
   );
 }
 
-function header(sign: string, csrf: string): string {
-  return (
-    `<div class="row"><a href="/k">Очередь</a><a href="/k/vitrina">Витрина</a><a href="/k/music">Музыка</a><span class="muted">Хранитель ${esc(sign)}</span>` +
-    `<form method="post" action="/k/logout"><input type="hidden" name="csrf" value="${esc(csrf)}"><button type="submit">Выйти</button></form>` +
-    `<form method="post" action="/k/logout-all"><input type="hidden" name="csrf" value="${esc(csrf)}"><button type="submit">Выйти везде</button></form></div>`
-  );
+/** Разделы панели: группа → [адрес, название]. Один список на всё — новый раздел добавляется здесь. */
+const SECTIONS: [string, [string, string][]][] = [
+  ['Стена', [['/k', 'Очередь черновиков']]],
+  ['Витрина', [['/k/vitrina', 'Пространства и версии'], ['/k/music', 'Музыка']]],
+  ['Сеть', [['/k/nodes', 'Узлы и кластеры'], ['/k/docs', 'Документы архива']]],
+  ['Снаружи', [['/', 'Витрина'], ['/wall/log', 'Журнал действий'], ['/wall/compat', 'Совместимость'], ['/llms.txt', 'Вход для моделей']]],
+];
+
+/** Левая колонка панели: разделы, кто вошёл, выход. Открывает <main>, page() закрывает. */
+function header(sign: string, csrf: string, path = ''): string {
+  const cur = '/k' + path;
+  let b = '<aside class="side">';
+  for (const [group, items] of SECTIONS) {
+    b += `<b>${esc(group)}</b>`;
+    for (const [href, name] of items) {
+      const on = href !== '/' && (cur === href || (href !== '/k' && cur.startsWith(href + '/')) || (href === '/k' && cur.startsWith('/k/d/')));
+      b += `<a href="${href}"${on ? ' class="on"' : ''}>${esc(name)}</a>`;
+    }
+  }
+  const hidden = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
+  b += `<div class="who">Хранитель ${esc(sign)}</div>`;
+  b += `<form method="post" action="/k/logout">${hidden}<button type="submit">Выйти</button></form>`;
+  b += `<form method="post" action="/k/logout-all">${hidden}<button type="submit">Выйти везде</button></form>`;
+  return b + '</aside><main class="work">';
 }
 
 // Сохранение сцены несёт её JSON в форме: до 256 КБ, а кириллица в urlencoded растёт до 9 раз — потолок с запасом.
@@ -177,7 +210,7 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   }
 
   const csrf = await csrfFor(env, 'session', session.id);
-  const top = header(me, csrf);
+  const top = header(me, csrf, path);
 
   if (post) {
     const f = await readForm(req, path === '/vitrina/save' ? SCENE_FORM_MAX : FORM_MAX);
@@ -230,6 +263,8 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   }
 
   if (path === '/vitrina') return scenesPage(env, top, csrf);
+  if (path === '/nodes') return nodesPage(env, top, csrf);
+  if (path === '/docs') return docsPage(env, top, csrf);
   if (path === '/music') return musicPage(env, top, csrf);
   const pv = /^\/vitrina\/v\/([1-9]\d{0,8})$/.exec(path);
   if (pv) {
@@ -278,6 +313,63 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   return page('Не найдено', top + '<h1>Не найдено</h1>', { status: 404 });
 }
 
+// ---------- сеть: узлы и документы ----------
+
+/** Узлы и кластеры: всего по состояниям, ветви корня — каждая со своей кнопкой; черновики видит только хранитель. */
+async function nodesPage(env: Env, top: string, csrf: string): Promise<Response> {
+  const hidden = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
+  const ns = (await env.DB.prepare(`SELECT state, count(*) AS n FROM nodes GROUP BY state`).all<{ state: string; n: number }>()).results;
+  const cnt = (st: string) => ns.find((x) => x.state === st)?.n ?? 0;
+  let b = top + '<h1>Узлы и кластеры</h1>\n';
+  b += '<h2>Всё дерево</h2>\n<div class="box">';
+  b += `<p style="margin:0 0 6px">Опубликовано: ${cnt('опубликован')} · черновиков: ${cnt('черновик')}. Узел с детьми — своё пространство /in/{id}, лист — окно в пространстве родителя.</p><div class="row">`;
+  if (cnt('черновик')) b += `<form method="post" action="/k/vitrina/nodes/publish">${hidden}<button type="submit">Опубликовать черновики узлов</button></form>`;
+  if (cnt('опубликован')) b += `<form method="post" action="/k/vitrina/nodes/hide">${hidden}<button type="submit">Снять узлы в черновик</button></form>`;
+  b += '</div></div>\n';
+  const roots = (await env.DB.prepare(`SELECT id, sign, title FROM nodes WHERE parent IS NULL ORDER BY pos, id`).all<{ id: string; sign: string | null; title: string }>()).results;
+  for (const r of roots) {
+    const br = (await env.DB.prepare(
+      `WITH RECURSIVE sub(id, top) AS (SELECT id, id FROM nodes WHERE parent = ?1 UNION ALL SELECT n.id, sub.top FROM nodes n JOIN sub ON n.parent = sub.id)
+       SELECT c.id, c.sign, c.title, c.pos, sum(n.state = 'опубликован') AS pub, sum(n.state = 'черновик') AS dr, count(*) AS n
+       FROM sub JOIN nodes n ON n.id = sub.id JOIN nodes c ON c.id = sub.top GROUP BY c.id ORDER BY c.pos, c.id`,
+    ).bind(r.id).all<{ id: string; sign: string | null; title: string; pub: number; dr: number; n: number }>()).results;
+    b += `<h2>Корень ${esc(r.sign ?? '')} ${esc(r.title)} — <a href="/in/${esc(r.id)}">/in/${esc(r.id)}</a></h2>\n`;
+    b += '<table><tr><th>Ветвь</th><th>Узлов</th><th>Опубликовано</th><th>Черновиков</th><th></th></tr>\n';
+    for (const c of br) {
+      const f = `${hidden}<input type="hidden" name="root" value="${esc(c.id)}">`;
+      b += `<tr><td><a href="/in/${esc(c.id)}">${esc(c.sign ? c.sign + ' ' : '')}${esc(c.title)}</a></td><td>${c.n}</td><td>${c.pub}</td><td>${c.dr}</td><td class="row">`;
+      if (c.dr) b += `<form method="post" action="/k/vitrina/nodes/publish">${f}<button type="submit">Опубликовать ветвь</button></form>`;
+      if (c.pub) b += `<form method="post" action="/k/vitrina/nodes/hide">${f}<button type="submit">Снять ветвь</button></form>`;
+      b += '</td></tr>\n';
+    }
+    b += '</table>\n';
+  }
+  if (!roots.length) b += '<p class="muted">Узлов ещё нет.</p>';
+  return page('Узлы и кластеры', b);
+}
+
+/** Документы архива: партия = папка архива; у партии — список документов, кнопки публикации и снятия. */
+async function docsPage(env: Env, top: string, csrf: string): Promise<Response> {
+  const hidden = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
+  const rows = (await env.DB.prepare(`SELECT name, path, title, state FROM docs ORDER BY path`).all<{ name: string; path: string; title: string; state: string }>()).results;
+  let b = top + '<h1>Документы архива</h1>\n';
+  b += '<p class="muted">Файлы архива сети после чистки от личного. Партия — папка архива. Черновик видит только хранитель: откройте, прочтите, потом «Опубликовать партию».</p>\n';
+  const batchOf = (p: string) => (p.includes('/') ? p.slice(0, p.indexOf('/')) : '');
+  for (const bt of [...new Set(rows.map((r) => batchOf(r.path)))]) {
+    const list = rows.filter((r) => batchOf(r.path) === bt);
+    const dr = list.filter((r) => r.state === 'черновик').length, pb = list.length - dr;
+    const f = `${hidden}<input type="hidden" name="batch" value="${esc(bt)}">`;
+    b += `<h2>${esc(bt || '(корень)')} — опубликовано ${pb} из ${list.length}</h2>\n<div class="box row">`;
+    if (dr) b += `<form method="post" action="/k/vitrina/docs/publish">${f}<button type="submit">Опубликовать партию</button></form>`;
+    if (pb) b += `<form method="post" action="/k/vitrina/docs/hide">${f}<button type="submit">Снять в черновик</button></form>`;
+    b += '</div>\n<table><tr><th>Документ</th><th>Состояние</th></tr>\n';
+    for (const d of list) b += `<tr><td><a href="/doc/${esc(d.name)}">${esc(d.title)}</a><br><span class="muted">${esc(d.path)}</span></td><td>${esc(d.state)}</td></tr>\n`;
+    b += '</table>\n';
+  }
+  if (!rows.length) b += '<p class="muted">Документов ещё нет.</p>';
+  return page('Документы архива', b);
+}
+
 // ---------- витрина: версии сцены ----------
 
 const sceneRow = (env: Env, v: number) => env.DB.prepare('SELECT * FROM scenes WHERE version = ?').bind(v).first<SceneRow>();
@@ -290,38 +382,15 @@ async function scenesPage(env: Env, top: string, csrf: string): Promise<Response
   const hidden = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
   let b = top + '<h1>Витрина</h1>\n';
   b += '<p class="muted">Пространства: main — главная витрина, остальные — алеф-нули внутри объектов (поле inner, адрес /in/имя). Редактор сохраняет в то пространство, где вы находитесь.</p>\n';
-  b += '<table><tr><th>Пространство</th><th>Сейчас</th><th></th></tr>\n';
+  b += '<h2>Пространства</h2>\n<table><tr><th>Пространство</th><th>Сейчас</th><th></th></tr>\n';
   for (const sp of spaces) {
     const v = cur.get(sp)!;
     b += `<tr><td><a href="${spaceUrl(sp)}">${esc(sp)}</a></td><td>${v ? `версия ${v}` : sp === 'main' ? 'встроенная сцена' : 'пусто'}</td>`;
     b += `<td><form method="post" action="/k/vitrina/rollback">${hidden}<input type="hidden" name="space" value="${esc(sp)}"><button type="submit">Откатить</button></form></td></tr>\n`;
   }
   b += '</table><p class="muted">«Откатить» снимает текущую публикацию пространства: оно вернётся к предыдущей опубликованной версии.</p>\n';
-  // узлы сети: черновики видит только хранитель (на витрине — с пометкой), публикует их здесь одной кнопкой
-  const ns = (await env.DB.prepare(`SELECT state, count(*) AS n FROM nodes GROUP BY state`).all<{ state: string; n: number }>()).results;
-  if (ns.length) {
-    const cnt = (st: string) => ns.find((x) => x.state === st)?.n ?? 0;
-    b += `<h2>Узлы сети</h2><p>Опубликовано: ${cnt('опубликован')} · черновиков: ${cnt('черновик')}. Корень — <a href="/in/aleph">/in/aleph</a>.</p>\n`;
-    if (cnt('черновик')) b += `<form method="post" action="/k/vitrina/nodes/publish">${hidden}<button type="submit">Опубликовать черновики узлов</button></form>`;
-    if (cnt('опубликован')) b += `<form method="post" action="/k/vitrina/nodes/hide">${hidden}<button type="submit">Снять узлы в черновик</button></form>`;
-  }
-  // документы архива: партия = папка архива; хранитель читает черновик по ссылке и публикует папку целиком
-  const ds = (await env.DB.prepare(`SELECT CASE WHEN instr(path, '/') > 0 THEN substr(path, 1, instr(path, '/') - 1) ELSE '' END AS batch, state, count(*) AS n, min(name) AS first FROM docs GROUP BY batch, state ORDER BY batch`)
-    .all<{ batch: string; state: string; n: number; first: string }>()).results;
-  if (ds.length) {
-    b += '<h2>Документы архива</h2><p class="muted">Партия — папка архива. Черновик видит только хранитель: откройте, прочтите, потом «Опубликовать партию».</p>\n';
-    b += '<table><tr><th>Партия</th><th>Черновиков</th><th>Опубликовано</th><th></th></tr>\n';
-    for (const bt of [...new Set(ds.map((x) => x.batch))]) {
-      const of = (st: string) => ds.find((x) => x.batch === bt && x.state === st);
-      const dr = of('черновик'), pb = of('опубликован');
-      const f = `${hidden}<input type="hidden" name="batch" value="${esc(bt)}">`;
-      b += `<tr><td>${esc(bt || '(корень)')}</td><td>${dr?.n ?? 0}</td><td>${pb?.n ?? 0}</td><td class="row"><a href="/doc/${esc((dr ?? pb)!.first)}">Открыть первый</a>`;
-      if (dr) b += `<form method="post" action="/k/vitrina/docs/publish">${f}<button type="submit">Опубликовать партию</button></form>`;
-      if (pb) b += `<form method="post" action="/k/vitrina/docs/hide">${f}<button type="submit">Снять в черновик</button></form>`;
-      b += '</td></tr>\n';
-    }
-    b += '</table>';
-  }
+  b += '<p class="muted">Узлы сети и документы архива — в разделах «Узлы и кластеры» и «Документы архива».</p>\n';
+  b += '<h2>Версии сцены</h2>\n';
   if (!rows.length) b += '<p>Версий ещё нет: сохраните черновик из редактора на витрине.</p>';
   else {
     b += '<table><tr><th>Версия</th><th>Пространство</th><th>Статус</th><th>Кто</th><th>Когда</th><th>Размер</th><th></th></tr>\n';
@@ -349,8 +418,13 @@ async function sceneAction(env: Env, o: string, req: Request, path: string, f: R
       : page(ok ? 'Витрина' : 'Отказ', top + `<h1>${esc(lines[0])}</h1><pre>${esc(lines.slice(1).join('\n'))}</pre><p><a href="/k/vitrina">К версиям</a></p>`, { status });
   if (path === '/vitrina/nodes/publish' || path === '/vitrina/nodes/hide') {
     const [from, to] = path.endsWith('publish') ? ['черновик', 'опубликован'] : ['опубликован', 'черновик'];
-    const r = await env.DB.batch([env.DB.prepare('UPDATE nodes SET state = ? WHERE state = ?').bind(to, from), bumpVersion(env.DB)]);
-    return reply(true, [`OK NODES`, `- ${to}: ${r[0].meta.changes}`]);
+    // root — ветвь целиком (узел и всё под ним), без него — всё дерево
+    const root = f.root ?? '';
+    const q = root
+      ? env.DB.prepare(`WITH RECURSIVE sub(id) AS (SELECT ?3 UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent = sub.id) UPDATE nodes SET state = ?1 WHERE state = ?2 AND id IN (SELECT id FROM sub)`).bind(to, from, root)
+      : env.DB.prepare('UPDATE nodes SET state = ? WHERE state = ?').bind(to, from);
+    const r = await env.DB.batch([q, bumpVersion(env.DB)]);
+    return reply(true, [`OK NODES`, ...(root ? [`ROOT: ${root}`] : []), `- ${to}: ${r[0].meta.changes}`]);
   }
   if (path === '/vitrina/docs/publish' || path === '/vitrina/docs/hide') {
     const [from, to] = path.endsWith('publish') ? ['черновик', 'опубликован'] : ['опубликован', 'черновик'];

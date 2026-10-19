@@ -715,8 +715,9 @@ describe('Узлы сети: пространства-кластеры из та
     const k = await (await get('/doc/calc-14k', { Cookie: cookie })).text();
     expect(k).toContain('Теория calc-14k');
     expect(k).toContain('черновик — видит только хранитель');
-    const pg = await (await get('/k/vitrina', { Cookie: cookie })).text();
-    expect(pg).toContain('Документы архива');
+    const pg = await (await get('/k/docs', { Cookie: cookie })).text();
+    expect(pg).toContain('02-computations — опубликовано 0 из 1');
+    expect(pg).toContain('href="/doc/calc-14k"');
     const csrf = csrfOf(pg);
     expect(await (await post('/k/vitrina/docs/publish', { csrf, batch: '02-computations' }, cookie, { 'X-Editor': '1' })).text()).toContain('- опубликован: 1');
     expect((await get('/doc/report-1')).status).toBe(404); // другая партия — ещё черновик
@@ -733,19 +734,35 @@ describe('Узлы сети: пространства-кластеры из та
     expect((await get('/doc/calc-14k')).status).toBe(404);
   });
 
-  it('хранитель публикует черновики узлов одной кнопкой в /k/vitrina и снимает обратно', async () => {
+  it('хранитель публикует черновики узлов одной кнопкой в /k/nodes и снимает обратно; ветвь — отдельно', async () => {
     await env.DB.prepare('DELETE FROM nodes').run();
     await add('aleph', null, 0, 'черновик');
     await add('b1', 'aleph', 0, 'черновик');
     const { cookie } = await login();
-    const pg = await (await get('/k/vitrina', { Cookie: cookie })).text();
+    const pg = await (await get('/k/nodes', { Cookie: cookie })).text();
     expect(pg).toContain('черновиков: 2');
+    expect(pg).toContain('Опубликовать ветвь');
+    expect(pg).toContain('class="on"');
     const csrf = csrfOf(pg);
     expect(await (await post('/k/vitrina/nodes/publish', { csrf }, cookie, { 'X-Editor': '1' })).text()).toContain('- опубликован: 2');
     expect((await get('/vitrina/scene/aleph.json')).status).toBe(200);
     await post('/k/vitrina/nodes/hide', { csrf }, cookie, { 'X-Editor': '1' });
     expect((await get('/vitrina/scene/aleph.json')).status).toBe(404);
     expect((await post('/k/vitrina/nodes/publish', { csrf: 'x' }, cookie, { 'X-Editor': '1' })).status).not.toBe(200);
+  });
+
+  it('ветвь публикуется целиком: узел и всё под ним, соседние ветви остаются черновиками', async () => {
+    await env.DB.prepare('DELETE FROM nodes').run();
+    await add('aleph', null, 0, 'черновик');
+    await add('p', 'aleph', 0, 'черновик');
+    await add('p1', 'p', 0, 'черновик');
+    await add('p11', 'p1', 0, 'черновик');
+    await add('m', 'aleph', 1, 'черновик');
+    const { cookie } = await login();
+    const csrf = csrfOf(await (await get('/k/nodes', { Cookie: cookie })).text());
+    expect(await (await post('/k/vitrina/nodes/publish', { csrf, root: 'p' }, cookie, { 'X-Editor': '1' })).text()).toContain('- опубликован: 3');
+    const st = (await env.DB.prepare('SELECT id, state FROM nodes ORDER BY id').all<{ id: string; state: string }>()).results;
+    expect(Object.fromEntries(st.map((x) => [x.id, x.state]))).toEqual({ aleph: 'черновик', m: 'черновик', p: 'опубликован', p1: 'опубликован', p11: 'опубликован' });
   });
 
   it('движок: длинный текст окна — листами с кнопками, черта — разделитель, ссылка /in/… — вход в пространство', () => {
