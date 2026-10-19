@@ -3,7 +3,7 @@ import { keeperDoor, keeperSession } from './panel';
 import { parentOf, publicScene, publishedScene, Scene, sceneNav } from './scene';
 import { nodeParent, visibleNodes, withNodes } from './nodes';
 import { publishedDocs } from './docs';
-import { currentTrack, hasKey } from './music';
+import { currentTrack, hasKey, widgetUrl } from './music';
 import { Env, html, inline, md, next, nowSec, render } from './util';
 import showcase from './pages/index.html';
 import llmsText from './pages/llms.txt';
@@ -14,7 +14,9 @@ import llmsText from './pages/llms.txt';
 // frame-src 'self': разделы панели хранителя открываются виджетами в окнах витрины (только своё происхождение)
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'self'";
 /** С музыкой плеер берёт звук у SoundCloud (только после ▶ посетителя: до этого адрес потока на странице не запрашивается). */
-const CSP_MUSIC = CSP + '; media-src https://*.sndcdn.com';
+// Музыка: официальный виджет SoundCloud (iframe и его скрипт Widget API — только после ▶) и свой плеер по ключу API (поток с sndcdn).
+const SC_WIDGET = 'https://w.soundcloud.com';
+const CSP_MUSIC = CSP.replace("script-src 'self'", `script-src 'self' ${SC_WIDGET}`).replace("frame-src 'self'", `frame-src 'self' ${SC_WIDGET}`) + '; media-src https://*.sndcdn.com';
 const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export interface VitrinaOpts {
@@ -67,6 +69,10 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
     MUSIC: !!t,
     TRACK_ID: t ? String(t.id) : '',
     KEY: hasKey(env) ? '1' : '0',
+    TRACK_KIND: t ? t.kind : '',
+    TRACK_SC: t ? String(t.sc_id) : '',
+    TRACK_BANDS: t && (await env.DB.prepare('SELECT 1 AS x FROM track_bands WHERE sc_id = ?').bind(t.sc_id).first()) ? '1' : '0',
+    WIDGET_URL: t ? widgetUrl(t) : '',
     TRACK_URL: t ? attr(t.url) : '',
     TRACK_TITLE: t ? attr(t.title) : '',
     ARTIST_URL: t ? attr(t.artist_url) : '',

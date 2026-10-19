@@ -113,8 +113,15 @@ CREATE TABLE anchors (day INTEGER PRIMARY KEY, seq INTEGER NOT NULL, link TEXT N
 -- Музыка витрины: треки SoundCloud из /k/music (звук не хранится — адрес и подпись); на витрине — meta 'music'.
 CREATE TABLE tracks (
   id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL UNIQUE, sc_id INTEGER NOT NULL, title TEXT NOT NULL,
-  artist TEXT NOT NULL, artist_url TEXT NOT NULL, added_at INTEGER NOT NULL, by_sign TEXT NOT NULL
+  artist TEXT NOT NULL, artist_url TEXT NOT NULL, added_at INTEGER NOT NULL, by_sign TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'track'  -- track | set (плейлист)
 );
+-- Спектр трека для виджета (migrations/0016-track-bands.sql): полосы по кадрам, кусками до 32 КБ.
+CREATE TABLE track_bands (
+  sc_id INTEGER PRIMARY KEY, fps INTEGER NOT NULL, bands INTEGER NOT NULL, frames INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL, added_at INTEGER NOT NULL, by_sign TEXT NOT NULL
+);
+CREATE TABLE track_band_chunks (sc_id INTEGER NOT NULL, n INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (sc_id, n));
 -- Узлы сети: дерево документов (src/nodes.ts, migrations/0013-nodes.sql). Узел с детьми — пространство /in/{id}.
 CREATE TABLE nodes (
   id TEXT PRIMARY KEY, parent TEXT, pos INTEGER NOT NULL DEFAULT 0,

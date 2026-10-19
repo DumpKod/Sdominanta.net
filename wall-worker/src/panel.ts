@@ -7,7 +7,7 @@ import { bumpVersion } from './post';
 import { jsonResponse, liveScene, sceneOut, spaceUrl, vitrinaPage } from './vitrina';
 import { b64url, clientIp, enc, Env, fmtTime, hmacSha256, html, nowSec, plain, randomBytes, sha256hex, timingSafeEqual } from './util';
 import editorJs from './pages/editor.js.txt';
-import { currentTrack, hasKey, normTrackUrl, resolveTrack, Track } from './music';
+import { BANDS_MAX, currentTrack, hasKey, normTrackUrl, resolveTrack, saveBands, Track } from './music';
 
 // Панель хранителя /k — простой HTML без скриптов.
 // Вход в два слоя, как у старых адресов: cookie ключа (__Host-keeper) → форма с 6 цифрами из аутентификатора →
@@ -50,7 +50,7 @@ async function sessionFrom(env: Env, req: Request, now: number): Promise<Session
   return env.DB.prepare('SELECT id, sign, exp FROM sessions WHERE id = ? AND revoked_at IS NULL AND exp > ?').bind(id, now).first<Session>();
 }
 
-function page(title: string, body: string, o: { status?: number; headers?: Record<string, string> } = {}): Response {
+function page(title: string, body: string, o: { status?: number; headers?: Record<string, string>; csp?: string } = {}): Response {
   const doc =
     '<!doctype html>\n<html lang="ru">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
     `<meta name="robots" content="noindex, nofollow">\n<title>${esc(title)}</title>\n<style>\n` +
@@ -82,7 +82,7 @@ function page(title: string, body: string, o: { status?: number; headers?: Recor
     '.work{padding:12px 16px}table{display:block;overflow-x:auto}}\n' +
     '</style>\n</head>\n<body>\n' + (body.startsWith('<header') ? `<div class="app">${body}\n</main></div>` : `<div class="solo">${body}</div>`) + '\n</body>\n</html>\n';
   // same-origin, а не no-referrer: при no-referrer браузер шлёт с формы «Origin: null», и проверка своего адреса отказала бы.
-  return html(doc, { status: o.status ?? 200, noStore: true, csp: CSP, headers: { 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'same-origin', ...o.headers } });
+  return html(doc, { status: o.status ?? 200, noStore: true, csp: o.csp ?? CSP, headers: { 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'same-origin', ...o.headers } });
 }
 
 /**
@@ -161,6 +161,8 @@ async function header(env: Env, sign: string, csrf: string, path = '', now = now
 
 // Сохранение сцены несёт её JSON в форме: до 256 КБ, а кириллица в urlencoded растёт до 9 раз — потолок с запасом.
 const SCENE_FORM_MAX = SCENE_MAX * 9 + FORM_MAX;
+/** Спектр трека приходит base64url: 4 знака на 3 байта. */
+const BANDS_FORM_MAX = Math.ceil((BANDS_MAX * 4) / 3) + FORM_MAX;
 
 async function readForm(req: Request, max = FORM_MAX): Promise<Record<string, string> | null> {
   if (Number(req.headers.get('Content-Length') ?? 0) > max) return null;
@@ -232,7 +234,7 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   const top = await header(env, me, csrf, path, now);
 
   if (post) {
-    const f = await readForm(req, path === '/vitrina/save' ? SCENE_FORM_MAX : FORM_MAX);
+    const f = await readForm(req, path === '/vitrina/save' ? SCENE_FORM_MAX : path === '/music/bands' ? BANDS_FORM_MAX : FORM_MAX);
     if (!f || !(await csrfOk(env, 'session', session.id, f.csrf ?? ''))) return page('Отказ', top + '<h1>Отказ</h1><p>Форма устарела: откройте страницу заново.</p>', { status: 403 });
     if (path === '/logout' || path === '/logout-all') {
       const q = path === '/logout' ? 'UPDATE sessions SET revoked_at = ? WHERE id = ?' : 'UPDATE sessions SET revoked_at = ? WHERE sign = ? AND revoked_at IS NULL';
@@ -501,23 +503,48 @@ async function sceneAction(env: Env, o: string, req: Request, path: string, f: R
 
 // ---------- музыка витрины ----------
 
+// Страница музыки — единственная в панели со скриптом: спектр трека считает браузер хранителя (/vitrina/bands-k.js).
+const CSP_MUSIC = CSP + "; script-src 'self'";
+
+const mmss = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+
 async function musicPage(env: Env, top: string, csrf: string, note = ''): Promise<Response> {
   const cur = await currentTrack(env);
   const rows = (await env.DB.prepare('SELECT * FROM tracks ORDER BY id DESC LIMIT 200').all<Track>()).results;
+  const spec = new Map(
+    (await env.DB.prepare('SELECT sc_id, fps, duration_ms FROM track_bands').all<{ sc_id: number; fps: number; duration_ms: number }>()).results.map((b) => [b.sc_id, b]),
+  );
   const hidden = `<input type="hidden" name="csrf" value="${esc(csrf)}">`;
   let b = top + '<h1>Музыка витрины</h1>\n';
   if (note) b += `<p class="warn">${esc(note)}</p>\n`;
-  b += `<p>Сейчас на витрине: ${cur ? `«${esc(cur.title)}» — ${esc(cur.artist)}` : 'тишина'}.` +
+  b += `<p>Сейчас на витрине: ${cur ? `${cur.kind === 'set' ? 'плейлист ' : ''}«${esc(cur.title)}» — ${esc(cur.artist)}` : 'тишина'}.` +
     (cur ? ` <form method="post" action="/k/music/off" style="display:inline">${hidden}<button type="submit">Выключить музыку</button></form>` : '') + '</p>\n';
-  b += `<p class="muted">Посетитель слышит трек только после своего нажатия ▶, по кругу. До нажатия к SoundCloud не уходит ни одного запроса. ` +
-    (hasKey(env) ? 'Ключ API внесён: звук идёт через свой плеер, холст слышит частоты.' : '<span class="warn">Ключ API SoundCloud не внесён (Secrets SC_CLIENT_ID и SC_CLIENT_SECRET): посетителю пока доступна только ссылка на трек.</span>') + '</p>\n';
-  b += `<form method="post" action="/k/music/add" class="row">${hidden}<label>Адрес трека на SoundCloud <input name="url" size="48" placeholder="https://soundcloud.com/автор/трек" required></label><button type="submit">Добавить</button></form>\n`;
+  b += '<h2>Как звучит и как слышит холст</h2>\n<div class="box">';
+  b += '<p>Посетитель слышит музыку только после своего нажатия ▶, по кругу. До нажатия к SoundCloud не уходит ни одного запроса.</p>';
+  b += '<p><b>Трек со спектром</b> и <b>плейлист</b> играет официальный виджет SoundCloud (проигрывания засчитываются авторам). ' +
+    'Холст берёт частоты из спектра по позиции виджета. Спектр считает ваш браузер из вашего файла этого трека: на сайт уходят только полосы частот, звук не покидает компьютер. ' +
+    'Файл должен быть тем же мастером, что на SoundCloud, иначе частоты разойдутся со звуком.</p>';
+  b += '<p><b>Плейлист:</b> частоты слышны у тех его треков, для которых посчитан спектр. Добавьте такие треки сюда отдельно и посчитайте спектр у каждого.</p>';
+  b += '<p><b>Трек без спектра</b> ' + (hasKey(env)
+    ? 'играет свой плеер по ключу API: холст слушает поток сам, если SoundCloud это разрешит (проверяется живым запуском).'
+    : 'играет виджет без частот: <span class="warn">ключ API SoundCloud не внесён</span> (Secrets SC_CLIENT_ID и SC_CLIENT_SECRET).') + '</p></div>\n';
+  b += `<form method="post" action="/k/music/add" class="row">${hidden}<label>Адрес трека или плейлиста на SoundCloud <input name="url" size="48" placeholder="https://soundcloud.com/автор/трек" required></label><button type="submit">Добавить</button></form>\n`;
   if (!rows.length) b += '<p>Треков ещё нет.</p>';
   else {
-    b += '<table><tr><th>Трек</th><th>Автор</th><th></th></tr>\n';
+    b += '<table><tr><th>Трек</th><th>Автор</th><th>Спектр</th><th></th></tr>\n';
     for (const t of rows) {
       const id = `<input type="hidden" name="id" value="${t.id}">`;
-      b += `<tr><td><a href="${esc(t.url)}">${esc(t.title)}</a></td><td><a href="${esc(t.artist_url)}">${esc(t.artist)}</a></td><td class="row">`;
+      const sp = spec.get(t.sc_id);
+      b += `<tr><td>${t.kind === 'set' ? 'плейлист ' : ''}<a href="${esc(t.url)}">${esc(t.title)}</a></td><td><a href="${esc(t.artist_url)}">${esc(t.artist)}</a></td><td>`;
+      if (t.kind === 'set') b += '<span class="muted">у треков плейлиста</span>';
+      else {
+        b += sp ? `есть: ${mmss(sp.duration_ms)}, ${sp.fps} кадров/с` : '<span class="muted">нет</span>';
+        b += `<form method="post" action="/k/music/bands" class="bands-form">${hidden}${id}` +
+          '<input type="hidden" name="fps"><input type="hidden" name="bands"><input type="hidden" name="frames"><input type="hidden" name="duration"><input type="hidden" name="data">' +
+          `<label class="row"><input type="file" accept="audio/*" class="bands-file" aria-label="Аудиофайл трека «${esc(t.title)}»"></label>` +
+          `<button type="submit">${sp ? 'Пересчитать' : 'Посчитать'} спектр</button> <span class="bands-note muted" aria-live="polite"></span></form>`;
+      }
+      b += '</td><td class="row">';
       b += cur?.id === t.id ? '<span>на витрине</span>' :
         `<form method="post" action="/k/music/choose">${hidden}${id}<button type="submit">Играть на витрине</button></form>` +
         `<form method="post" action="/k/music/remove">${hidden}${id}<button type="submit">Убрать</button></form>`;
@@ -525,20 +552,34 @@ async function musicPage(env: Env, top: string, csrf: string, note = ''): Promis
     }
     b += '</table>';
   }
-  return page('Музыка', b);
+  b += '\n<script type="module" src="/vitrina/bands-k.js"></script>';
+  return page('Музыка', b, { csp: CSP_MUSIC });
 }
 
-/** POST /k/music/add (url) · /choose (id) → трек на витрине · /off → тишина · /remove (id, не текущий). */
+/** base64url → байты; null — не base64url. */
+function unb64url(s: string): Uint8Array | null {
+  if (!/^[A-Za-z0-9_-]*$/.test(s)) return null;
+  try {
+    const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
+    const u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  } catch {
+    return null;
+  }
+}
+
+/** POST /k/music/add (url) · /choose (id) → трек на витрине · /off → тишина · /remove (id, не текущий) · /bands (id + спектр). */
 async function musicAction(env: Env, path: string, f: Record<string, string>, me: string, now: number, top: string): Promise<Response> {
   const back = (note: string, status = 200) => musicPage(env, top, f.csrf ?? '', note).then((r) => (status === 200 ? r : new Response(r.body, { status, headers: r.headers })));
   if (path === '/music/add') {
     const url = normTrackUrl(f.url ?? '');
-    if (!url) return back('Нужен адрес трека вида https://soundcloud.com/автор/трек (не плейлист и не профиль).', 400);
+    if (!url) return back('Нужен адрес трека https://soundcloud.com/автор/трек или плейлиста https://soundcloud.com/автор/sets/имя (не профиль).', 400);
     const t = await resolveTrack(url);
     if ('error' in t) return back(`Не добавлено: ${t.error}.`, 400);
-    await env.DB.prepare('INSERT INTO tracks (url, sc_id, title, artist, artist_url, added_at, by_sign) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (url) DO UPDATE SET sc_id = excluded.sc_id, title = excluded.title, artist = excluded.artist, artist_url = excluded.artist_url')
-      .bind(t.url, t.sc_id, t.title, t.artist, t.artist_url, now, me).run();
-    return back(`Добавлено: «${t.title}» — ${t.artist}.`);
+    await env.DB.prepare('INSERT INTO tracks (url, sc_id, title, artist, artist_url, added_at, by_sign, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (url) DO UPDATE SET sc_id = excluded.sc_id, title = excluded.title, artist = excluded.artist, artist_url = excluded.artist_url, kind = excluded.kind')
+      .bind(t.url, t.sc_id, t.title, t.artist, t.artist_url, now, me, t.kind).run();
+    return back(`Добавлено: ${t.kind === 'set' ? 'плейлист ' : ''}«${t.title}» — ${t.artist}.`);
   }
   const id = Number(f.id);
   if (path === '/music/choose') {
@@ -556,8 +597,24 @@ async function musicAction(env: Env, path: string, f: Record<string, string>, me
   if (path === '/music/remove') {
     const cur = await currentTrack(env);
     if (cur?.id === id) return back('Трек на витрине: сначала выберите другой или выключите музыку.', 409);
-    await env.DB.prepare('DELETE FROM tracks WHERE id = ?').bind(id).run();
+    // Спектр уходит вместе с последним треком с тем же номером SoundCloud.
+    const gone = `SELECT sc_id FROM tracks WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM tracks o WHERE o.sc_id = tracks.sc_id AND o.id != ?1)`;
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM track_band_chunks WHERE sc_id IN (${gone})`).bind(id),
+      env.DB.prepare(`DELETE FROM track_bands WHERE sc_id IN (${gone})`).bind(id),
+      env.DB.prepare('DELETE FROM tracks WHERE id = ?').bind(id),
+    ]);
     return back('Убрано.');
+  }
+  if (path === '/music/bands') {
+    const t = Number.isInteger(id) ? await env.DB.prepare('SELECT * FROM tracks WHERE id = ?').bind(id).first<Track>() : null;
+    if (!t) return back('Такого трека нет.', 404);
+    if (t.kind === 'set') return back('Спектр считается для трека, не для плейлиста: добавьте трек плейлиста отдельно.', 400);
+    const data = unb64url(f.data ?? '');
+    if (!data || !data.length) return back('Спектр не пришёл: выберите аудиофайл трека и дождитесь, пока браузер его посчитает (нужен JavaScript).', 400);
+    const why = await saveBands(env, t.sc_id, { fps: Number(f.fps), bands: Number(f.bands), frames: Number(f.frames), durationMs: Number(f.duration), data }, me, now);
+    if (why) return back(`Спектр не сохранён: ${why}.`, 400);
+    return back(`Спектр сохранён: «${t.title}», ${mmss(Number(f.duration))}.`);
   }
   return back('Нет такого действия.', 404);
 }

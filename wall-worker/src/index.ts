@@ -5,7 +5,7 @@ import { Format, pickFormat, present } from './format';
 import { flushIndexNow, INDEXNOW_KEY, SITEMAP_TTL, sitemapEntries, sitemapXml } from './indexing';
 import { head, headLine, seal } from './events';
 import { mcp } from './mcp';
-import { streamRoute } from './music';
+import { bandsRoute, streamRoute } from './music';
 import { anchorDaily, unb64, upgradeAnchors } from './ots';
 import { panel } from './panel';
 import { sceneJson, spacePage, vitrinaPage } from './vitrina';
@@ -170,6 +170,8 @@ async function routeInner(req: Request, env: Env, ctx: ExecutionContext, fmt: Fo
   if (raw.pathname.startsWith('/p/')) return passRoute(env, raw.origin, req, raw);
   const stream = /^\/music\/stream\/([1-9]\d{0,8})$/.exec(raw.pathname);
   if (stream) return streamRoute(env, req, Number(stream[1]), nowSec());
+  const bands = /^\/music\/bands\/([1-9]\d{0,19})$/.exec(raw.pathname);
+  if (bands) return bandsRoute(env, Number(bands[1]));
   const url = pathForm(raw) ?? raw;
   const o = url.origin;
   let p: string;

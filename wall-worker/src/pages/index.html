@@ -20,8 +20,9 @@
 </ul>
   </nav>
 {{#MUSIC}}
-  <!-- Музыка: трек, который выбрал хранитель. Звук — только после нажатия ▶, по кругу; до нажатия к SoundCloud не уходит ни одного запроса. -->
-  <aside class="music" data-slot="player" data-stream="/music/stream/{{TRACK_ID}}" data-key="{{KEY}}">
+  <!-- Музыка: трек или плейлист, который выбрал хранитель. Звук — только после нажатия ▶, по кругу; до нажатия к SoundCloud не уходит ни одного запроса.
+       Виджет SoundCloud (data-widget) появляется в нажатии; свой плеер по ключу API (data-stream) — для трека без спектра. -->
+  <aside class="music" data-slot="player" data-stream="/music/stream/{{TRACK_ID}}" data-key="{{KEY}}" data-kind="{{TRACK_KIND}}" data-sc="{{TRACK_SC}}" data-bands="{{TRACK_BANDS}}" data-widget="{{WIDGET_URL}}">
     <button class="music-play" type="button" aria-label="Слушать «{{TRACK_TITLE}}»" aria-pressed="false">▶</button>
     <span class="music-what">«<a href="{{TRACK_URL}}" rel="noopener noreferrer">{{TRACK_TITLE}}</a>» — <a href="{{ARTIST_URL}}" rel="noopener noreferrer">{{ARTIST}}</a> · звук: <a href="https://soundcloud.com" rel="noopener noreferrer">SoundCloud</a></span>
   </aside>

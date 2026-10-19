@@ -79,6 +79,10 @@ html:not(.js) body { overflow: auto; }
 .music-play:hover, .music-play:focus-visible { border-color: rgba(0, 242, 254, 0.8); outline: none; }
 .music-note { flex: none; color: #64748b; }
 html:not(.js) .music-play { display: none; }
+.music.widget-on { flex-wrap: wrap; border-radius: 12px; }
+/* Официальный виджет SoundCloud (мини-плеер): своя подпись, логотип и кнопка — всегда на виду. */
+.music-widget { flex-basis: 100%; }
+.music-widget iframe { display: block; width: min(420px, calc(100vw - 110px)); height: 20px; border: 0; }
 
 /* Место хранителя: разделы панели или поле кода; без места в сцене — вверху слева. */
 .keeper {

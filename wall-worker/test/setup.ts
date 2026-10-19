@@ -7,7 +7,7 @@ const TRIGGERS = schema.match(/^CREATE TRIGGER .*$/gm)!;
 
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 
-const TABLES = ['records', 'links', 'status_log', 'drafts', 'passes', 'pieces', 'piece_parts', 'test_marks', 'compat', 'otp_used', 'keeper_lock', 'rate', 'meta', 'accounts', 'sessions', 'scenes', 'indexnow_queue', 'anchors', 'tracks'];
+const TABLES = ['records', 'links', 'status_log', 'drafts', 'passes', 'pieces', 'piece_parts', 'test_marks', 'compat', 'otp_used', 'keeper_lock', 'rate', 'meta', 'accounts', 'sessions', 'scenes', 'indexnow_queue', 'anchors', 'tracks', 'track_bands', 'track_band_chunks'];
 beforeEach(async () => {
   await env.DB.batch([
     ...TABLES.map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
