@@ -237,6 +237,13 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
     if (!row) return page('Не найдено', top + '<h1>Версии нет</h1>', { status: 404 });
     return vitrinaPage(req, env, o, { scene: JSON.parse(row.json) as Scene, sceneUrl: `/k/vitrina/scene/${row.version}.json`, version: row.version, space: row.space });
   }
+  // Опубликованная сцена целиком, с заметками хранителя: её берёт движок витрины, когда хранитель вошёл (редактор правит её).
+  const lj = /^\/vitrina\/live\/([a-z0-9-]{1,32})\.json$/.exec(path);
+  if (lj) {
+    const { json, version } = await publishedScene(env, lj[1]);
+    if (lj[1] !== 'main' && !version) return new Response(JSON.stringify({ error: 'NO_SPACE' }), { status: 404, headers: jsonResponse('', { noStore: true }).headers });
+    return jsonResponse(json, { noStore: true, version });
+  }
   const sj = /^\/vitrina\/scene\/(0|[1-9]\d{0,8})\.json$/.exec(path);
   if (sj) {
     if (sj[1] === '0') return jsonResponse(JSON.stringify(DEFAULT_SCENE), { noStore: true });

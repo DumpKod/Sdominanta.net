@@ -1374,7 +1374,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   let fromId = cv.dataset.from || null;
   let going = null, pull = 0;
   const fade = { veil: 0, veilTo: 0 };
-  const sceneUrl = (sp) => (sp === 'main' ? '/vitrina/scene.json' : `/vitrina/scene/${sp}.json`);
+  // хранителю — сцены целиком, с его заметками (note): редактор правит то, что сохранит
+  const sceneUrl = (sp) => (keeper ? `/k/vitrina/live/${sp}.json` : sp === 'main' ? '/vitrina/scene.json' : `/vitrina/scene/${sp}.json`);
   const spaceUrl = (sp) => (sp === 'main' ? '/' : `/in/${sp}`);
   // Пространства без опубликованной сцены нет (404): гость упирается, хранитель входит в пустое, чтобы нарисовать.
   const loadScene = (sp) => fetch(sceneUrl(sp), { credentials: 'same-origin' }).then((r) => {

@@ -101,7 +101,7 @@ describe('Витрина: файлы', () => {
       // fetch — только своих путей: сцена, шрифт из жил, действия редактора
       for (const m of text.matchAll(/fetch\(([^,)]+)/g)) expect(m[1], name).toMatch(/^(?:'\/vitrina\/font\.json'|cv\.dataset\.scene \|\| '\/vitrina\/scene\.json'|sceneUrl\(sp|path|f\.path)$/);
       // сцена пространства (алеф-нуля) — тоже только свой путь
-      if (text.includes('sceneUrl = ')) expect(text).toContain("const sceneUrl = (sp) => (sp === 'main' ? '/vitrina/scene.json' : `/vitrina/scene/${sp}.json`);");
+      if (text.includes('sceneUrl = ')) expect(text).toContain("const sceneUrl = (sp) => (keeper ? `/k/vitrina/live/${sp}.json` : sp === 'main' ? '/vitrina/scene.json' : `/vitrina/scene/${sp}.json`);");
     }
   });
 
@@ -110,7 +110,7 @@ describe('Витрина: файлы', () => {
     expect(vitrinaJs).toContain('document.hidden');
     expect(vitrinaJs).toContain("matchMedia('(prefers-reduced-motion: reduce)')");
     expect(vitrinaJs).not.toMatch(/shadowBlur\s*=/);
-    expect(vitrinaJs).not.toContain('/k/vitrina'); // правка и сохранение живут только в /k/editor.js
+    expect(vitrinaJs).not.toMatch(/\/k\/vitrina\/(?:save|publish|rollback)/); // читает хранителю сцену целиком (/k/vitrina/live), но правка и сохранение живут только в /k/editor.js
     expect(vitrinaJs).not.toContain('localStorage');
     expect(editorJs).toContain("fetch(path, { method: 'POST'");
     expect(vitrinaJs).toContain("import * as M from '/vitrina/model.js'");
@@ -544,6 +544,28 @@ describe('Окно объекта: рама из узлов области', () 
     for (const s of ['function placeDive(', 'function diveCam(', 'if (!force && rama && rama.dive) return false;', 'cam.x = base.x; cam.y = base.y; cam.zoom = base.zoom', "classList.add('dive')"])
       expect(vitrinaJs, s).toContain(s);
   });
+  it('note — заметка хранителя у объекта и области: в сцене хранится, гостям и моделям не уходит, хранителю — целиком', async () => {
+    const area = [[0, 0], [10, 0], [10, 10]];
+    expect(validateScene(tiny({ note: 'x'.repeat(2001) })).ok).toBe(false);
+    expect(validateScene(tiny({ doors: [{ area, note: 5 }] })).ok).toBe(false);
+    const json = tiny({ note: 'Тайный замысел', doors: [{ area, label: 'Вход', note: 'Ещё тайна' }] });
+    expect(validateScene(json).ok).toBe(true);
+    const { cookie } = await login();
+    const v = /VERSION: (\d+)/.exec(await (await save(cookie, json)).text())![1];
+    const csrf = csrfOf(await (await get('/k/vitrina', { Cookie: cookie })).text());
+    expect((await post('/k/vitrina/publish', { csrf, version: v }, cookie, { 'X-Editor': '1' })).status).toBe(200);
+    for (const res of [await get('/vitrina/scene.json'), await get('/', HTML), await get('/'), await get('/json/')]) expect(await res.text()).not.toContain('тайн');
+    const full = await get('/k/vitrina/live/main.json', { Cookie: cookie });
+    expect(full.headers.get('Cache-Control')).toBe('no-store');
+    const j = (await full.json()) as { objects: { note?: string; doors?: { note?: string }[] }[] };
+    expect([j.objects[0].note, j.objects[0].doors![0].note]).toEqual(['Тайный замысел', 'Ещё тайна']);
+    expect((await get('/k/vitrina/live/main.json')).headers.get('Content-Type')).not.toContain('json'); // без сессии — нет
+    expect((await get('/k/vitrina/live/nowhere.json', { Cookie: cookie })).status).toBe(404);
+    expect(await (await get('/', { ...HTML, Cookie: cookie })).text()).toContain('data-scene="/k/vitrina/live/main.json"');
+    const o = new M.SceneObject({ id: 'a', label: 'A', strokes: [], note: 'n', doors: [{ area, note: 'd' }] });
+    const oj = o.toJSON() as unknown as { note?: string; doors: { note?: string }[] };
+    expect([oj.note, oj.doors[0].note]).toEqual(['n', 'd']);
+  });
   it('doors — ещё области объекта со своим содержимым; модель двигает их вместе с объектом и не сохраняет пустые', () => {
     const area = [[0, 0], [10, 0], [10, 10]];
     expect(validateScene(tiny({ doors: [{ area, href: '/wall/rules', label: 'Правила', frame: { push: 300, depth: 0.5 } }, { area, inner: 'net' }] })).ok).toBe(true);
@@ -553,7 +575,7 @@ describe('Окно объекта: рама из узлов области', () 
     expect(validateScene(tiny({ doors: Array.from({ length: 17 }, () => ({ area })) })).ok).toBe(false);
     const o = new M.SceneObject({ id: 'a', label: 'A', strokes: [], doors: [{ area: area.map((p) => [...p]), window: { title: 'T' } }, {}] });
     o.translate(5, 0);
-    const j = o.toJSON();
+    const j = o.toJSON() as unknown as { doors: { area: number[][] }[] };
     expect(j.doors).toHaveLength(1);
     expect(j.doors[0].area[0]).toEqual([5, 0]);
     expect(o.bounds().x1).toBe(15);

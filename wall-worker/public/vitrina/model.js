@@ -65,7 +65,7 @@ export const FRAME = {
 export const FRAME_DEFAULTS = defaults(FRAME);
 /** Области-входы объекта: сколько и какие поля у каждой (то же содержимое окна, что у объекта). */
 export const DOORS_MAX = 16;
-export const DOOR_KEYS = ['area', 'label', 'href', 'inner', 'widget', 'window', 'frame'];
+export const DOOR_KEYS = ['area', 'label', 'href', 'inner', 'widget', 'window', 'frame', 'note'];
 export const STYLE_DEFAULTS = defaults(STYLE);
 export const SPACE_DEFAULTS = defaults(SPACE);
 
@@ -171,7 +171,7 @@ export class SceneObject {
     this.z = typeof src.z === 'number' ? src.z : 0;
     this.strokes = clone(src.strokes || []);
     this.area = src.area ? clone(src.area) : null;
-    /** Ещё области объекта — свои входы: { area, label?, href?, inner?, widget?, window?, frame? } (до DOORS_MAX). */
+    /** Ещё области объекта — свои входы: { area, label?, href?, inner?, widget?, window?, frame?, note? } (до DOORS_MAX). */
     this.doors = src.doors ? clone(src.doors) : null;
     this.window = src.window ? clone(src.window) : null;
     this.frame = src.frame ? clone(src.frame) : null;
@@ -180,6 +180,8 @@ export class SceneObject {
     /** Связи узла с соседями по уровню: { to — id, w — вес 0…1 }; при входе внутрь — нити сквозь горизонт. */
     this.links = src.links ? clone(src.links) : null;
     this.style = src.style ? clone(src.style) : null;
+    /** Заметка хранителя: в сцене хранится, гостям и моделям сервер её не отдаёт. */
+    this.note = src.note || null;
   }
   /** Параметр объекта: свой или по умолчанию. */
   get(k) {
@@ -273,6 +275,7 @@ export class SceneObject {
     if (this.widget) o.widget = this.widget;
     if (this.links && this.links.length) o.links = this.links;
     if (this.style && Object.keys(this.style).length) o.style = this.style;
+    if (this.note) o.note = this.note;
     return o;
   }
 }

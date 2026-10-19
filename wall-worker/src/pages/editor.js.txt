@@ -112,7 +112,8 @@
     // 2) закрасить её кистью «Область» по узлам; 3) что внутри; 4) как взрывается и раскрывается; 5) проверить.
     // Вход срабатывает в пределе приближения над областью: колёсико копит напор, за порогом — взрыв внутрь.
     const winBox = section('Входы: области и окна', true);
-    const fDoor = input('select'), dLabel = input(), dHref = input(), dInner = input();
+    const fDoor = input('select'), dLabel = input(), dHref = input(), dInner = input(), fNote = input('textarea');
+    fNote.rows = 3;
     const winState = el('p', 'kp-note', '');
     const winRow = el('div', 'kp-row');
     button(winRow, 'Закрасить область', () => setTool('area'), '', 'Инструмент «Область»: кистью по узлам, Alt — стереть');
@@ -140,6 +141,7 @@
     const mainNote = el('p', 'kp-note', 'У основной области адрес и алеф-нуль — поля объекта выше.');
     winBox.append(
       wrap(fDoor, 'Область объекта: основная или ещё одна (до 16), у каждой своё содержимое'),
+      wrap(fNote, 'Заметка: что здесь задумано, любым текстом. Видит только хранитель'),
       winState, winRow, mainNote, doorOnly,
       wrap(fWidget, 'Виджет: живое управление (разделы хранителя видит только хранитель)'),
       wrap(fTitle, 'Заголовок окна'), wrap(fText, 'Текст окна: по абзацу на строку'), wrap(fLinks, 'Ссылки, по строке «подпись | /путь»'),
@@ -328,7 +330,7 @@
     }
     function showFields() {
       const o = first();
-      for (const f of [fId, fLabel, fHref, fInner, fSlot, fWidget, fZ, fTitle, fText, fLinks, dLabel, dHref, dInner]) f.disabled = !o;
+      for (const f of [fId, fLabel, fHref, fInner, fSlot, fWidget, fZ, fTitle, fText, fLinks, dLabel, dHref, dInner, fNote]) f.disabled = !o;
       const t = tgt();
       fillDoors(o);
       doorOnly.hidden = doorIx < 0; mainNote.hidden = doorIx >= 0;
@@ -336,6 +338,7 @@
       dHref.value = (doorIx >= 0 && t.href) || '';
       dInner.value = (doorIx >= 0 && t.inner) || '';
       fWidget.value = (t && t.widget) || '';
+      fNote.value = (t && t.note) || '';
       fRel.value = ((o && o.links) || []).map((l) => `${l.to} ${l.w ?? 0.5}`).join('\n');
       fRel.disabled = !o;
       for (const s of [...Object.values(sliders), ...Object.values(frameSliders)]) s.r.disabled = !o;
@@ -381,6 +384,7 @@
       o.slot = fSlot.value || null;
       const t = tgt();
       t.widget = fWidget.value || null;
+      t.note = fNote.value.trim() || null;
       if (doorIx >= 0) {
         t.label = dLabel.value.trim() || null;
         t.href = dHref.value.trim() || null;
@@ -405,7 +409,7 @@
       if (opt) opt.textContent = `${o.id} — ${o.label}`;
     }
     pick.addEventListener('change', () => select(pick.value ? [pick.value] : []));
-    for (const f of [fLabel, fHref, fInner, fSlot, fWidget, fRel, fZ, fTitle, fText, fLinks, dLabel, dHref, dInner]) {
+    for (const f of [fLabel, fHref, fInner, fSlot, fWidget, fRel, fZ, fTitle, fText, fLinks, dLabel, dHref, dInner, fNote]) {
       f.addEventListener('input', readFields);
       f.addEventListener('change', () => changed(f === fZ));
     }

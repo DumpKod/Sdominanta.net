@@ -1,6 +1,6 @@
 import { htmlText } from './format';
 import { keeperDoor, keeperSession } from './panel';
-import { parentOf, publishedScene, Scene, sceneNav } from './scene';
+import { parentOf, publicScene, publishedScene, Scene, sceneNav } from './scene';
 import { currentTrack, hasKey } from './music';
 import { Env, html, inline, md, next, nowSec, render } from './util';
 import showcase from './pages/index.html';
@@ -41,7 +41,8 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
     DOOR: !!door,
     LOGIN_CSRF: door?.csrf ?? '',
     BACK: spaceUrl(space),
-    SCENE_URL: opts.sceneUrl ?? sceneUrlOf(space),
+    // хранителю — сцена целиком, с заметками (/k/vitrina/live/…): редактор правит её и не теряет их при сохранении
+    SCENE_URL: opts.sceneUrl ?? (s ? `/k/vitrina/live/${space}.json` : sceneUrlOf(space)),
     SPACE: space,
     PARENT: space === 'main' ? '' : parent ? parent.space : 'main',
     FROM: parent ? parent.id : '',
@@ -66,10 +67,10 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
 
 /** Опубликованная сцена JSON-ом; кэш короткий, ключ кэша страниц сбрасывает публикация (версия стены в meta). */
 export async function sceneJson(env: Env, space = 'main'): Promise<Response> {
-  const { json, version } = await publishedScene(env, space);
+  const { scene, version } = await publishedScene(env, space);
   // Неопубликованное пространство — 404: гость упирается (холст вздрагивает), хранитель входит в пустое и рисует.
   if (space !== 'main' && !version) return new Response(JSON.stringify({ error: 'NO_SPACE' }), { status: 404, headers: jsonResponse('', { noStore: true }).headers });
-  return jsonResponse(json, { maxAge: 30, version });
+  return jsonResponse(JSON.stringify(publicScene(scene)), { maxAge: 30, version });
 }
 
 export function jsonResponse(json: string, o: { maxAge?: number; version?: number; noStore?: boolean } = {}): Response {
