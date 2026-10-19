@@ -9,6 +9,7 @@ import { streamRoute } from './music';
 import { anchorDaily, unb64, upgradeAnchors } from './ots';
 import { panel } from './panel';
 import { sceneJson, spacePage, vitrinaPage } from './vitrina';
+import { docPage } from './docs';
 import { SPACE_RE } from './scene';
 import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
 import { wallLog, wallRecordLog, wallDigest, wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
@@ -201,6 +202,10 @@ async function routeInner(req: Request, env: Env, ctx: ExecutionContext, fmt: Fo
   if ((sp = /^\/vitrina\/scene\/([a-z0-9-]{1,32})\.json$/.exec(p)) && SPACE_RE.test(sp[1])) return cached(req, env, ctx, () => sceneJson(env, sp![1]));
   if ((sp = /^\/in\/([a-z0-9-]{1,32})$/.exec(p)) && sp[1] !== 'main') {
     const r = await spacePage(req, env, o, sp[1], fmt);
+    if (r) return r;
+  }
+  if ((sp = /^\/doc\/([^/]{1,120})$/.exec(p))) {
+    const r = await docPage(req, env, o, sp[1]);
     if (r) return r;
   }
   if (p === '/wall/test' || p.startsWith('/wall/test/')) return wallTest(env, o, p.slice('/wall/test/'.length), req, url);

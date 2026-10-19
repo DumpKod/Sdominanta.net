@@ -305,6 +305,23 @@ async function scenesPage(env: Env, top: string, csrf: string): Promise<Response
     if (cnt('черновик')) b += `<form method="post" action="/k/vitrina/nodes/publish">${hidden}<button type="submit">Опубликовать черновики узлов</button></form>`;
     if (cnt('опубликован')) b += `<form method="post" action="/k/vitrina/nodes/hide">${hidden}<button type="submit">Снять узлы в черновик</button></form>`;
   }
+  // документы архива: партия = папка архива; хранитель читает черновик по ссылке и публикует папку целиком
+  const ds = (await env.DB.prepare(`SELECT CASE WHEN instr(path, '/') > 0 THEN substr(path, 1, instr(path, '/') - 1) ELSE '' END AS batch, state, count(*) AS n, min(name) AS first FROM docs GROUP BY batch, state ORDER BY batch`)
+    .all<{ batch: string; state: string; n: number; first: string }>()).results;
+  if (ds.length) {
+    b += '<h2>Документы архива</h2><p class="muted">Партия — папка архива. Черновик видит только хранитель: откройте, прочтите, потом «Опубликовать партию».</p>\n';
+    b += '<table><tr><th>Партия</th><th>Черновиков</th><th>Опубликовано</th><th></th></tr>\n';
+    for (const bt of [...new Set(ds.map((x) => x.batch))]) {
+      const of = (st: string) => ds.find((x) => x.batch === bt && x.state === st);
+      const dr = of('черновик'), pb = of('опубликован');
+      const f = `${hidden}<input type="hidden" name="batch" value="${esc(bt)}">`;
+      b += `<tr><td>${esc(bt || '(корень)')}</td><td>${dr?.n ?? 0}</td><td>${pb?.n ?? 0}</td><td class="row"><a href="/doc/${esc((dr ?? pb)!.first)}">Открыть первый</a>`;
+      if (dr) b += `<form method="post" action="/k/vitrina/docs/publish">${f}<button type="submit">Опубликовать партию</button></form>`;
+      if (pb) b += `<form method="post" action="/k/vitrina/docs/hide">${f}<button type="submit">Снять в черновик</button></form>`;
+      b += '</td></tr>\n';
+    }
+    b += '</table>';
+  }
   if (!rows.length) b += '<p>Версий ещё нет: сохраните черновик из редактора на витрине.</p>';
   else {
     b += '<table><tr><th>Версия</th><th>Пространство</th><th>Статус</th><th>Кто</th><th>Когда</th><th>Размер</th><th></th></tr>\n';
@@ -334,6 +351,16 @@ async function sceneAction(env: Env, o: string, req: Request, path: string, f: R
     const [from, to] = path.endsWith('publish') ? ['черновик', 'опубликован'] : ['опубликован', 'черновик'];
     const r = await env.DB.batch([env.DB.prepare('UPDATE nodes SET state = ? WHERE state = ?').bind(to, from), bumpVersion(env.DB)]);
     return reply(true, [`OK NODES`, `- ${to}: ${r[0].meta.changes}`]);
+  }
+  if (path === '/vitrina/docs/publish' || path === '/vitrina/docs/hide') {
+    const [from, to] = path.endsWith('publish') ? ['черновик', 'опубликован'] : ['опубликован', 'черновик'];
+    const bt = f.batch ?? '';
+    const where = bt ? `substr(path, 1, length(?1) + 1) = ?1 || '/'` : `instr(path, '/') = 0 AND ?1 = ''`;
+    const r = await env.DB.batch([
+      env.DB.prepare(`UPDATE docs SET state = ?2, published_at = ?3 WHERE state = ?4 AND ${where}`).bind(bt, to, to === 'опубликован' ? now : null, from),
+      bumpVersion(env.DB),
+    ]);
+    return reply(true, [`OK DOCS`, `BATCH: ${bt || '(корень)'}`, `- ${to}: ${r[0].meta.changes}`]);
   }
   if (path === '/vitrina/save') {
     const raw = f.json ?? '';

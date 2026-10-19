@@ -124,3 +124,9 @@ CREATE TABLE nodes (
 );
 CREATE INDEX nodes_parent ON nodes (parent, pos);
 CREATE INDEX nodes_state ON nodes (state);
+-- Документы архива сети (src/docs.ts, migrations/0015-docs.sql): /doc/{name}, черновик видит только хранитель.
+CREATE TABLE docs (
+  name TEXT PRIMARY KEY, path TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL,
+  state TEXT NOT NULL, created_at INTEGER NOT NULL, published_at INTEGER
+);
+CREATE INDEX docs_state ON docs (state);

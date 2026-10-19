@@ -698,6 +698,41 @@ describe('Узлы сети: пространства-кластеры из та
     expect(await (await get('/k/vitrina/live/aleph.json', { Cookie: cookie })).text()).toContain('[calc-14k.md](https://drive.google.com/file/d/abc/view)');
   });
 
+  it('документы архива: черновик — только хранителю, партия публикуется папкой, окно узла ссылается на /doc/', async () => {
+    await env.DB.prepare('DELETE FROM nodes').run();
+    await env.DB.prepare('DELETE FROM docs').run();
+    const doc = (name: string, path: string) =>
+      env.DB.prepare(`INSERT INTO docs (name, path, title, body, state, created_at) VALUES (?, ?, ?, ?, 'черновик', 0)`).bind(name, path, name, `# ${name}\n\nТеория ${name}`).run();
+    await doc('calc-14k', '02-computations/calc-14k.md');
+    await doc('report-1', '01_reports/report-1.md');
+    await doc('INDEX', '00-INDEX.md');
+    await add('aleph', null, 0, 'опубликован');
+    await add('leaf', 'aleph', 0, 'опубликован');
+    await env.DB.prepare(`UPDATE nodes SET files = ? WHERE id = 'leaf'`).bind(JSON.stringify([{ name: 'calc-14k.md', doc: 'calc-14k' }])).run();
+    expect((await get('/doc/calc-14k')).status).toBe(404);
+    expect(await (await get('/vitrina/scene/aleph.json')).text()).not.toContain('/doc/calc-14k');
+    const { cookie } = await login();
+    const k = await (await get('/doc/calc-14k', { Cookie: cookie })).text();
+    expect(k).toContain('Теория calc-14k');
+    expect(k).toContain('черновик — видит только хранитель');
+    const pg = await (await get('/k/vitrina', { Cookie: cookie })).text();
+    expect(pg).toContain('Документы архива');
+    const csrf = csrfOf(pg);
+    expect(await (await post('/k/vitrina/docs/publish', { csrf, batch: '02-computations' }, cookie, { 'X-Editor': '1' })).text()).toContain('- опубликован: 1');
+    expect((await get('/doc/report-1')).status).toBe(404); // другая партия — ещё черновик
+    expect((await get('/doc/INDEX')).status).toBe(404);
+    const g = await (await get('/doc/calc-14k')).text();
+    expect(g).toContain('Теория calc-14k');
+    expect(g).not.toContain('черновик');
+    expect(g).toContain('/in/aleph'); // узел, который на него ссылается
+    expect(await (await get('/vitrina/scene/aleph.json')).text()).toContain('[calc-14k.md](/doc/calc-14k)');
+    expect(await (await post('/k/vitrina/docs/publish', { csrf, batch: '' }, cookie, { 'X-Editor': '1' })).text()).toContain('- опубликован: 1');
+    expect((await get('/doc/INDEX')).status).toBe(200);
+    expect((await get('/doc/report-1')).status).toBe(404);
+    await post('/k/vitrina/docs/hide', { csrf, batch: '02-computations' }, cookie, { 'X-Editor': '1' });
+    expect((await get('/doc/calc-14k')).status).toBe(404);
+  });
+
   it('хранитель публикует черновики узлов одной кнопкой в /k/vitrina и снимает обратно', async () => {
     await env.DB.prepare('DELETE FROM nodes').run();
     await add('aleph', null, 0, 'черновик');

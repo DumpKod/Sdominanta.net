@@ -2,6 +2,7 @@ import { htmlText } from './format';
 import { keeperDoor, keeperSession } from './panel';
 import { parentOf, publicScene, publishedScene, Scene, sceneNav } from './scene';
 import { nodeParent, visibleNodes, withNodes } from './nodes';
+import { publishedDocs } from './docs';
 import { currentTrack, hasKey } from './music';
 import { Env, html, inline, md, next, nowSec, render } from './util';
 import showcase from './pages/index.html';
@@ -30,7 +31,7 @@ export interface VitrinaOpts {
 export async function liveScene(env: Env, space: string, keeper: boolean) {
   const pub = await publishedScene(env, space);
   const all = await visibleNodes(env, keeper);
-  const scene = space === 'main' ? pub.scene : withNodes(pub.scene, all, space, keeper);
+  const scene = space === 'main' ? pub.scene : withNodes(pub.scene, all, space, keeper, await publishedDocs(env));
   const parent = space === 'main' ? null : nodeParent(all, space) ?? (await parentOf(env, space));
   return { scene, version: pub.version, exists: space === 'main' || !!pub.version || scene !== pub.scene, parent };
 }
