@@ -129,6 +129,11 @@ html:not(.js) .music-play { display: none; }
 .page-body code { color: #a5f3fc; }
 .page-body pre { margin: 0 0 0.9em; white-space: pre-wrap; overflow-wrap: anywhere; color: #94a3b8; }
 .page-body pre.page-row { margin: 0; }
+.page-body hr { border: 0; height: 1px; margin: 1.4em 0; background: linear-gradient(90deg, transparent, rgba(0, 242, 254, 0.45), transparent); }
+.page-leaves { display: flex; align-items: center; justify-content: center; gap: 1.2em; margin: 2em 0 1em; font-variant-numeric: tabular-nums; color: #94a3b8; }
+.page-leaves button { min-width: 3em; padding: 0.45em 0.9em; font: inherit; color: #e0fbff; background: rgba(1, 3, 6, 0.6); border: 1px solid rgba(0, 242, 254, 0.35); border-radius: 999px; cursor: pointer; }
+.page-leaves button:hover, .page-leaves button:focus-visible { border-color: rgba(0, 242, 254, 0.85); outline: none; }
+.page-leaves button:disabled { opacity: 0.3; cursor: default; }
 
 /* Текст в конце провала: на весь экран любого устройства, поверх живого поля (оно видно сквозь вуаль по краям).
    --col — ширина колонки (frame.width объекта), --veil — насколько приглушить поле под текстом (frame.far). */

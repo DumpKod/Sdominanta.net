@@ -4,7 +4,7 @@ import { formatErrors } from './card';
 import { hit } from './rate';
 import { DEFAULT_SCENE, SCENE_MAX, SPACE_RE, publishedScene, SceneRow, validateScene, Scene } from './scene';
 import { bumpVersion } from './post';
-import { jsonResponse, spaceUrl, vitrinaPage } from './vitrina';
+import { jsonResponse, liveScene, sceneOut, spaceUrl, vitrinaPage } from './vitrina';
 import { b64url, clientIp, enc, Env, fmtTime, hmacSha256, html, nowSec, plain, randomBytes, sha256hex, timingSafeEqual } from './util';
 import editorJs from './pages/editor.js.txt';
 import { currentTrack, hasKey, normTrackUrl, resolveTrack, Track } from './music';
@@ -240,9 +240,9 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   // Опубликованная сцена целиком, с заметками хранителя: её берёт движок витрины, когда хранитель вошёл (редактор правит её).
   const lj = /^\/vitrina\/live\/([a-z0-9-]{1,32})\.json$/.exec(path);
   if (lj) {
-    const { json, version } = await publishedScene(env, lj[1]);
-    if (lj[1] !== 'main' && !version) return new Response(JSON.stringify({ error: 'NO_SPACE' }), { status: 404, headers: jsonResponse('', { noStore: true }).headers });
-    return jsonResponse(json, { noStore: true, version });
+    const { scene, version, exists, parent } = await liveScene(env, lj[1], true);
+    if (!exists) return new Response(JSON.stringify({ error: 'NO_SPACE' }), { status: 404, headers: jsonResponse('', { noStore: true }).headers });
+    return jsonResponse(sceneOut(scene, lj[1], parent), { noStore: true, version });
   }
   const sj = /^\/vitrina\/scene\/(0|[1-9]\d{0,8})\.json$/.exec(path);
   if (sj) {
@@ -297,6 +297,14 @@ async function scenesPage(env: Env, top: string, csrf: string): Promise<Response
     b += `<td><form method="post" action="/k/vitrina/rollback">${hidden}<input type="hidden" name="space" value="${esc(sp)}"><button type="submit">Откатить</button></form></td></tr>\n`;
   }
   b += '</table><p class="muted">«Откатить» снимает текущую публикацию пространства: оно вернётся к предыдущей опубликованной версии.</p>\n';
+  // узлы сети: черновики видит только хранитель (на витрине — с пометкой), публикует их здесь одной кнопкой
+  const ns = (await env.DB.prepare(`SELECT state, count(*) AS n FROM nodes GROUP BY state`).all<{ state: string; n: number }>()).results;
+  if (ns.length) {
+    const cnt = (st: string) => ns.find((x) => x.state === st)?.n ?? 0;
+    b += `<h2>Узлы сети</h2><p>Опубликовано: ${cnt('опубликован')} · черновиков: ${cnt('черновик')}. Корень — <a href="/in/aleph">/in/aleph</a>.</p>\n`;
+    if (cnt('черновик')) b += `<form method="post" action="/k/vitrina/nodes/publish">${hidden}<button type="submit">Опубликовать черновики узлов</button></form>`;
+    if (cnt('опубликован')) b += `<form method="post" action="/k/vitrina/nodes/hide">${hidden}<button type="submit">Снять узлы в черновик</button></form>`;
+  }
   if (!rows.length) b += '<p>Версий ещё нет: сохраните черновик из редактора на витрине.</p>';
   else {
     b += '<table><tr><th>Версия</th><th>Пространство</th><th>Статус</th><th>Кто</th><th>Когда</th><th>Размер</th><th></th></tr>\n';
@@ -322,6 +330,11 @@ async function sceneAction(env: Env, o: string, req: Request, path: string, f: R
     editor
       ? plain(lines.join('\n') + '\n', { status, noStore: true })
       : page(ok ? 'Витрина' : 'Отказ', top + `<h1>${esc(lines[0])}</h1><pre>${esc(lines.slice(1).join('\n'))}</pre><p><a href="/k/vitrina">К версиям</a></p>`, { status });
+  if (path === '/vitrina/nodes/publish' || path === '/vitrina/nodes/hide') {
+    const [from, to] = path.endsWith('publish') ? ['черновик', 'опубликован'] : ['опубликован', 'черновик'];
+    const r = await env.DB.batch([env.DB.prepare('UPDATE nodes SET state = ? WHERE state = ?').bind(to, from), bumpVersion(env.DB)]);
+    return reply(true, [`OK NODES`, `- ${to}: ${r[0].meta.changes}`]);
+  }
   if (path === '/vitrina/save') {
     const raw = f.json ?? '';
     const v = validateScene(raw);

@@ -56,6 +56,7 @@ export interface SceneObject {
   inner?: string;
   slot?: (typeof SLOTS)[number];
   note?: string; // заметка хранителя: хранится в сцене, гостям и моделям не уходит (publicScene)
+  auto?: 'node'; // объект построил сервер из таблицы узлов (src/nodes.ts): в сохранённой сцене его нет, редактор его не сохраняет
 }
 export interface Scene {
   v: 2;

@@ -182,6 +182,8 @@ export class SceneObject {
     this.style = src.style ? clone(src.style) : null;
     /** Заметка хранителя: в сцене хранится, гостям и моделям сервер её не отдаёт. */
     this.note = src.note || null;
+    /** Построен сервером из узлов сети (auto: 'node'): в сохранённую сцену не входит, редактор его не выбирает. */
+    this.auto = src.auto || null;
   }
   /** Параметр объекта: свой или по умолчанию. */
   get(k) {
@@ -276,6 +278,7 @@ export class SceneObject {
     if (this.links && this.links.length) o.links = this.links;
     if (this.style && Object.keys(this.style).length) o.style = this.style;
     if (this.note) o.note = this.note;
+    if (this.auto) o.auto = this.auto;
     return o;
   }
 }
@@ -307,6 +310,12 @@ export class Scene {
     let n = 1;
     while (this.objects.some((o) => o.id === `${prefix}-${n}`)) n++;
     return `${prefix}-${n}`;
+  }
+  /** Сцена для сохранения: без объектов, построенных сервером. */
+  toSaved() {
+    const j = this.toJSON();
+    j.objects = j.objects.filter((o) => !o.auto);
+    return j;
   }
   toJSON() {
     const j = { v: 2 };

@@ -115,3 +115,12 @@ CREATE TABLE tracks (
   id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL UNIQUE, sc_id INTEGER NOT NULL, title TEXT NOT NULL,
   artist TEXT NOT NULL, artist_url TEXT NOT NULL, added_at INTEGER NOT NULL, by_sign TEXT NOT NULL
 );
+-- Узлы сети: дерево документов (src/nodes.ts, migrations/0013-nodes.sql). Узел с детьми — пространство /in/{id}.
+CREATE TABLE nodes (
+  id TEXT PRIMARY KEY, parent TEXT, pos INTEGER NOT NULL DEFAULT 0,
+  sign TEXT, title TEXT NOT NULL, short TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL, by_sign TEXT NOT NULL, dates TEXT, src TEXT, links TEXT NOT NULL DEFAULT '[]',
+  state TEXT NOT NULL, created_at INTEGER NOT NULL, pass_pub TEXT
+);
+CREATE INDEX nodes_parent ON nodes (parent, pos);
+CREATE INDEX nodes_state ON nodes (state);

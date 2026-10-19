@@ -1,6 +1,7 @@
 import { htmlText } from './format';
 import { keeperDoor, keeperSession } from './panel';
 import { parentOf, publicScene, publishedScene, Scene, sceneNav } from './scene';
+import { nodeParent, visibleNodes, withNodes } from './nodes';
 import { currentTrack, hasKey } from './music';
 import { Env, html, inline, md, next, nowSec, render } from './util';
 import showcase from './pages/index.html';
@@ -22,6 +23,18 @@ export interface VitrinaOpts {
   space?: string; // пространство: main — главная витрина, иначе алеф-нуль /in/{space}
 }
 
+/**
+ * Сцена пространства, как её видит зритель: опубликованная нарисованная плюс узлы сети (src/nodes.ts).
+ * exists — пространство есть (сцена опубликована или есть узел с таким именем); parent — откуда в него входят.
+ */
+export async function liveScene(env: Env, space: string, keeper: boolean) {
+  const pub = await publishedScene(env, space);
+  const all = await visibleNodes(env, keeper);
+  const scene = space === 'main' ? pub.scene : withNodes(pub.scene, all, space);
+  const parent = space === 'main' ? null : nodeParent(all, space) ?? (await parentOf(env, space));
+  return { scene, version: pub.version, exists: space === 'main' || !!pub.version || scene !== pub.scene, parent };
+}
+
 /** Адрес сцены пространства для движка. */
 export const sceneUrlOf = (space: string) => (space === 'main' ? '/vitrina/scene.json' : `/vitrina/scene/${space}.json`);
 /** Адрес страницы пространства. */
@@ -31,8 +44,9 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
   const s = await keeperSession(env, req, nowSec());
   const door = s ? null : await keeperDoor(env, req, nowSec());
   const space = opts.space ?? 'main';
-  const scene = opts.scene ?? (await publishedScene(env, space)).scene;
-  const parent = space === 'main' ? null : await parentOf(env, space);
+  const live = await liveScene(env, space, !!s);
+  const scene = opts.scene ?? live.scene;
+  const parent = live.parent;
   const ENTRY = htmlText(render(llmsText, { BASE: o }));
   const t = await currentTrack(env);
   const body = render(showcase, {
@@ -67,10 +81,15 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
 
 /** Опубликованная сцена JSON-ом; кэш короткий, ключ кэша страниц сбрасывает публикация (версия стены в meta). */
 export async function sceneJson(env: Env, space = 'main'): Promise<Response> {
-  const { scene, version } = await publishedScene(env, space);
+  const { scene, version, exists, parent } = await liveScene(env, space, false);
   // Неопубликованное пространство — 404: гость упирается (холст вздрагивает), хранитель входит в пустое и рисует.
-  if (space !== 'main' && !version) return new Response(JSON.stringify({ error: 'NO_SPACE' }), { status: 404, headers: jsonResponse('', { noStore: true }).headers });
-  return jsonResponse(JSON.stringify(publicScene(scene)), { maxAge: 30, version });
+  if (!exists) return new Response(JSON.stringify({ error: 'NO_SPACE' }), { status: 404, headers: jsonResponse('', { noStore: true }).headers });
+  return jsonResponse(sceneOut(publicScene(scene), space, parent), { maxAge: 30, version });
+}
+
+/** JSON сцены для движка; up — пространство уровнем выше (движку при выходе наружу без перезагрузки). */
+export function sceneOut(scene: Scene, space: string, parent: { space: string } | null): string {
+  return JSON.stringify(space === 'main' ? scene : { ...scene, up: parent ? parent.space : 'main' });
 }
 
 export function jsonResponse(json: string, o: { maxAge?: number; version?: number; noStore?: boolean } = {}): Response {
@@ -91,12 +110,13 @@ export function jsonResponse(json: string, o: { maxAge?: number; version?: numbe
  * или на него указывает объект опубликованной сцены; хранитель в сессии открывает и пустое — чтобы нарисовать.
  */
 export async function spacePage(req: Request, env: Env, o: string, space: string, fmt: string): Promise<Response | null> {
-  const pub = await publishedScene(env, space);
-  const parent = await parentOf(env, space);
-  if (!pub.version && !parent && !(await keeperSession(env, req, nowSec()))) return null;
+  const keeper = !!(await keeperSession(env, req, nowSec()));
+  const pub = await liveScene(env, space, keeper);
+  const parent = pub.parent;
+  if (!pub.exists && !parent && !keeper) return null;
   if (fmt === 'html') return vitrinaPage(req, env, o, { space });
   const back = spaceUrl(parent ? parent.space : 'main');
-  const lines = pub.scene.objects.map((x) => {
+  const lines = pub.scene.objects.filter((x) => x.href || x.inner || x.window || x.doors || x.widget).map((x) => {
     const href = x.inner ? `/in/${x.inner}` : x.href;
     const w = x.window;
     let s = href ? `- [${inline(x.label)}](${o}${href})` : `- ${inline(x.label)}`;

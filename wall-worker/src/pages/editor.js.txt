@@ -278,7 +278,7 @@
       showFields();
       note.textContent = `Пространство: ${E.space}.`;
     });
-    const byId = (id) => E.objects.find((o) => o.id === id) || null;
+    const byId = (id) => E.objects.find((o) => o.id === id && !o.auto) || null; // узлы сети (auto) строит сервер — их не правят
     const selected = () => selIds.map(byId).filter(Boolean);
     const first = () => selected()[0] || null;
     function select(ids) {
@@ -325,7 +325,7 @@
     function fillPick() {
       pick.textContent = '';
       pick.append(new Option('— ничего не выбрано —', ''));
-      E.objects.forEach((o) => pick.append(new Option(`${o.id} — ${o.label}`, o.id)));
+      E.objects.forEach((o) => { if (!o.auto) pick.append(new Option(`${o.id} — ${o.label}`, o.id)); });
       pick.value = selIds[0] || '';
     }
     function showFields() {
@@ -456,7 +456,7 @@
     const line = (text, k) => (new RegExp(`^${k}: (.+)$`, 'm').exec(text) || [])[1];
     async function save() {
       readFields();
-      const r = await post('/k/vitrina/save', { json: snap(), space: E.space || 'main' });
+      const r = await post('/k/vitrina/save', { json: JSON.stringify(E.savedScene()), space: E.space || 'main' });
       note.textContent = r.ok ? `Черновик сохранён: версия ${line(r.text, 'VERSION')}.` : r.text;
       return r.ok ? line(r.text, 'VERSION') : null;
     }
@@ -474,14 +474,17 @@
     button(sceneRow, 'Версии', () => { location.href = '/k/vitrina'; });
     button(sceneRow, 'JSON', () => {
       readFields();
-      box.value = snap();
-      box.hidden = !box.hidden;
+      // текст всегда свежий: открытое окно с прежним текстом обновляется, второй нажим без правок — закрывает
+      const fresh = JSON.stringify(E.savedScene());
+      if (!box.hidden && box.value === fresh) box.hidden = true;
+      else { box.value = fresh; box.hidden = false; }
     });
     button(sceneRow, 'Применить JSON', () => {
       try {
         const j = JSON.parse(box.value);
         if (!j || !Array.isArray(j.objects)) throw new Error('нужно { v: 2, objects: [...] }');
-        E.load(j);
+        // узлы сети (auto) строит сервер: в JSON их нет, на холсте они остаются
+        E.load({ ...j, objects: [...E.objects.filter((o) => o.auto).map((o) => o.toJSON()), ...j.objects.filter((o) => !o.auto)] });
         selIds = selIds.filter(byId);
         fillPick();
         showFields();

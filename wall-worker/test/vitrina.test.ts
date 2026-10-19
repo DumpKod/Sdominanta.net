@@ -632,3 +632,77 @@ describe('Страницы сети внутри алеф-нуля и предп
     for (const s of ['function setPreview(', 'Вернуться к правке', "classList.toggle('kp-preview', on)", 'if (preview) return;']) expect(editorJs, s).toContain(s);
   });
 });
+
+describe('Узлы сети: пространства-кластеры из таблицы nodes', () => {
+  const add = (id: string, parent: string | null, pos: number, state: string, extra: Record<string, string> = {}) =>
+    env.DB.prepare(`INSERT OR REPLACE INTO nodes (id, parent, pos, sign, title, short, status, by_sign, links, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+      .bind(id, parent, pos, extra.sign ?? null, extra.title ?? id.toUpperCase(), extra.short ?? `Текст ${id}`, extra.status ?? 'computed', '🜃', extra.links ?? '[]', state).run();
+
+  it('черновик видит только хранитель; опубликованный узел — пространство: он в центре, дети вокруг, глубже — портал', async () => {
+    await add('aleph', null, 0, 'черновик', { sign: 'ℵ°', title: 'Ядро' });
+    await add('physics', 'aleph', 0, 'черновик');
+    await add('gravity', 'physics', 0, 'черновик', { links: JSON.stringify([{ to: 'koide', rel: 'supports', w: 1 }]) });
+    await add('koide', 'aleph', 1, 'черновик', { short: 'А'.repeat(3000) });
+    expect((await get('/vitrina/scene/aleph.json')).status).toBe(404);
+    const { cookie } = await login();
+    const live = await get('/k/vitrina/live/aleph.json', { Cookie: cookie });
+    expect(live.status).toBe(200);
+    const j = (await live.json()) as { up: string; objects: { id: string; auto?: string; inner?: string; window?: { title: string; text: string; links?: { label: string; href: string }[] } }[] };
+    expect(j.up).toBe('main');
+    expect(j.objects.map((o) => o.id)).toEqual(['aleph', 'physics', 'koide', 'aleph-links']);
+    expect(j.objects.every((o) => o.auto === 'node')).toBe(true);
+    expect(j.objects[0].window!.title).toBe('ℵ° Ядро');
+    expect(j.objects[0].window!.text).toContain('Видит только хранитель');
+    expect(j.objects[1].inner).toBe('physics'); // у physics есть дети — портал
+    expect(j.objects[2].window!.links).toContainEqual({ label: 'его подтверждает: GRAVITY', href: '/in/physics' });
+    expect(((await (await get('/k/vitrina/live/physics.json', { Cookie: cookie })).json()) as { up: string }).up).toBe('aleph');
+    expect((await get('/k/vitrina/live/gravity.json', { Cookie: cookie })).status).toBe(404); // лист — окно у родителя
+    await env.DB.prepare(`UPDATE nodes SET state = 'опубликован'`).run();
+    const pub = (await (await get('/vitrina/scene/aleph.json')).json()) as { objects: { id: string; window?: { text: string } }[] };
+    expect(pub.objects[0].window!.text).not.toContain('Видит только хранитель');
+    const md = await (await get('/in/physics')).text();
+    expect(md).toContain('GRAVITY');
+    expect(md).toContain('Текст gravity');
+    expect(md).not.toContain('Связи:');
+    const page = await (await get('/in/physics', HTML)).text();
+    expect(page).toContain('data-parent="aleph" data-from="physics"');
+  });
+
+  it('нарисованное хранителем в том же пространстве — поверх узлов; редактор узлы не сохраняет и не выбирает', async () => {
+    await env.DB.prepare('DELETE FROM nodes').run();
+    await add('aleph', null, 0, 'опубликован');
+    await add('a1', 'aleph', 0, 'опубликован');
+    const { cookie } = await login();
+    const csrf = csrfOf(await (await get('/k/vitrina', { Cookie: cookie })).text());
+    const s = await post('/k/vitrina/save', { csrf, json: tiny({ id: 'mine', label: 'Моё' }), space: 'aleph' }, cookie, { 'X-Editor': '1' });
+    const v = /VERSION: (\d+)/.exec(await s.text())![1];
+    await post('/k/vitrina/publish', { csrf, version: v }, cookie, { 'X-Editor': '1' });
+    const j = (await (await get('/vitrina/scene/aleph.json')).json()) as { objects: { id: string }[] };
+    expect(j.objects.map((o) => o.id)).toEqual(['aleph', 'a1', 'aleph-links', 'mine']);
+    expect(validateScene(JSON.stringify({ v: 2, objects: [{ id: 'x', label: 'X', strokes: [], auto: 'node' }] })).ok).toBe(false);
+    const sc = new M.Scene({ v: 2, objects: [{ id: 'x', label: 'X', strokes: [], auto: 'node' }, { id: 'y', label: 'Y', strokes: [] }] });
+    expect((sc.toSaved() as unknown as { objects: { id: string }[] }).objects.map((o) => o.id)).toEqual(['y']);
+    expect(editorJs).toContain('E.savedScene()');
+    expect(editorJs).toContain('!o.auto');
+  });
+
+  it('хранитель публикует черновики узлов одной кнопкой в /k/vitrina и снимает обратно', async () => {
+    await env.DB.prepare('DELETE FROM nodes').run();
+    await add('aleph', null, 0, 'черновик');
+    await add('b1', 'aleph', 0, 'черновик');
+    const { cookie } = await login();
+    const pg = await (await get('/k/vitrina', { Cookie: cookie })).text();
+    expect(pg).toContain('черновиков: 2');
+    const csrf = csrfOf(pg);
+    expect(await (await post('/k/vitrina/nodes/publish', { csrf }, cookie, { 'X-Editor': '1' })).text()).toContain('- опубликован: 2');
+    expect((await get('/vitrina/scene/aleph.json')).status).toBe(200);
+    await post('/k/vitrina/nodes/hide', { csrf }, cookie, { 'X-Editor': '1' });
+    expect((await get('/vitrina/scene/aleph.json')).status).toBe(404);
+    expect((await post('/k/vitrina/nodes/publish', { csrf: 'x' }, cookie, { 'X-Editor': '1' })).status).not.toBe(200);
+  });
+
+  it('движок: длинный текст окна — листами с кнопками, черта — разделитель, ссылка /in/… — вход в пространство', () => {
+    for (const s of ['PAGE_CHARS', 'function renderLeaf(', "nav.className = 'page-leaves'", 'function toSpace(', "createElement('hr')", 'j.up ||'])
+      expect(vitrinaJs, s).toContain(s);
+  });
+});

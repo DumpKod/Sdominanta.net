@@ -1752,8 +1752,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       if (!fromHistory) history.pushState({ space: target }, '', spaceUrl(target));
       const sc = Scene.from(j), back = entriesOf(sc).find((o) => o.inner === was) || sc.objects.find((o) => o.inner === was);
       const came = ups[0] && back && ups[0].from === back.id ? ups[0].cam : null;
-      // родитель родителя неизвестен без сервера: страница пространства отдаёт его в data-parent при прямом заходе
-      swapScene(j, target, target === 'main' ? null : 'main', null);
+      // родитель родителя: сервер кладёт его в сцену пространства (up), при прямом заходе — в data-parent страницы
+      swapScene(j, target, target === 'main' ? null : j.up || 'main', null);
       ups.shift();
       threads = ups.length ? ups[0].threads : [];
       resize();
@@ -1808,6 +1808,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   let flash = 0, flashX = 0, flashY = 0; // вспышка взрыва: мягкий свет из точки, гаснет сам
   let diveK = 0; // насколько глубоко провал (0…1): жилы и плазма тают, остаются растянутые узлы
   const pages = []; // стопка страниц внутри рамы
+  const PAGE_CHARS = 1400; // лист окна: столько знаков текста, дальше — следующий лист
   let pageEl = null, pageBody = null, pageBack = null, pageReq = 0;
   const lerp = (a, b, t) => a + (b - a) * t;
   const ease = (t) => t * t * (3 - 2 * t);
@@ -1844,7 +1845,11 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       const a = e.target.closest && e.target.closest('a[href]');
       if (!a) return;
       const path = ownPath(a.getAttribute('href'));
-      if (path) { e.preventDefault(); deeper(path); }
+      if (!path) return;
+      e.preventDefault();
+      const sp = /^\/in\/([a-z0-9-]{1,32})$/.exec(path);
+      if (sp) toSpace(sp[1]);
+      else deeper(path);
     });
     document.body.append(pageEl);
   }
@@ -2131,11 +2136,17 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       return;
     }
     if (f.kind === 'window') {
-      // строки текста окна хранитель пишет абзацами
-      const w = f.o.window, md = [`# ${w.title || f.o.label}`, '', ...(w.text ? [w.text.replace(/\n+/g, '\n\n'), ''] : [])];
-      if (f.o.href) md.push(`- [${f.o.label}](${f.o.href})`);
-      for (const l of w.links || []) md.push(`- [${l.label}](${l.href})`);
-      renderMd(md.join('\n'), pageBody);
+      // строки текста окна — абзацы; длинный текст — листами по PAGE_CHARS знаков, листают кнопками, ссылки — на последнем
+      const w = f.o.window, leaves = [];
+      let cur = [], len = 0;
+      for (const p of (w.text || '').split(/\n+/).filter((x) => x.trim())) {
+        if (len > 0 && len + p.length > PAGE_CHARS) { leaves.push(cur); cur = []; len = 0; }
+        if (!cur.length && /^-{3,}$/.test(p.trim())) continue; // черта в начале листа не нужна
+        cur.push(p); len += p.length;
+      }
+      if (cur.length || !leaves.length) leaves.push(cur);
+      f.leaves = leaves; f.leaf = 0;
+      renderLeaf(f);
       return;
     }
     pageBody.textContent = '…';
@@ -2148,6 +2159,42 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     pageBody.textContent = '';
     renderMd(text, pageBody);
     pageEl.scrollTop = 0;
+  }
+
+  /** Лист окна: заголовок, абзацы листа; на последнем — ссылки; листов больше одного — кнопки «назад» и «дальше». */
+  function renderLeaf(f) {
+    const w = f.o.window, n = f.leaves.length, k = f.leaf;
+    const md = [`# ${w.title || f.o.label}`, ''];
+    for (const p of f.leaves[k]) md.push(p, '');
+    if (k === n - 1) {
+      if (f.o.href) md.push(`- [${f.o.label}](${f.o.href})`);
+      for (const l of w.links || []) md.push(`- [${l.label}](${l.href})`);
+    }
+    pageBody.textContent = '';
+    renderMd(md.join('\n'), pageBody);
+    if (n < 2) return;
+    const nav = document.createElement('nav');
+    nav.className = 'page-leaves';
+    const btn = (text, to, label) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = text; b.setAttribute('aria-label', label);
+      b.disabled = to < 0 || to >= n;
+      b.addEventListener('click', () => { f.leaf = to; renderLeaf(f); pageEl.scrollTop = 0; });
+      return b;
+    };
+    const at = document.createElement('span');
+    at.textContent = `${k + 1} / ${n}`;
+    nav.append(btn('←', k - 1, 'Предыдущий лист'), at, btn('→', k + 1, 'Следующий лист'));
+    pageBody.append(nav);
+  }
+
+  /** Ссылка из текста в пространство: вход из этой сцены — портал, наружу — к родителю, дальше — переходом по адресу. */
+  function toSpace(name) {
+    if (name === SPACE) { closeFrameNow(); return; }
+    const en = entriesOf(scene).find((o) => o.inner === name) || scene.objects.find((o) => o.inner === name);
+    if (en) { closeFrameNow(); goIn(en); return; }
+    if (name === parentSpace) { closeFrameNow(); goOut(false); return; }
+    location.href = spaceUrl(name);
   }
 
   /** Ссылка внутри рамы на свою страницу — глубже: то же окно, новый текст, адрес в истории. */
@@ -2192,6 +2239,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       if (pre) { if (/^```/.test(line)) { pre = null; } else pre.textContent += line + '\n'; continue; }
       if (/^```/.test(line)) { end(); pre = document.createElement('pre'); box.append(pre); continue; }
       if (!line.trim()) { end(); continue; }
+      if (/^-{3,}$/.test(line.trim())) { end(); box.append(document.createElement('hr')); continue; }
       let m;
       if ((m = /^(#{1,4})\s+(.*)$/.exec(line))) { end(); const h = document.createElement('h' + Math.min(4, m[1].length + 1)); inline(m[2], h); box.append(h); continue; }
       if ((m = /^\s*[-*]\s+(.*)$/.exec(line))) {
@@ -2446,6 +2494,8 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     },
     hit: (sx, sy) => hit(sx * VK, sy * VK), highlight, fitAll, flyTo, cameraChanged,
     exportScene() { return scene.toJSON(); },
+    /** Сцена для сохранения: без узлов, построенных сервером (auto). */
+    savedScene() { return scene.toSaved(); },
     /** Сцена изменилась на месте (правка объектов): пересобрать жилы, камеру не трогать. */
     rebuild(n) { readSpace(); bindNav(); ensureView(true); refresh(n || 30); },
     settle() { ensureView(true); refresh(4); },
