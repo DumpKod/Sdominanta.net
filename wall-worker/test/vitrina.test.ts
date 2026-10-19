@@ -763,6 +763,9 @@ describe('Узлы сети: пространства-кластеры из та
     expect(await (await post('/k/vitrina/nodes/publish', { csrf, root: 'p' }, cookie, { 'X-Editor': '1' })).text()).toContain('- опубликован: 3');
     const st = (await env.DB.prepare('SELECT id, state FROM nodes ORDER BY id').all<{ id: string; state: string }>()).results;
     expect(Object.fromEntries(st.map((x) => [x.id, x.state]))).toEqual({ aleph: 'черновик', m: 'черновик', p: 'опубликован', p1: 'опубликован', p11: 'опубликован' });
+    expect(await (await post('/k/vitrina/nodes/publish', { csrf, only: 'aleph' }, cookie, { 'X-Editor': '1' })).text()).toContain('- опубликован: 1');
+    expect((await env.DB.prepare(`SELECT state FROM nodes WHERE id = 'm'`).first<{ state: string }>())!.state).toBe('черновик');
+    expect(await (await get('/k/nodes', { Cookie: cookie })).text()).toContain('Снять корень');
   });
 
   it('движок: длинный текст окна — листами с кнопками, черта — разделитель, ссылка /in/… — вход в пространство', () => {

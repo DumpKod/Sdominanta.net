@@ -352,7 +352,14 @@ async function nodesPage(env: Env, top: string, csrf: string): Promise<Response>
        SELECT c.id, c.sign, c.title, c.pos, sum(n.state = 'опубликован') AS pub, sum(n.state = 'черновик') AS dr, count(*) AS n
        FROM sub JOIN nodes n ON n.id = sub.id JOIN nodes c ON c.id = sub.top GROUP BY c.id ORDER BY c.pos, c.id`,
     ).bind(r.id).all<{ id: string; sign: string | null; title: string; pub: number; dr: number; n: number }>()).results;
+    const rs = (await env.DB.prepare('SELECT state FROM nodes WHERE id = ?').bind(r.id).first<{ state: string }>())!.state;
     b += `<h2>Корень ${esc(r.sign ?? '')} ${esc(r.title)} — <a href="/in/${esc(r.id)}">/in/${esc(r.id)}</a></h2>\n`;
+    const of = `${hidden}<input type="hidden" name="only" value="${esc(r.id)}">`;
+    b += `<div class="box row"><span>Сам корень (окно ядра и вход): ${esc(rs)}</span>`;
+    b += rs === 'черновик'
+      ? `<form method="post" action="/k/vitrina/nodes/publish">${of}<button type="submit">Опубликовать корень</button></form>`
+      : `<form method="post" action="/k/vitrina/nodes/hide">${of}<button type="submit">Снять корень</button></form>`;
+    b += '</div>\n';
     b += '<table><tr><th>Ветвь</th><th>Узлов</th><th>Опубликовано</th><th>Черновиков</th><th></th></tr>\n';
     for (const c of br) {
       const f = `${hidden}<input type="hidden" name="root" value="${esc(c.id)}">`;
@@ -439,11 +446,14 @@ async function sceneAction(env: Env, o: string, req: Request, path: string, f: R
     const [from, to] = path.endsWith('publish') ? ['черновик', 'опубликован'] : ['опубликован', 'черновик'];
     // root — ветвь целиком (узел и всё под ним), без него — всё дерево
     const root = f.root ?? '';
-    const q = root
+    // only — один узел без его ветвей (корень дерева: вход в /in/aleph открыт, ветви — по одной)
+    const q = f.only
+      ? env.DB.prepare('UPDATE nodes SET state = ? WHERE state = ? AND id = ?').bind(to, from, f.only)
+      : root
       ? env.DB.prepare(`WITH RECURSIVE sub(id) AS (SELECT ?3 UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent = sub.id) UPDATE nodes SET state = ?1 WHERE state = ?2 AND id IN (SELECT id FROM sub)`).bind(to, from, root)
       : env.DB.prepare('UPDATE nodes SET state = ? WHERE state = ?').bind(to, from);
     const r = await env.DB.batch([q, bumpVersion(env.DB)]);
-    return reply(true, [`OK NODES`, ...(root ? [`ROOT: ${root}`] : []), `- ${to}: ${r[0].meta.changes}`]);
+    return reply(true, [`OK NODES`, ...(f.only ? [`NODE: ${f.only}`] : root ? [`ROOT: ${root}`] : []), `- ${to}: ${r[0].meta.changes}`]);
   }
   if (path === '/vitrina/docs/publish' || path === '/vitrina/docs/hide') {
     const [from, to] = path.endsWith('publish') ? ['черновик', 'опубликован'] : ['опубликован', 'черновик'];
