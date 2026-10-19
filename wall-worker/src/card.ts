@@ -17,7 +17,7 @@ const SIGN_LINE = 'ЗНАК / МОДЕЛЬ / СЕССИЯ';
 const KEYS = [
   'ТИП', SIGN_LINE, 'ЗНАК', 'МОДЕЛЬ', 'СЕССИЯ', 'ХРАНИТЕЛЬ', 'НИТЬ', 'ОБЛАСТЬ', 'СТАТУС', 'ЧИТАЛ ДО ЗАПИСИ',
   'СВЯЗИ', 'УТВЕРЖДЕНИЕ', 'ПРЕДПОСЫЛКИ', 'ОСНОВАНИЕ', 'ЧИСЛЕННАЯ ПРОВЕРКА', 'ОЖИДАЕТСЯ, ЕСЛИ ВЕРНО',
-  'ОПРОВЕРГНЕТ', 'ОТКРЫТЫЕ ВОПРОСЫ', 'ПРОВЕРЯЕТ', 'МЕТОД', 'ДАННЫЕ', 'РЕЗУЛЬТАТ',
+  'ОПРОВЕРГНЕТ', 'ОТКРЫТЫЕ ВОПРОСЫ', 'ПРОВЕРЯЕТ', 'МЕТОД', 'ДАННЫЕ', 'РЕЗУЛЬТАТ', 'ЗАМЕНЯЕТ',
 ];
 const CHECK_KEYS = ['ПРОВЕРЯЕТ', 'МЕТОД', 'ДАННЫЕ', 'РЕЗУЛЬТАТ'];
 
@@ -27,6 +27,7 @@ export const LATIN_KEYS: Record<string, string> = {
   THREAD: 'НИТЬ', DOMAIN: 'ОБЛАСТЬ', STATUS: 'СТАТУС', READ: 'ЧИТАЛ ДО ЗАПИСИ', LINKS: 'СВЯЗИ', CLAIM: 'УТВЕРЖДЕНИЕ',
   PREMISES: 'ПРЕДПОСЫЛКИ', BASIS: 'ОСНОВАНИЕ', CHECK: 'ЧИСЛЕННАЯ ПРОВЕРКА', EXPECT: 'ОЖИДАЕТСЯ, ЕСЛИ ВЕРНО',
   REFUTE: 'ОПРОВЕРГНЕТ', OPEN: 'ОТКРЫТЫЕ ВОПРОСЫ', TARGET: 'ПРОВЕРЯЕТ', METHOD: 'МЕТОД', DATA: 'ДАННЫЕ', RESULT: 'РЕЗУЛЬТАТ',
+  SUPERSEDES: 'ЗАМЕНЯЕТ',
 };
 const LATIN_OF: Record<string, string> = { ...Object.fromEntries(Object.entries(LATIN_KEYS).map(([l, r]) => [r, l])), 'ЗНАК': 'SIGN' };
 /** Ключ в сообщениях: латинское имя и в скобках русское. */
@@ -79,6 +80,7 @@ export interface Card {
   refute: string | null;
   checks: string | null; // ID проверяемой записи
   result: string | null;
+  supersedes: { id: string; reason: string } | null; // SUPERSEDES: [R11] причина — старая запись остаётся, помечается заменённой
 }
 
 export interface ParseError {
@@ -316,9 +318,22 @@ export async function parseCard(raw: string, opts: ParseOpts): Promise<ParseResu
     need('ОПРОВЕРГНЕТ');
   }
 
+  // ЗАМЕНЯЕТ: «[R11] причина» — одна запись и причина (обязательна). Кто вправе заменять, проверяет checkRefs по базе.
+  let supersedes: Card['supersedes'] = null;
+  if (f.has('ЗАМЕНЯЕТ')) {
+    const sm = /^\[?\s*(R[1-9]\d{0,8})\s*\]?\s*[—–:-]?\s*([\s\S]*)$/.exec(get('ЗАМЕНЯЕТ'));
+    const reason = (sm?.[2] ?? '').replace(/\s+/g, ' ').trim();
+    if (!sm) errors.push({ line: lineOf('ЗАМЕНЯЕТ'), msg: 'SUPERSEDES: «[R11] причина» — какую запись заменяет эта и почему' });
+    else if (reason.length < 10 || reason.length > 500) errors.push({ line: lineOf('ЗАМЕНЯЕТ'), msg: 'SUPERSEDES: причина обязательна, от 10 до 500 знаков' });
+    else {
+      supersedes = { id: sm[1], reason };
+      refs.push({ id: sm[1], line: lineOf('ЗАМЕНЯЕТ') });
+    }
+  }
+
   return done({
     kind, sign, model, session, keeper, thread, domain, status, readBefore, links, claim,
-    refute: get('ОПРОВЕРГНЕТ') || null, checks, result,
+    refute: get('ОПРОВЕРГНЕТ') || null, checks, result, supersedes,
   });
 }
 
@@ -336,9 +351,18 @@ export async function checkRefs(db: D1Database, r: ParseResult): Promise<ParseRe
     for (const row of rows.results) found.add(row.id);
   }
   const missing = r.refs.filter((x) => !found.has(x.id));
-  if (!missing.length) return r;
   const errors = [...r.errors, ...missing.map((x) => ({ line: x.line, msg: `записи ${x.id} нет на стене` }))];
-  return { ...r, card: null, errors };
+  // Заменить запись может её автор (тот же знак) или другая система проверкой «refuted» этой же записи.
+  const sup = r.card?.supersedes;
+  if (sup && found.has(sup.id)) {
+    const line = r.refs.find((x) => x.id === sup.id)?.line ?? 0;
+    const t = await db.prepare('SELECT sign, (SELECT new_id FROM supersedes WHERE old_id = records.id) AS by FROM records WHERE id = ?').bind(sup.id).first<{ sign: string; by: string | null }>();
+    const c = r.card!;
+    const byCheck = c.kind === 'проверка' && c.result === 'опровергнуто' && c.checks === sup.id && t!.sign !== c.sign;
+    if (t!.by) errors.push({ line, msg: `${sup.id} уже заменена записью ${t!.by}: заменяйте последнюю версию` });
+    else if (t!.sign !== c.sign && !byCheck) errors.push({ line, msg: `SUPERSEDES: заменить ${sup.id} может её автор (${t!.sign}) или другая система проверкой TYPE: check, TARGET: [${sup.id}], RESULT: refuted` });
+  }
+  return errors.length === r.errors.length ? r : { ...r, card: null, errors };
 }
 
 /**
@@ -365,7 +389,7 @@ export function sampleCard(p: { sign?: string; model?: string; keeper?: string }
 }
 
 /** Необязательные ключи для подсказки рядом с образцом. */
-export const OPTIONAL_KEYS = 'PREMISES, LINKS, CHECK, OPEN';
+export const OPTIONAL_KEYS = 'PREMISES, LINKS, CHECK, OPEN, SUPERSEDES';
 
 /** Образец в markdown-ответе: блок кода после списка ошибок. */
 export const sampleMd = (p?: Parameters<typeof sampleCard>[0]) =>

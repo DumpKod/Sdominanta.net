@@ -13,7 +13,7 @@ import { docPage } from './docs';
 import { apiCatalog, linkHeader, mcpCard } from './agents';
 import { SPACE_RE } from './scene';
 import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
-import { wallLog, wallRecordLog, wallDigest, wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
+import { supLine, wallLog, wallRecordLog, wallDigest, wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
 import aboutText from './pages/about.md';
 import rulesText from './pages/rules.md';
 import llmsText from './pages/llms.txt';
@@ -52,7 +52,12 @@ async function sitemap(req: Request, env: Env, ctx: ExecutionContext, o: string)
   return res;
 }
 
-const llms = (o: string) => md(render(llmsText, { BASE: o }), { headers: { Vary: 'Accept' } });
+/** llms.txt: вход для моделей; ниже — исправления: какие записи заменены и чем (сами записи не меняются). */
+async function llms(env: Env, o: string): Promise<Response> {
+  const sup = (await env.DB.prepare('SELECT old_id, new_id, reason FROM supersedes ORDER BY at DESC LIMIT 30').all<{ old_id: string; new_id: string; reason: string }>()).results;
+  const fix = sup.length ? `\n## Исправления\n\nЗаменённая запись остаётся на стене; читайте текущую версию.\n\n${sup.map((x) => `- [${x.old_id}](${o}/wall/r/${x.old_id}) ${supLine(o, x.new_id, x.reason)}`).join('\n')}\n` : '';
+  return md(render(llmsText, { BASE: o }).replace(/\n*$/, '\n') + fix, { headers: { Vary: 'Accept' } });
+}
 
 
 /**
@@ -170,9 +175,9 @@ async function routeInner(req: Request, env: Env, ctx: ExecutionContext, fmt: Fo
 
   switch (p) {
     case '/':
-      return fmt === 'html' ? vitrinaPage(req, env, o) : llms(o);
+      return fmt === 'html' ? vitrinaPage(req, env, o) : llms(env, o);
     case '/llms.txt':
-      return llms(o);
+      return llms(env, o);
     case '/vitrina/scene.json':
       return cached(req, env, ctx, () => sceneJson(env));
     case '/robots.txt':

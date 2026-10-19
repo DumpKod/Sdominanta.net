@@ -4,6 +4,7 @@ import { formatErrors } from './card';
 import { hit } from './rate';
 import { DEFAULT_SCENE, SCENE_MAX, SPACE_RE, publishedScene, SceneRow, validateScene, Scene } from './scene';
 import { bumpVersion } from './post';
+import { logEvent } from './events';
 import { jsonResponse, liveScene, sceneOut, spaceUrl, vitrinaPage } from './vitrina';
 import { b64url, clientIp, enc, Env, fmtTime, hmacSha256, html, nowSec, plain, randomBytes, sha256hex, timingSafeEqual } from './util';
 import editorJs from './pages/editor.js.txt';
@@ -120,14 +121,14 @@ function loginForm(csrf: string, note = ''): string {
 
 /** Разделы панели: группа → [адрес, название]. Один список на всё — новый раздел добавляется здесь. */
 const SECTIONS: [string, [string, string][]][] = [
-  ['Стена', [['/k', 'Очередь черновиков']]],
+  ['Стена', [['/k', 'Очередь черновиков'], ['/k/fix', 'Исправления записей']]],
   ['Витрина', [['/k/vitrina', 'Пространства и версии'], ['/k/music', 'Музыка']]],
   ['Сеть', [['/k/nodes', 'Узлы и кластеры'], ['/k/docs', 'Документы архива']]],
   ['Снаружи', [['/', 'Витрина'], ['/wall/log', 'Журнал действий'], ['/wall/compat', 'Совместимость'], ['/llms.txt', 'Вход для моделей']]],
 ];
 
 /** Короткие метки разделов на панели инструментов слева (как значки инструментов в графическом редакторе). */
-const TOOL: Record<string, string> = { '/k': 'Оч', '/k/vitrina': 'Пр', '/k/music': 'Му', '/k/nodes': 'Уз', '/k/docs': 'Дк' };
+const TOOL: Record<string, string> = { '/k': 'Оч', '/k/fix': 'Ис', '/k/vitrina': 'Пр', '/k/music': 'Му', '/k/nodes': 'Уз', '/k/docs': 'Дк' };
 
 /**
  * Оболочка панели вокруг рабочей области: сверху меню (группы разделов), слева инструменты (разделы одним знаком),
@@ -254,6 +255,7 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
       if (r.kind === 'busy') return page('Не опубликовано', top + '<h1>Не опубликовано</h1><p>Стена занята, повторите.</p>' + back, { status: 503 });
       return page('Ничего не изменено', top + `<h1>Ничего не изменено</h1><p>Черновик ${esc(code.slice(0, 20))}: ${esc(r.state)}.</p>` + back, { status: 409 });
     }
+    if (path === '/supersede') return supersede(env, f, me, now, top, csrf);
     if (path === '/reject') {
       const reason = (f.reason ?? '').replace(/\s+/g, ' ').trim();
       if (!reason || reason.length > 500) return page('Нужна причина', top + '<h1>Нужна причина</h1><p>Отказ публикуется с причиной (до 500 символов).</p>' + back, { status: 400 });
@@ -283,6 +285,7 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
 
   if (path === '/vitrina') return scenesPage(env, top, csrf);
   if (path === '/nodes') return nodesPage(env, top, csrf);
+  if (path === '/fix') return fixPage(env, top, csrf);
   if (path === '/docs') return docsPage(env, top, csrf);
   if (path === '/music') return musicPage(env, top, csrf);
   const pv = /^\/vitrina\/v\/([1-9]\d{0,8})$/.exec(path);
@@ -330,6 +333,56 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
     return page('Черновик ' + d.code, b);
   }
   return page('Не найдено', top + '<h1>Не найдено</h1>', { status: 404 });
+}
+
+// ---------- стена: исправления записей ----------
+
+const REC_RE = /^R[1-9]\d{0,8}$/;
+
+/** Исправления: какие записи заменены и кем; форма хранителя — пометить запись заменённой, когда автор недоступен. */
+async function fixPage(env: Env, top: string, csrf: string, note = ''): Promise<Response> {
+  const rows = (await env.DB.prepare('SELECT old_id, new_id, reason, by_kind, at FROM supersedes ORDER BY at DESC LIMIT 200').all<{ old_id: string; new_id: string; reason: string; by_kind: string; at: number }>()).results;
+  const who: Record<string, string> = { author: 'автор', check: 'проверка', keeper: 'хранитель' };
+  let b = top + '<h1>Исправления записей</h1>\n' + note;
+  b += '<p class="muted">Запись не стирается и не правится: её заменяет новая. Автор пишет в карточке SUPERSEDES: [R…] причина; другая система — проверкой с RESULT: refuted. Здесь — когда автор недоступен.</p>\n';
+  b += '<h2>Пометить заменённой</h2>\n<div class="box">';
+  b += `<form method="post" action="/k/supersede" class="row"><input type="hidden" name="csrf" value="${esc(csrf)}">`;
+  b += '<label>Старая <input name="old" size="6" pattern="R[1-9][0-9]{0,8}" required></label><label>Новая <input name="new" size="6" pattern="R[1-9][0-9]{0,8}" required></label>';
+  b += '<label style="flex:1 1 320px">Причина (публичная, 10–500) <input name="reason" minlength="10" maxlength="500" required style="width:100%;box-sizing:border-box"></label><button type="submit">Пометить</button></form>';
+  b += '<p class="muted" style="margin:6px 0 0">Пометку не снять: её можно только продолжить следующей заменой. Событие уходит в журнал.</p></div>\n';
+  b += '<h2>Заменены</h2>\n';
+  if (!rows.length) b += '<div class="box muted">Пока ни одной.</div>';
+  else {
+    b += '<table><tr><th>Запись</th><th>Заменена</th><th>Причина</th><th>Кто</th><th>День</th></tr>\n';
+    for (const r of rows) b += `<tr><td><a href="/wall/r/${r.old_id}">${r.old_id}</a></td><td><a href="/wall/r/${r.new_id}">${r.new_id}</a></td><td>${esc(r.reason)}</td><td>${who[r.by_kind] ?? esc(r.by_kind)}</td><td>${esc(fmtTime(r.at).slice(0, 10))}</td></tr>\n`;
+    b += '</table>';
+  }
+  return page('Исправления записей', b);
+}
+
+/** POST /k/supersede: old, new, reason — пометка хранителя; старая запись остаётся как есть. */
+async function supersede(env: Env, f: Record<string, string>, me: string, now: number, top: string, csrf: string): Promise<Response> {
+  const old = (f.old ?? '').trim().toUpperCase(), nw = (f.new ?? '').trim().toUpperCase(), reason = (f.reason ?? '').replace(/\s+/g, ' ').trim();
+  const fail = (msg: string, status = 400) => page('Не помечено', top + `<h1>Не помечено</h1><p class="warn">${esc(msg)}</p><p><a href="/k/fix">Назад</a></p>`, { status });
+  if (!REC_RE.test(old) || !REC_RE.test(nw) || old === nw) return fail('Нужны два разных номера записей, вида R11 и R12.');
+  if (reason.length < 10 || reason.length > 500) return fail('Причина обязательна, от 10 до 500 знаков.');
+  const recs = (await env.DB.prepare('SELECT id FROM records WHERE id IN (?, ?)').bind(old, nw).all<{ id: string }>()).results;
+  if (recs.length !== 2) return fail('Одной из записей нет на стене.', 404);
+  const taken = await env.DB.prepare('SELECT new_id FROM supersedes WHERE old_id = ?').bind(old).first<{ new_id: string }>();
+  if (taken) return fail(`${old} уже заменена записью ${taken.new_id}. Заменяйте последнюю версию.`, 409);
+  // нельзя замкнуть цепочку: новая не должна сама вести к старой
+  for (let cur = nw, i = 0; i < 50; i++) {
+    const n = await env.DB.prepare('SELECT new_id FROM supersedes WHERE old_id = ?').bind(cur).first<{ new_id: string }>();
+    if (!n) break;
+    if (n.new_id === old) return fail('Получится круг замен.', 409);
+    cur = n.new_id;
+  }
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO supersedes (old_id, new_id, reason, by_kind, at) VALUES (?, ?, ?, 'keeper', ?)`).bind(old, nw, reason, now),
+    logEvent(env.DB, 'supersede', me, `${old}>${nw}`),
+    bumpVersion(env.DB),
+  ]);
+  return fixPage(env, top, csrf, `<div class="box">Помечено: <a href="/wall/r/${old}">${old}</a> заменена <a href="/wall/r/${nw}">${nw}</a>.</div>\n`);
 }
 
 // ---------- сеть: узлы и документы ----------
