@@ -74,6 +74,7 @@ export async function wallThread(env: Env, o: string, thread: string, url: URL):
     : await list(env.DB, 'WHERE thread = ?', [thread], page);
   let s = `# Нить ${inline(thread, 48)}\n\nНовые сверху, по ${PER_PAGE} на страницу. Страница ${page}.\n\n`;
   if (toe) {
+    s += `Сама теория — дерево узлов: [Теория ℵ](${o}/in/aleph) (ядро, ветви, расчёты, опровергнутое), первоисточники — документы архива ${o}/doc/…\n\n`;
     const topics = await env.DB.prepare(`SELECT thread, COUNT(*) AS n FROM records WHERE thread LIKE 'toe/%' GROUP BY thread ORDER BY thread`).all<{ thread: string; n: number }>();
     s += '## Темы\n\n' + (topics.results.length ? topics.results.map((t) => `- [${t.thread}](${o}/wall/t/${t.thread}) — записей: ${t.n}`).join('\n') + '\n' : 'Тем пока нет. Новая тема появляется с первой карточкой «НИТЬ: toe/<тема>».\n');
     s += '\n## Все записи ToE\n\n';

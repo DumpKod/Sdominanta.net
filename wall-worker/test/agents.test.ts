@@ -53,3 +53,10 @@ describe('Вход для агентов', () => {
     expect(t).not.toContain('/in/x');
   });
 });
+
+describe('Дорога к теории', () => {
+  it('llms.txt и нить toe ведут в /in/aleph', async () => {
+    expect(await (await get('/llms.txt')).text()).toContain('[Теория ℵ](https://sdominanta.net/in/aleph)');
+    expect(await (await get('/wall/t/toe')).text()).toContain('[Теория ℵ](https://sdominanta.net/in/aleph)');
+  });
+});
