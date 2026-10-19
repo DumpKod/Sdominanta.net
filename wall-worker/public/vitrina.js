@@ -782,8 +782,14 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
           const onMode = qSd < fsc[i] * 2, rr = onMode ? cr * 0.6 : cr;
           const d = Math.sqrt(d2) || 1e-6;
           if (d < rr) {
-            const q = 1 - d / rr, p = q * q * (onMode ? 0.45 : 1.6) * iz;
-            ax += (dx / d) * p; ay += (dy / d) * p; b = Math.max(b, q * 0.5);
+            const sd = d / rr, q = 1 - sd, p = q * q * (onMode ? 0.45 : 1.6) * iz;
+            ax += (dx / d) * p; ay += (dy / d) * p;
+            // Возбуждение без ровного градиента (хранитель 19.10): к краю круга узлов зажигается меньше, но каждый ярче;
+            // по окружности неровно — две гармоники медленно плывут. Какие узлы зажигаются — постоянная доля по номеру
+            // узла (золотое сечение), поэтому картинка не мерцает. У самого края — спад, чтобы не было кольца.
+            const ang = Math.atan2(dy, dx);
+            const lobe = 0.55 + 0.45 * (0.6 * Math.sin(3 * ang + T * 0.5 + 0.7) + 0.4 * Math.sin(5 * ang - T * 0.8 + 1.3));
+            if ((i * 0.6180339887) % 1 < (1 - 0.72 * sd) * lobe) b = Math.max(b, (0.26 + 0.44 * sd) * Math.min(1, q / 0.18) * (0.8 + 0.2 * lobe));
             // над узлом с детьми ободок дыры курсора дышит: здесь есть глубина
             if (portalHover) b = Math.max(b, 4 * q * (1 - q) * (0.45 + 0.3 * Math.sin(T * 2.6)));
           }
