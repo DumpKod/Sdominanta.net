@@ -68,7 +68,7 @@ html:not(.js) .music-play { display: none; }
 .keeper input { width: 7ch; letter-spacing: 0.1em; }
 .keeper button { cursor: pointer; }
 /* В месте сцены (slot): элемент встаёт в рамку объекта, координаты ставит движок. */
-.slotted { position: fixed; right: auto; bottom: auto; max-width: none; box-sizing: border-box; overflow: hidden; justify-content: center; }
+.slotted { position: fixed; right: auto; bottom: auto; max-width: none; box-sizing: border-box; overflow: hidden; justify-content: center; transform-origin: 50% 50%; }
 .slotted[hidden] { display: none; }
 /* Плеер в рамке объекта: подпись и ▶ сверху, виджет SoundCloud заполняет остальное. */
 .music.slotted { border-radius: 12px; padding: 6px; }

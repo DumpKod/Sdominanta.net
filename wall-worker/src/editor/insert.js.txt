@@ -1,6 +1,5 @@
 // Вставка — дело секунды: каталог с поиском («+», I или /), дублирование, копирование и вставка между слоями.
 // Всё вставленное встаёт в центр видимой части холста, размером в пикселях экрана, и сразу выделено.
-// Виджеты SoundCloud и подобные чужие окна — просто «картинки» в рамке объекта; всё остальное — жилы континуума.
 
 import { Win, el, toast } from './dom.js';
 import { circle, r1, r2, rect, ring } from './geom.js';
@@ -31,16 +30,7 @@ export function makeInsert(E, doc, ui) {
     { group: 'Содержимое', name: 'Окно с текстом', desc: 'Рамка: приближение в неё раскрывает текст', make: (x, y) => ({ label: 'Окно', strokes: [frame(x, y, 360, 240, 4)], area: rect(x, y, px(360), px(240), px(10)), window: { title: 'Заголовок', text: 'Текст окна: по абзацу на строку.' } }) },
     { group: 'Содержимое', name: 'Страница сайта', desc: 'Рамка: внутри — страница по адресу (выберите в свойствах)', make: (x, y) => ({ label: 'Страница', href: '/wall', strokes: [frame(x, y, 360, 240, 4)], area: rect(x, y, px(360), px(240), px(10)) }) },
     { group: 'Глубина', name: 'Пространство', desc: 'Алеф-нуль: кольцо со своим слоем внутри', make: (x, y) => ({ label: 'Пространство', inner: freeSpace(), strokes: [{ r: vein(10), pts: ring(x, y, px(140)) }], area: circle(x, y, px(110)) }) },
-    { group: 'Живое', name: 'Плеер SoundCloud', desc: 'Виджет SoundCloud стоит в рамке и ездит с холстом (один на слой)', one: ['slot', 'player'], make: (x, y) => ({ label: 'Плеер', slot: 'player', strokes: [frame(x, y, 420, 200, 4)] }) },
-    { group: 'Живое', name: 'Вход хранителя', desc: 'Поле кода или разделы хранителя в рамке (один на слой)', one: ['slot', 'keeper'], make: (x, y) => ({ label: 'Вход хранителя', slot: 'keeper', strokes: [frame(x, y, 360, 120, 4)] }) },
-    { group: 'Живое', name: 'Плеер в окне', desc: 'Виджет плеера открывается приближением в рамку', make: (x, y) => widget(x, y, 'player', 'Плеер') },
-    { group: 'Хранителю', name: 'Очередь', desc: 'Окно очереди черновиков (видит только хранитель)', make: (x, y) => widget(x, y, 'queue', 'Очередь') },
-    { group: 'Хранителю', name: 'Музыка', desc: 'Окно выбора трека (видит только хранитель)', make: (x, y) => widget(x, y, 'music', 'Музыка') },
-    { group: 'Хранителю', name: 'Витрина', desc: 'Окно версий витрины (видит только хранитель)', make: (x, y) => widget(x, y, 'vitrina', 'Витрина') },
   ];
-  function widget(x, y, w, label) {
-    return { label, widget: w, strokes: [frame(x, y, 360, 240, 4)], area: rect(x, y, px(360), px(240), px(10)) };
-  }
 
   /** Поставить объект: id новый, слой — над выделенным (или над всеми). */
   function place(src, label) {
@@ -87,7 +77,7 @@ export function makeInsert(E, doc, ui) {
     if (!win) {
       win = new Win({ id: 'insert', title: 'Вставить', at: { x: Math.max(16, innerWidth / 2 - 180), y: 90, w: 360 }, closable: true, cls: 'ed-cat' });
       q = el('input', 'ed-in');
-      q.placeholder = 'Поиск: окно, плеер, пространство…';
+      q.placeholder = 'Поиск: окно, страница, пространство…';
       q.spellcheck = false;
       list = el('div', 'ed-cat-l');
       win.body.append(q, list);

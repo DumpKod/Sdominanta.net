@@ -326,6 +326,43 @@ export class Scene {
 }
 
 /** Отсечение по рамкам: индексы рамок, задевающих прямоугольник. */
+/**
+ * Наименьший по площади прямоугольник вокруг точек (выпуклая оболочка + вращающиеся калиперы):
+ * { cx, cy, w, h, a } — середина, стороны и наклон в радианах (|a| ≤ π/4). Повёрнутая рамка даёт свой угол,
+ * ровная — 0. Пусто — null.
+ */
+export function minRect(points) {
+  const P = points.map((p) => [p[0], p[1]]).sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  if (!P.length) return null;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], hi = [];
+  for (const p of P) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let i = P.length - 1; i >= 0; i--) { const p = P[i]; while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); }
+  let H = lo.slice(0, -1).concat(hi.slice(0, -1));
+  if (!H.length) H = [P[0]];
+  let best = null;
+  const edges = H.length;
+  for (let i = 0; i < edges; i++) {
+    const a = H[i], b = H[(i + 1) % H.length] || a;
+    let ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    ang = ((ang % (Math.PI / 2)) + Math.PI / 2) % (Math.PI / 2); // сторона прямоугольника — до четверти оборота
+    if (ang > Math.PI / 4) ang -= Math.PI / 2;
+    const c = Math.cos(ang), s = Math.sin(ang);
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    for (const [x, y] of H) {
+      const u = x * c + y * s, v = -x * s + y * c;
+      if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v;
+    }
+    const area = (u1 - u0) * (v1 - v0);
+    // почти равные — ровный прямоугольник: без дрожи угла у прямой рамки
+    if (!best || area < best.area * 0.999 || (Math.abs(area - best.area) <= best.area * 0.001 && Math.abs(ang) < Math.abs(best.a))) {
+      const um = (u0 + u1) / 2, vm = (v0 + v1) / 2;
+      best = { area, a: ang, w: u1 - u0, h: v1 - v0, cx: um * c - vm * s, cy: um * s + vm * c };
+    }
+  }
+  return { cx: best.cx, cy: best.cy, w: best.w, h: best.h, a: best.a };
+}
+
 export function visibleObjects(bounds, rect) {
   const out = [];
   bounds.forEach((b, i) => { if (!isEmpty(b) && intersects(b, rect)) out.push(i); });

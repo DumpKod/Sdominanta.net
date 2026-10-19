@@ -983,6 +983,23 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
      Пишем в DOM только когда рамка изменилась.
      --------------------------------------------------------------------- */
   const SLOT_MIN = 48;
+  // Меньше этого живой элемент не раскладывается (виджет SoundCloud обрезал бы кнопки): он раскладывается в этот
+  // размер и уменьшается целиком, как картинка. Повёрнутая рамка поворачивает и элемент (наименьший прямоугольник жил).
+  const SLOT_W = 300, SLOT_H = 150;
+  const slotRects = new WeakMap();
+  function slotRect(o) {
+    const b = o.bounds();
+    let n = 0;
+    for (const st of o.strokes) n += st.pts.length;
+    const sig = `${b.x0},${b.y0},${b.x1},${b.y1},${n}`;
+    const c = slotRects.get(o);
+    if (c && c.sig === sig) return c.r;
+    const pts = [];
+    for (const st of o.strokes) for (const p of st.pts) pts.push(p);
+    const r = M.minRect(pts);
+    slotRects.set(o, { sig, r });
+    return r;
+  }
   let slotKey = '';
   function placeSlots() {
     let key = going ? 'go' : '';
@@ -991,22 +1008,29 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       if (!o.slot || seen[o.slot]) continue;
       const b = o.bounds();
       if (isEmpty(b)) continue;
+      const r = slotRect(o);
+      if (!r) continue;
       const [x0, y0] = cam.toScreen(b.x0, b.y0, W, H), [x1, y1] = cam.toScreen(b.x1, b.y1, W, H);
-      seen[o.slot] = [x0 / VK, y0 / VK, (x1 - x0) / VK, (y1 - y0) / VK].map(Math.round);
-      key += o.slot + seen[o.slot].join(',') + ';';
+      const [cx, cy] = cam.toScreen(r.cx, r.cy, W, H), z = cam.zoom / VK;
+      seen[o.slot] = { box: [x0 / VK, y0 / VK, x1 / VK, y1 / VK], cx: cx / VK, cy: cy / VK, w: r.w * z, h: r.h * z, a: r.a };
+      const q = seen[o.slot];
+      key += o.slot + [q.cx, q.cy, q.w, q.h].map(Math.round).join(',') + ',' + q.a.toFixed(3) + ';';
     }
     if (key === slotKey) return;
     slotKey = key;
     for (const el of document.querySelectorAll('[data-slot]')) {
       if (el.dataset.framed) continue; // живёт в раскрытом окне
-      const r = seen[el.dataset.slot];
-      if (!r) { el.classList.remove('slotted'); el.hidden = false; for (const k of ['left', 'top', 'width', 'height']) el.style[k] = ''; continue; }
-      const [x, y, w, h] = r;
-      const off = going || w < SLOT_MIN || x + w < 0 || y + h < 0 || x > innerWidth || y > innerHeight;
+      const q = seen[el.dataset.slot];
+      if (!q) { el.classList.remove('slotted'); el.hidden = false; for (const k of ['left', 'top', 'width', 'height', 'transform']) el.style[k] = ''; continue; }
+      const [bx0, by0, bx1, by1] = q.box;
+      const off = going || Math.min(q.w, q.h) < SLOT_MIN * 0.5 || q.w < SLOT_MIN || bx1 < 0 || by1 < 0 || bx0 > innerWidth || by0 > innerHeight;
       el.classList.add('slotted');
       el.hidden = off;
       if (off) continue;
-      el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.width = w + 'px'; el.style.height = h + 'px';
+      const k = Math.min(1, q.w / SLOT_W, q.h / SLOT_H), w = q.w / k, h = q.h / k;
+      el.style.left = Math.round(q.cx - w / 2) + 'px'; el.style.top = Math.round(q.cy - h / 2) + 'px';
+      el.style.width = Math.round(w) + 'px'; el.style.height = Math.round(h) + 'px';
+      el.style.transform = q.a || k < 1 ? `rotate(${q.a.toFixed(4)}rad) scale(${k.toFixed(4)})` : '';
     }
   }
 
@@ -2170,7 +2194,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       el.dataset.framed = '1';
       el.classList.remove('slotted');
       el.hidden = false;
-      for (const k of ['left', 'top', 'width', 'height']) el.style[k] = '';
+      for (const k of ['left', 'top', 'width', 'height', 'transform']) el.style[k] = '';
       lent = { el, mark };
       pageBody.append(el);
       return;

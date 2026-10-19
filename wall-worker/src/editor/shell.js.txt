@@ -22,7 +22,7 @@ export function boot(E) {
   const recs = new Map(); // слой → аварийная копия | null (уже спрошено)
   const parents = new Map(); // слой → откуда открыт (для слоёв, которых ещё нет на сервере)
   let brushPx = store.get('brush', 4), mini = store.get('mini', true);
-  let tools, layers, insp, ins, top, bar, crumbs, stateEl, bPub, bSave, zoomEl, brushBox, toolBtns = {}, shield, menus, jsonWin = null;
+  let tools, layers, insp, ins, top, bar, crumbs, jumps, stateEl, bPub, bSave, zoomEl, brushBox, toolBtns = {}, shield, menus, jsonWin = null;
 
   /* ---------- вход в редактор ---------- */
   const keeperBox = document.querySelector('aside.keeper');
@@ -72,7 +72,11 @@ export function boot(E) {
     bSave = button('Сохранить', () => saveAll(), { title: 'Черновик всех изменённых слоёв (Ctrl+S)' });
     bPub = button('Опубликовать', () => publish(), { cls: 'ed-primary', title: 'Сделать сохранённое видимым на сайте' });
     right.append(stateEl, button('Предпросмотр', () => previewOn(), { title: 'Tab' }), bSave, bPub);
-    top.append(left, crumbs, right);
+    // выделен объект с пространствами внутри — переходы в каждое прямо здесь (алеф-нуль и пространства областей)
+    jumps = el('nav', 'ed-jumps');
+    jumps.setAttribute('aria-label', 'Внутрь выделенного');
+    jumps.hidden = true;
+    top.append(left, crumbs, jumps, right);
     /* низ: инструменты */
     bar = el('div', 'ed-bar');
     for (const t of TOOLS) {
@@ -103,7 +107,9 @@ export function boot(E) {
     E.onCamera(() => { if (zoomEl) zoomEl.textContent = Math.round(E.cam.zoom * 100) + '%'; });
     doc.on('change', status);
     doc.on('saved', status);
-    doc.on('layer', () => { status(); drawCrumbs(); askRecovery(E.space); });
+    doc.on('layer', () => { status(); drawCrumbs(); drawJumps(); askRecovery(E.space); });
+    doc.on('sel', drawJumps);
+    doc.on('change', drawJumps);
     addEventListener('keydown', onKey);
     addEventListener('beforeunload', (e) => { if (open && doc.dirtyLayers().length) { e.preventDefault(); e.returnValue = ''; } });
     setInterval(keep, KEEP_EVERY);
@@ -177,6 +183,31 @@ export function boot(E) {
       const b = button((l && l.dirty ? '● ' : '') + name(sp), () => openLayer(sp), { cls: 'ed-crumb' + (sp === E.space ? ' on' : ''), title: sp });
       crumbs.append(b);
     });
+  }
+  /** Пространства внутри выделенного объекта (или узла сети под взглядом): его inner и inner его областей-входов. */
+  function innersOf(o) {
+    if (!o) return [];
+    const out = [];
+    if (o.inner) out.push({ sp: o.inner, label: name(o.inner) === o.inner ? o.label : name(o.inner) });
+    (o.doors || []).forEach((d, k) => { if (d && d.inner) out.push({ sp: d.inner, label: d.label || name(d.inner), door: k + 2 }); });
+    return out.filter((x, i) => out.findIndex((y) => y.sp === x.sp) === i);
+  }
+  function drawJumps() {
+    if (!jumps) return;
+    const o = doc.first || (doc.peeked && doc.any(doc.peeked));
+    const list = doc.sel.length > 1 ? [] : innersOf(o);
+    jumps.textContent = '';
+    jumps.hidden = !list.length;
+    if (!list.length) return;
+    jumps.append(el('span', 'ed-jumps-h', 'Внутрь:'));
+    for (const j of list.slice(0, 12)) {
+      const short = j.label.length > 22 ? j.label.slice(0, 21) + '…' : j.label;
+      const it = ui.info(j.sp), empty = !it || it.state === 'пусто';
+      jumps.append(button((j.door ? `${j.door}. ` : '') + short + ' ↘', () => openLayer(j.sp, E.space), {
+        cls: 'ed-jump' + (empty ? ' empty' : ''),
+        title: `${j.label}\nСлой ${j.sp}${empty ? ' — пока пустой' : ''}`,
+      }));
+    }
   }
   function status() {
     if (!stateEl) return;

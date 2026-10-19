@@ -795,3 +795,21 @@ describe('Узлы сети: пространства-кластеры из та
       expect(vitrinaJs, s).toContain(s);
   });
 });
+
+describe('Место живого элемента (виджет SoundCloud в рамке)', () => {
+  const box = (w: number, h: number, a: number, cx = 100, cy = 50) => {
+    const c = Math.cos(a), s = Math.sin(a);
+    return [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map(([x, y]) => [cx + x * c - y * s, cy + x * s + y * c]);
+  };
+  it('наименьший прямоугольник: ровная рамка — угол 0, повёрнутая — свой угол, четверть оборота — те же стороны наоборот', () => {
+    expect(M.minRect(box(400, 200, 0))).toMatchObject({ cx: 100, cy: 50, w: 400, h: 200, a: 0 });
+    const r = M.minRect(box(400, 200, 0.3))!;
+    expect(r.a).toBeCloseTo(0.3, 6);
+    expect(r.w).toBeCloseTo(400, 6);
+    expect(r.h).toBeCloseTo(200, 6);
+    const q = M.minRect(box(400, 200, Math.PI / 2))!;
+    expect([q.w, q.h, q.a].map((v) => Math.round(v * 1000) / 1000)).toEqual([200, 400, 0]);
+    expect(M.minRect([])).toBeNull();
+    expect(M.minRect([[1, 1]])).toMatchObject({ w: 0, h: 0 });
+  });
+});
