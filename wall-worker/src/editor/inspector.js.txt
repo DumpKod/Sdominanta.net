@@ -5,7 +5,10 @@
 
 import { Win, button, el, field, options, section, slider } from './dom.js';
 
-const WIDGET_NAMES = { player: 'плеер SoundCloud', keeper: 'вход хранителя', queue: 'очередь (хранителю)', music: 'музыка (хранителю)', vitrina: 'витрина (хранителю)' };
+const WIDGET_NAMES = {
+  player: 'плеер SoundCloud', keeper: 'вход хранителя', queue: 'панель хранителя: очередь', vitrina: 'панель хранителя: пространства',
+  music: 'панель хранителя: музыка', nodes: 'панель хранителя: узлы', docs: 'панель хранителя: документы',
+};
 const STYLE_NAMES = { tubeR: 'Радиус новых мазков', thick: 'Толщина', resonance: 'Резонанс', tact: 'Такты', flow: 'Течение', wobble: 'Волнистость', fill: 'Заливка жилы', sound: 'Реакция на звук' };
 const FRAME_NAMES = {
   push: 'Напор до взрыва (сила колёсика)', depth: 'Глубина провала', width: 'Ширина колонки текста, px',

@@ -69,6 +69,17 @@ html.ed-preview .ed-top, html.ed-preview .ed-dock, html.ed-preview .ed-bar, html
 .ed-grip { position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize; z-index: 2; }
 .ed-dock-left .ed-grip { right: -4px; }
 .ed-dock-right .ed-grip { left: -4px; }
+/* панель хранителя: свой док слева вне редактора, сверху до низа; разделы /k — страницей в рамке */
+.ed-dock-kp { left: 0; top: 0; border-right: 1px solid var(--ed-line); }
+.ed-dock-kp .ed-grip { right: -4px; }
+html.kp-on:not(.ed-on) .ed-dock-kp { display: flex; }
+html:not(.kp-on) .ed-dock-kp, html.ed-on .ed-dock-kp, html.ed-preview .ed-dock-kp { display: none; }
+.kp-win .ed-win-b { display: flex; flex-direction: column; gap: 6px; padding: 6px; min-height: 0; flex: 1 1 auto; }
+.kp-tabs { display: flex; flex-wrap: wrap; gap: 3px; }
+.kp-tab.on { color: #fff; background: var(--ed-acc-bg); border-color: var(--ed-acc); }
+.kp-frame { flex: 1 1 auto; min-height: 200px; width: 100%; border: 1px solid var(--ed-line); background: #0b0d10; }
+.kp-acts { display: flex; gap: 4px; justify-content: space-between; }
+html.kp-on .fresh { left: auto; }
 .ed-win { display: flex; flex-direction: column; background: var(--ed-panel); min-height: 0; }
 .ed-win[hidden] { display: none; }
 .ed-win.ed-grow { flex: 1 1 auto; }

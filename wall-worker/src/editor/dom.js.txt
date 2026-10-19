@@ -94,7 +94,7 @@ export function dock(side, width = 280) {
     e.preventDefault();
     grip.setPointerCapture(e.pointerId);
     const x0 = e.clientX, w0 = w;
-    const move = (ev) => { w = Math.max(200, Math.min(560, w0 + (side === 'left' ? ev.clientX - x0 : x0 - ev.clientX))); apply(); };
+    const move = (ev) => { w = Math.max(200, Math.min(side === 'kp' ? 900 : 560, w0 + (side === 'right' ? x0 - ev.clientX : ev.clientX - x0))); apply(); };
     const up = () => { grip.removeEventListener('pointermove', move); store.set('dock:' + side, w); window.dispatchEvent(new Event('ed:layout')); };
     grip.addEventListener('pointermove', move);
     grip.addEventListener('pointerup', up, { once: true });

@@ -49,8 +49,9 @@ const defaults = (spec) => Object.fromEntries(Object.entries(spec).map(([k, v]) 
  * ring — толщина рамки из узлов области в пикселях CSS; far — сколько узлов фона гаснет, пока окно раскрыто.
  */
 /** Виджеты окна: плеер и вход хранителя — живые элементы страницы, остальные — разделы панели (только хранителю). */
-export const WIDGETS = ['player', 'keeper', 'queue', 'music', 'vitrina'];
-export const KEEPER_WIDGETS = { queue: '/k', music: '/k/music', vitrina: '/k/vitrina' };
+export const WIDGETS = ['player', 'keeper', 'queue', 'music', 'vitrina', 'nodes', 'docs'];
+/** Разделы панели хранителя: область с таким виджетом у хранителя открывает панель слева на этом разделе. */
+export const KEEPER_WIDGETS = { queue: '/k', vitrina: '/k/vitrina', music: '/k/music', nodes: '/k/nodes', docs: '/k/docs' };
 export const FRAME = {
   width: [240, 1400, 760],
   aspect: [0, 2, 0],

@@ -11,6 +11,7 @@ import { TOOLS, makeTools } from './tools.js';
 import { makeLayers } from './layers.js';
 import { makeInspector } from './inspector.js';
 import { makeInsert } from './insert.js';
+import { makeKeeper } from './keeper.js';
 
 const KEEP_EVERY = 60000;
 
@@ -28,6 +29,15 @@ export function boot(E) {
   const keeperBox = document.querySelector('aside.keeper');
   const opener = button('Редактор', () => enter(), { cls: 'ed-open', title: 'Открыть редактор витрины' });
   if (keeperBox) keeperBox.prepend(opener); else document.body.append(opener);
+  // панель хранителя слева: разделы /k в рамке; ссылки на разделы в углу открывают её же
+  const kp = makeKeeper(E, () => enter());
+  const kpBtn = button('Панель', () => (kp.isOpen ? kp.close() : kp.open()), { cls: 'ed-open', title: 'Панель хранителя: очередь, пространства, музыка, узлы, документы' });
+  opener.after(kpBtn);
+  const BY_PATH = { '/k': 'queue', '/k/vitrina': 'vitrina', '/k/music': 'music', '/k/nodes': 'nodes', '/k/docs': 'docs' };
+  if (keeperBox) for (const a of keeperBox.querySelectorAll('a[href]')) {
+    const id = BY_PATH[a.getAttribute('href')];
+    if (id) a.addEventListener('click', (e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); kp.open(id); });
+  }
 
   const ui = {
     brush: () => brushPx,
@@ -53,6 +63,7 @@ export function boot(E) {
     info: (sp) => items.find((i) => i.space === sp) || null,
     recovery: (sp) => (doc.layer(sp) && doc.layer(sp).dirty ? null : recs.get(sp) || null),
     freeSpace: () => ins.freeSpace(),
+    keeper: () => kp,
     openLayer, openDraft, restore, dropRecovery, check,
     fit(o) { const b = o.bounds(); if (!E.M.isEmpty(b)) E.flyTo(E.M.expand(b, Math.max(b.x1 - b.x0, b.y1 - b.y0) * 0.2)); },
   };
@@ -119,6 +130,7 @@ export function boot(E) {
     if (open) return;
     if (!built) build();
     open = true;
+    kp.close();
     root.classList.add('ed-on');
     try { sessionStorage.setItem('ed:open', '1'); } catch { /* без памяти вкладки */ }
     E.closeAll();

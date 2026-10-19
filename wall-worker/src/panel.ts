@@ -80,7 +80,13 @@ function page(title: string, body: string, o: { status?: number; headers?: Recor
     '@media (max-width:760px){.app{grid-template:"bar" auto "tools" auto "work" 1fr "dock" auto/1fr}.bar{flex-wrap:wrap}' +
     '.tools{flex-direction:row;justify-content:center;border-right:0;border-bottom:1px solid var(--line)}.dock{border-left:0;border-top:1px solid var(--line)}' +
     '.work{padding:12px 16px}table{display:block;overflow-x:auto}}\n' +
-    '</style>\n</head>\n<body>\n' + (body.startsWith('<header') ? `<div class="app">${body}\n</main></div>` : `<div class="solo">${body}</div>`) + '\n</body>\n</html>\n';
+    // в рамке панели хранителя на витрине (embedTop): без оболочки, узко; ссылки наружу панели — во всё окно
+    (body.startsWith(EMBED) ? '.solo{padding:10px 12px}.kbar{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:12px;color:var(--dim);margin-bottom:8px}.kbar form{margin:0}table{display:block;overflow-x:auto}\n' : '') +
+    '</style>\n</head>\n<body>\n' +
+    (body.startsWith('<header')
+      ? `<div class="app">${body}\n</main></div>`
+      : `<div class="solo">${body.startsWith(EMBED) ? body.replace(/<a href="(?=\/k\/vitrina\/v\/|(?!\/k[/"]))/g, '<a target="_top" href="') : body}</div>`) +
+    '\n</body>\n</html>\n';
   // same-origin, а не no-referrer: при no-referrer браузер шлёт с формы «Origin: null», и проверка своего адреса отказала бы.
   return html(doc, { status: o.status ?? 200, noStore: true, csp: o.csp ?? CSP, headers: { 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'same-origin', ...o.headers } });
 }
@@ -116,6 +122,21 @@ function loginForm(csrf: string, note = ''): string {
     '<label>Код из аутентификатора <input name="otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label>\n' +
     '<button type="submit">Войти</button>\n</form>\n<p class="muted">Сессия — 12 часов, «Выйти» закрывает её сразу.</p>'
   );
+}
+
+const EMBED = '<div class="kbar">';
+/**
+ * Раздел в рамке панели хранителя на витрине (Sec-Fetch-Dest: iframe): вместо оболочки — строка «ждёт решения» и выход.
+ * Разделы переключает сама панель витрины.
+ */
+async function embedTop(env: Env, sign: string, csrf: string, now: number): Promise<string> {
+  const q = (await waitingDrafts(env, now)).length;
+  const st = (await env.DB.batch([
+    env.DB.prepare(`SELECT count(*) AS n FROM nodes WHERE state = 'черновик'`),
+    env.DB.prepare(`SELECT count(*) AS n FROM docs WHERE state = 'черновик'`),
+  ])).map((r) => (r.results[0] as { n: number }).n);
+  return EMBED + `<span>Ждёт решения: <a href="/k">карточки ${q}</a> · <a href="/k/nodes">узлы ${st[0]}</a> · <a href="/k/docs">документы ${st[1]}</a></span>` +
+    `<span>🜄 ${esc(sign)}</span><form method="post" action="/k/logout" target="_top"><input type="hidden" name="csrf" value="${esc(csrf)}"><button type="submit">Выйти</button></form></div>\n`;
 }
 
 /** Разделы панели: группа → [адрес, название]. Один список на всё — новый раздел добавляется здесь. */
@@ -237,7 +258,7 @@ export async function panel(env: Env, o: string, req: Request, path: string): Pr
   }
 
   const csrf = await csrfFor(env, 'session', session.id);
-  const top = await header(env, me, csrf, path, now);
+  const top = req.headers.get('Sec-Fetch-Dest') === 'iframe' ? await embedTop(env, me, csrf, now) : await header(env, me, csrf, path, now);
 
   if (post) {
     const f = await readForm(req, path === '/vitrina/save' || path === '/vitrina/recover' ? SCENE_FORM_MAX : path === '/music/bands' ? BANDS_FORM_MAX : FORM_MAX);

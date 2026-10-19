@@ -102,3 +102,33 @@ describe('Редактор: лёгкие чтения не тратят лими
     expect(await panelRows()).toBe(before + 1);
   });
 });
+
+describe('Панель хранителя на витрине', () => {
+  it('раздел в рамке — без оболочки, со строкой «ждёт решения»; ссылки наружу панели и предпросмотр — во всё окно', async () => {
+    const { cookie } = await session();
+    const res = await get('/k/vitrina', { Cookie: cookie, 'Sec-Fetch-Dest': 'iframe' });
+    const page = await res.text();
+    expect(res.status).toBe(200);
+    expect(page).not.toContain('<header class="bar">');
+    expect(page).toContain('<div class="solo"><div class="kbar">');
+    expect(page).toContain('<a href="/k/nodes">узлы');
+    expect(page).toMatch(/<form method="post" action="\/k\/logout" target="_top">/);
+    for (const m of page.matchAll(/<a ([^>]*)href="([^"]+)"/g)) {
+      const inside = /^\/k(\/|$)/.test(m[2]) && !m[2].startsWith('/k/vitrina/v/');
+      expect(m[1].includes('target="_top"'), m[2]).toBe(!inside);
+    }
+    expect(res.headers.get('X-Frame-Options')).toBe('SAMEORIGIN');
+    // обычный заход — с оболочкой
+    expect(await (await get('/k/vitrina', { Cookie: cookie })).text()).toContain('<header class="bar">');
+  });
+
+  it('модуль панели отдаётся в сессии; разделы хранителя — виджеты сцены', async () => {
+    const { cookie, csrf } = await session();
+    const r = await get('/k/ed/keeper.js', { Cookie: cookie });
+    expect(r.status).toBe(200);
+    expect(await r.text()).toContain('setPanel');
+    expect((await get('/k/ed/keeper.js')).status).not.toBe(200);
+    const doors = [{ area: [[0, 0], [9, 0], [9, 9]], widget: 'nodes' }, { area: [[20, 0], [29, 0], [29, 9]], widget: 'docs' }];
+    expect(await saveIn(cookie, csrf, tiny({ doors }))).toBeGreaterThan(0);
+  });
+});

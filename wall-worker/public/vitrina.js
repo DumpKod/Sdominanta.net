@@ -1358,10 +1358,21 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     // второй клик по той же области (камера уже подлетела и с тех пор не двигалась) — вход, как двойной щелчок
     const at = sx == null ? null : portalAt(sx, sy);
     const en = at || (kindOf(o) ? o : null);
+    if (en && toPanel(en)) return;
     if (en && focused === en) { focused = null; openFrame(en, true); return; }
     if (en) { flyTo(expand(areaBounds(en), 0)); focused = en; }
     else if (o.href) location.href = new URL(o.href, location.origin).href;
   }
+  // Область с разделом панели хранителя (виджет queue, music, …) у хранителя открывает панель слева (редактор
+  // ставит setPanel), а не окно на холсте. Нет панели — как раньше: раздел в окне провала.
+  let panelFn = null;
+  const toPanel = (en) => {
+    const path = en && en.widget && M.KEEPER_WIDGETS[en.widget];
+    if (!path || !keeper || !panelFn) return false;
+    focused = null;
+    panelFn(en.widget, path, en);
+    return true;
+  };
   let focused = null; // вход, к которому подлетели кликом: второй клик по нему входит
   let aim = null; // точка мира, на которую смотрели в начале прокрутки колёсиком
   function tap(x, y) {
@@ -1993,6 +2004,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   function openFrame(i, auto) {
     const o = entryOf(i), kind = o && kindOf(o);
     if (!kind || going) return;
+    if (toPanel(o)) return;
     if (win) closeWindow();
     highlight(-1);
     tween = null;
@@ -2565,6 +2577,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     settle() { ensureView(true); refresh(4); },
     /** Редактор: свои несохранённые слои вместо сайта при любом переходе (null — сайт). */
     setLoader(f) { loader = f; },
+    setPanel(f) { panelFn = f; },
     /** Редактор: открыть слой сразу, без полёта и провала; камера — на весь слой. */
     openSpace(sp, parent) {
       return loadScene(sp).then((j) => {

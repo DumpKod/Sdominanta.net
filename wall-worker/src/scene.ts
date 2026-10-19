@@ -82,7 +82,7 @@ export const SPACE_RE = /^[a-z0-9-]{1,32}$/;
 /** Места для живого HTML в сцене: плеер и вход хранителя. */
 export const SLOTS = ['player', 'keeper'] as const;
 /** Виджеты окна (WIDGETS в public/vitrina/model.js). */
-export const WIDGETS = ['player', 'keeper', 'queue', 'music', 'vitrina'] as const;
+export const WIDGETS = ['player', 'keeper', 'queue', 'music', 'vitrina', 'nodes', 'docs'] as const;
 export const EMPTY_SCENE: Scene = { v: 2, objects: [] };
 
 /** Относительный путь своего сайта: «/…», без «//», «..», схемы, строки запроса и пробелов. */

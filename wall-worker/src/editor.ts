@@ -11,6 +11,7 @@ import layers from './editor/layers.js.txt';
 import inspector from './editor/inspector.js.txt';
 import insert from './editor/insert.js.txt';
 import tools from './editor/tools.js.txt';
+import keeper from './editor/keeper.js.txt';
 import css from './editor/editor.css.txt';
 
 // Редактор витрины v2 (решения хранителя 19.10): модули ES, отдаются только в сессии хранителя (/k/ed/…).
@@ -19,7 +20,7 @@ import css from './editor/editor.css.txt';
 const FILES: Record<string, [string, string]> = {
   'main.js': [main, 'js'], 'dom.js': [dom, 'js'], 'doc.js': [doc, 'js'], 'geom.js': [geom, 'js'], 'io.js': [io, 'js'],
   'shell.js': [shell, 'js'], 'layers.js': [layers, 'js'], 'inspector.js': [inspector, 'js'], 'insert.js': [insert, 'js'],
-  'tools.js': [tools, 'js'], 'editor.css': [css, 'css'],
+  'tools.js': [tools, 'js'], 'keeper.js': [keeper, 'js'], 'editor.css': [css, 'css'],
 };
 
 /** Файл редактора: ETag — номер выкладки, браузер сверяется каждый раз (304, пока деплоя не было). */
