@@ -7,3 +7,10 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Cache-Control: public, max-age=300
+
+/lab/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: public, max-age=60
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://w.soundcloud.com; style-src 'self'; img-src 'self'; connect-src 'self' https:; media-src 'self' blob: https:; frame-src https://w.soundcloud.com; base-uri 'none'; form-action 'none'

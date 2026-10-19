@@ -185,7 +185,7 @@ const b64url = (u: Uint8Array) => btoa(String.fromCharCode(...u)).replace(/\+/g,
 describe('Спектр трека для виджета', () => {
   it('спектр синуса 1 кГц — пик в полосе с 1 кГц; за концом трека — тишина; файл SDB1 туда и обратно', () => {
     const s = spectrumOf(sine(1000, 2), 44100);
-    expect(s).toMatchObject({ fps: 30, bands: BANDS, frames: 60, durationMs: 2000 });
+    expect(s).toMatchObject({ fps: 60, bands: BANDS, frames: 120, durationMs: 2000 });
     const out = new Float32Array(BANDS);
     bandsAt(s, 1000, out);
     const top = out.indexOf(Math.max(...out));
@@ -195,7 +195,7 @@ describe('Спектр трека для виджета', () => {
     expect(out[0]).toBe(0);
     expect(bandsAt(s, 2100, out)).toBeNull();
     const u = unpackBands(packBands(s))!;
-    expect(u).toMatchObject({ fps: 30, bands: BANDS, frames: 60, durationMs: 2000 });
+    expect(u).toMatchObject({ fps: 60, bands: BANDS, frames: 120, durationMs: 2000 });
     expect([...u.data]).toEqual([...s.data]);
     expect(unpackBands(new Uint8Array(20))).toBeNull();
   });
@@ -227,7 +227,7 @@ describe('Спектр трека для виджета', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
     const u = unpackBands(await res.arrayBuffer())!;
-    expect(u).toMatchObject({ fps: 30, bands: BANDS, frames: s.frames, durationMs: 3000 });
+    expect(u).toMatchObject({ fps: 60, bands: BANDS, frames: s.frames, durationMs: 3000 });
     expect([...u.data]).toEqual([...s.data]);
     expect(await (await get('/', HTML)).text()).toContain('data-bands="1"');
 

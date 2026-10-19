@@ -6,10 +6,12 @@
 import { BANDS, bandEdges, bandsOf } from './sound.js';
 
 export const FFT = 2048;
-export const FPS = 30;
+/** 60 кадров/с — как живой анализатор (расхождение с ним ~0.5%); треки длиннее 20 минут — 30 кадров/с, чтобы влезть в 2 МБ. */
+export const FPS = 60;
+export const LONG_SEC = 1200;
 /** Как у AnalyserNode: окно Блэкмана, |X|/N, сглаживание 0.55 при 60 кадрах в секунду, байты в окне −100…−30 дБ. */
 const MIN_DB = -100, MAX_DB = -30, SMOOTH_60 = 0.55;
-/** Предел данных: 2 МБ полос — около 46 минут при 24 полосах и 30 кадрах. */
+/** Предел данных: 2 МБ полос — около 23 минут при 24 полосах и 60 кадрах, 46 минут при 30. */
 export const MAX_BYTES = 2_000_000;
 const MAGIC = 0x31424453; // 'SDB1'
 export const HEAD = 16;
@@ -50,7 +52,7 @@ export function fft(re, im) {
  * Кадр k — окно FFT, которое кончается в момент k / fps (как анализатор в момент кадра).
  * onProgress(0..1) — для длинных треков.
  */
-export function spectrumOf(mono, sampleRate, { fps = FPS, bands = BANDS, onProgress } = {}) {
+export function spectrumOf(mono, sampleRate, { fps = mono.length / sampleRate > LONG_SEC ? 30 : FPS, bands = BANDS, onProgress } = {}) {
   const frames = Math.max(1, Math.floor((mono.length / sampleRate) * fps));
   const out = new Uint8Array(frames * bands);
   const win = blackman(FFT), re = new Float32Array(FFT), im = new Float32Array(FFT);
