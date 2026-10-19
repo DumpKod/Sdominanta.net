@@ -686,6 +686,18 @@ describe('Узлы сети: пространства-кластеры из та
     expect(editorJs).toContain('!o.auto');
   });
 
+  it('первоисточники узла: имена — всем, адреса архива — только хранителю', async () => {
+    await env.DB.prepare('DELETE FROM nodes').run();
+    await add('aleph', null, 0, 'опубликован');
+    await add('leaf', 'aleph', 0, 'опубликован');
+    await env.DB.prepare(`UPDATE nodes SET files = ? WHERE id = 'leaf'`).bind(JSON.stringify([{ name: 'calc-14k.md', drive: 'abc', url: 'https://drive.google.com/file/d/abc/view' }])).run();
+    const guest = await (await get('/vitrina/scene/aleph.json')).text();
+    expect(guest).toContain('Первоисточники: `calc-14k.md`');
+    expect(guest).not.toContain('drive.google.com');
+    const { cookie } = await login();
+    expect(await (await get('/k/vitrina/live/aleph.json', { Cookie: cookie })).text()).toContain('[calc-14k.md](https://drive.google.com/file/d/abc/view)');
+  });
+
   it('хранитель публикует черновики узлов одной кнопкой в /k/vitrina и снимает обратно', async () => {
     await env.DB.prepare('DELETE FROM nodes').run();
     await add('aleph', null, 0, 'черновик');

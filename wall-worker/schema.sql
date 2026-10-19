@@ -120,7 +120,7 @@ CREATE TABLE nodes (
   id TEXT PRIMARY KEY, parent TEXT, pos INTEGER NOT NULL DEFAULT 0,
   sign TEXT, title TEXT NOT NULL, short TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL, by_sign TEXT NOT NULL, dates TEXT, src TEXT, links TEXT NOT NULL DEFAULT '[]',
-  state TEXT NOT NULL, created_at INTEGER NOT NULL, pass_pub TEXT
+  state TEXT NOT NULL, created_at INTEGER NOT NULL, pass_pub TEXT, files TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX nodes_parent ON nodes (parent, pos);
 CREATE INDEX nodes_state ON nodes (state);

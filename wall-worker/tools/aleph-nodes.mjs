@@ -27,8 +27,8 @@ const q = (v) => (v === null || v === undefined || v === '' ? 'NULL' : `'${Strin
 const now = Math.floor(Date.now() / 1000);
 const rows = tree.nodes.map((n) => {
   const links = (n.links || []).map((l) => ({ to: l.to, rel: l.rel, w: typeof l.w === 'number' ? l.w : 0.5 }));
-  return `INSERT OR REPLACE INTO nodes (id, parent, pos, sign, title, short, body, status, by_sign, dates, src, links, state, created_at) VALUES (` +
+  return `INSERT OR REPLACE INTO nodes (id, parent, pos, sign, title, short, body, status, by_sign, dates, src, links, state, created_at, files) VALUES (` +
     [q(n.id), q(parent.get(n.id)), pos.get(n.id) ?? 0, q(n.sign), q(n.title), `'${(n.short || '').replace(/'/g, "''")}'`, `'${(n.body || '').replace(/'/g, "''")}'`,
-      q(n.status), q(n.by || 'сеть'), q(n.dates), q(n.src), `'${JSON.stringify(links).replace(/'/g, "''")}'`, q(state), now].join(', ') + ');';
+      q(n.status), q(n.by || 'сеть'), q(n.dates), q(n.src), `'${JSON.stringify(links).replace(/'/g, "''")}'`, q(state), now, `'${JSON.stringify((n.files || []).filter((f) => f && f.name).map((f) => ({ name: f.name, ...(f.drive ? { drive: f.drive } : {}), ...(f.url ? { url: f.url } : {}) }))).replace(/'/g, "''")}'`].join(', ') + ');';
 });
 console.log(rows.join('\n'));

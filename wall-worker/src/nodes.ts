@@ -39,6 +39,7 @@ export interface NodeRow {
   state: string; // черновик | опубликован | ждёт | отклонён
   created_at: number;
   pass_pub: string | null;
+  files?: string; // JSON [{name, drive?, url?}] — первоисточники в архиве (migrations/0014-node-files.sql)
 }
 
 /** Узлы, видимые зрителю: гостю — опубликованные; хранителю — ещё черновики и ждущие решения. */
@@ -67,12 +68,25 @@ export const spaceOfNode = (all: Map<string, NodeRow>, id: string) => {
 const titleOf = (n: NodeRow) => (n.sign ? `${n.sign} ${n.title}` : n.title);
 
 /** Текст окна узла: краткий текст, тело, строка учёта; ссылки — связи в обе стороны и путь наверх. */
-export function nodeWindow(all: Map<string, NodeRow>, n: NodeRow): NonNullable<SceneObject['window']> {
+/** Первоисточники узла: имена — всем; адреса архива (Drive, позже R2) — только хранителю, пока архив не открыт. */
+function filesLine(n: NodeRow, keeper: boolean): string {
+  let f: { name?: string; url?: string }[] = [];
+  try {
+    f = JSON.parse(n.files || '[]');
+  } catch { /* битое поле — без первоисточников */ }
+  const list = (Array.isArray(f) ? f : []).filter((x) => x && typeof x.name === 'string');
+  if (!list.length) return '';
+  const item = (x: { name?: string; url?: string }) =>
+    keeper && typeof x.url === 'string' && /^https:\/\//.test(x.url) ? `[${x.name}](${x.url})` : `\`${x.name}\``;
+  return 'Первоисточники: ' + list.map(item).join(', ');
+}
+
+export function nodeWindow(all: Map<string, NodeRow>, n: NodeRow, keeper = false): NonNullable<SceneObject['window']> {
   const meta = [`Статус: ${STATUS_NAMES[n.status] ?? n.status}`, `Автор: ${n.by_sign}`];
   if (n.dates) meta.push(`Даты: ${n.dates}`);
   if (n.src) meta.push(`Источник: ${n.src}`);
   if (n.state !== 'опубликован') meta.push(`Видит только хранитель: ${n.state}`);
-  const text = [n.short, n.body, meta.join(' · ')].filter((s) => s && s.trim()).join('\n\n---\n\n');
+  const text = [n.short, n.body, [meta.join(' · '), filesLine(n, keeper)].filter(Boolean).join('\n')].filter((s) => s && s.trim()).join('\n\n---\n\n');
   const links: { label: string; href: string }[] = [];
   const href = (id: string) => `/in/${spaceOfNode(all, id)}`;
   for (const l of linksOf(n)) {
@@ -125,7 +139,7 @@ const STATUS_STYLE: Record<string, Record<string, number>> = {
 };
 
 /** Объекты пространства узла id: он в центре, дети по кругу, нити — к детям и связи между ними. Пусто — узла нет. */
-export function nodeObjects(all: Map<string, NodeRow>, id: string): SceneObject[] {
+export function nodeObjects(all: Map<string, NodeRow>, id: string, keeper = false): SceneObject[] {
   const n = all.get(id);
   if (!n) return [];
   const kids = childrenOf(all, id);
@@ -142,7 +156,7 @@ export function nodeObjects(all: Map<string, NodeRow>, id: string): SceneObject[
     const o: SceneObject = { id: k.id, label: titleOf(k), z: center ? 2 : 1, strokes: [ring(k.id, p.x, p.y, p.R, center ? 6 : 3.6)] };
     o.area = circle(p.x, p.y, p.R * 1.3 + 6);
     if (!center && childrenOf(all, k.id).length) o.inner = k.id;
-    else o.window = nodeWindow(all, k);
+    else o.window = nodeWindow(all, k, keeper);
     o.style = STATUS_STYLE[k.status] ?? {};
     const near = linksOf(k).filter((l) => l.to !== k.id && pos.has(l.to)).map((l) => ({ to: l.to, w: Math.max(0, Math.min(1, l.w ?? 0.5)) }));
     if (near.length) o.links = near.slice(0, 10);
@@ -161,9 +175,9 @@ export function nodeObjects(all: Map<string, NodeRow>, id: string): SceneObject[
  * Сцена пространства с узлами: нарисованное (drawn) поверх, узлы — под ним; совпадающие id остаются за нарисованным.
  * Узла с таким именем нет — сцена как была.
  */
-export function withNodes(drawn: Scene, all: Map<string, NodeRow>, space: string): Scene {
+export function withNodes(drawn: Scene, all: Map<string, NodeRow>, space: string, keeper = false): Scene {
   if (spaceOfNode(all, space) !== space) return drawn; // лист дерева — окно в пространстве родителя, не своё пространство
-  const gen = nodeObjects(all, space);
+  const gen = nodeObjects(all, space, keeper);
   if (!gen.length) return drawn;
   const own = new Set(drawn.objects.map((o) => o.id));
   return { ...drawn, objects: [...gen.filter((o) => !own.has(o.id)), ...drawn.objects] };

@@ -30,7 +30,7 @@ export interface VitrinaOpts {
 export async function liveScene(env: Env, space: string, keeper: boolean) {
   const pub = await publishedScene(env, space);
   const all = await visibleNodes(env, keeper);
-  const scene = space === 'main' ? pub.scene : withNodes(pub.scene, all, space);
+  const scene = space === 'main' ? pub.scene : withNodes(pub.scene, all, space, keeper);
   const parent = space === 'main' ? null : nodeParent(all, space) ?? (await parentOf(env, space));
   return { scene, version: pub.version, exists: space === 'main' || !!pub.version || scene !== pub.scene, parent };
 }
