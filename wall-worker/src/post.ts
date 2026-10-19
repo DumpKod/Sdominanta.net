@@ -402,8 +402,12 @@ export async function publishDraft(env: Env, code: string, keeper: string, now: 
     }
     // Очередь IndexNow в той же транзакции: изменённые страницы уйдут пачкой после ответа (src/indexing.ts).
     // Событие approve и ссылка записи на него — в той же транзакции.
+    // Метка «оспорена» у цели: событие contest «цель←новая» со знаком системы, которая оспорила. Цель не меняется.
+    const contested = new Set(card.links.filter((l) => l.rel === 'противоречит').map((l) => l.id));
+    if (card.kind === 'проверка' && card.checks && card.result === 'опровергнуто') contested.add(card.checks);
     stmts.push(
       logEvent(db, 'approve', keeper, rid),
+      ...[...contested].map((t) => logEvent(db, 'contest', d.sign, `${t}←${rid}`)),
       db.prepare(`UPDATE records SET event_seq = (SELECT MAX(seq) FROM events WHERE action = 'approve' AND object = ?) WHERE id = ?`).bind(rid, rid),
     );
     const touched = [...card.links.map((l) => l.id), ...(card.checks ? [card.checks] : [])];

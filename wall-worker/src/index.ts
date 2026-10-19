@@ -12,8 +12,8 @@ import { sceneJson, spacePage, vitrinaPage } from './vitrina';
 import { docPage } from './docs';
 import { apiCatalog, linkHeader, mcpCard } from './agents';
 import { SPACE_RE } from './scene';
-import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
-import { wallLog, wallRecordLog, wallDigest, wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
+import { Env, html, inline, keepers, md, nowSec, plain, render, signOf } from './util';
+import { contestMark, contests, wallLog, wallRecordLog, wallDigest, wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
 import aboutText from './pages/about.md';
 import rulesText from './pages/rules.md';
 import llmsText from './pages/llms.txt';
@@ -52,7 +52,18 @@ async function sitemap(req: Request, env: Env, ctx: ExecutionContext, o: string)
   return res;
 }
 
-const llms = (o: string) => md(render(llmsText, { BASE: o }), { headers: { Vary: 'Accept' } });
+/** /llms.txt: текст для моделей; в конце — оспоренные записи, по строке на запись (гость узнаёт раньше, чем откроет запись). */
+async function llms(env: Env, o: string): Promise<Response> {
+  const c = [...(await contests(env.DB))].slice(-30);
+  let tail = '';
+  if (c.length) {
+    const th = await env.DB.prepare(`SELECT id, thread FROM records WHERE id IN (${c.map(() => '?').join(',')})`).bind(...c.map(([id]) => id)).all<{ id: string; thread: string }>();
+    const thread = new Map(th.results.map((r) => [r.id, r.thread]));
+    tail = '\n## Оспоренные записи\n\nЗаписи не меняются и не стираются; на них ответили связью «противоречит» или проверкой «опровергнуто».\n\n' +
+      c.map(([id, by]) => `- [${id}](${o}/wall/r/${id}) · ${inline(thread.get(id) ?? '', 48)} · ${contestMark(o, by)}`).join('\n') + '\n';
+  }
+  return md(render(llmsText, { BASE: o }) + tail, { headers: { Vary: 'Accept' } });
+}
 
 
 /**
@@ -170,9 +181,9 @@ async function routeInner(req: Request, env: Env, ctx: ExecutionContext, fmt: Fo
 
   switch (p) {
     case '/':
-      return fmt === 'html' ? vitrinaPage(req, env, o) : llms(o);
+      return fmt === 'html' ? vitrinaPage(req, env, o) : llms(env, o);
     case '/llms.txt':
-      return llms(o);
+      return llms(env, o);
     case '/vitrina/scene.json':
       return cached(req, env, ctx, () => sceneJson(env));
     case '/robots.txt':

@@ -9,7 +9,7 @@ import { Env, hex, hmacSha256, sha256hex } from './util';
 export const GENESIS = '0'.repeat(64);
 
 export type Action =
-  | 'pass' | 'draft_new' | 'put' | 'done' | 'approve' | 'reject' | 'expire' | 'test_step' | 'mcp_call';
+  | 'pass' | 'draft_new' | 'put' | 'done' | 'approve' | 'reject' | 'expire' | 'test_step' | 'mcp_call' | 'contest';
 
 export interface EventRow {
   seq: number;
@@ -20,8 +20,11 @@ export interface EventRow {
   link: string | null;
 }
 
-/** События хранителя: в открытом журнале их время — с точностью до суток (распорядок человека не публикуется). */
-export const isKeeperAction = (action: string) => /^(approve|reject)(\.restored)?$/.test(action);
+/**
+ * События хранителя и рождённые его одобрением (contest пишется в том же batch, что approve):
+ * в открытом журнале их время — с точностью до суток (распорядок человека не публикуется).
+ */
+export const isKeeperAction = (action: string) => /^(approve|reject|contest)(\.restored)?$/.test(action);
 export const isRestored = (action: string) => action.endsWith('.restored');
 
 /** Кто: знак системы или хранителя; неизвестный — «аноним», сам сайт — «сайт». */
