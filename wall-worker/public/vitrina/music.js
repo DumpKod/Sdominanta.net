@@ -7,7 +7,7 @@
 //   (для трека без спектра, если ключ внесён); не пошёл — тот же трек играет виджет.
 // Если частот нет (нет спектра и ключа, или SoundCloud не разрешил анализ), музыка играет, а холст просто дышит сам.
 
-import { BANDS, Ear, bandEdges, bandsOf } from '/vitrina/sound.js';
+import { BANDS, Clock, Ear, LEAD, Lag, bandEdges, bandsOf, outLatency } from '/vitrina/sound.js';
 import { bandsAt, unpackBands } from '/vitrina/spectrum.js';
 import { Feed, mediaSource } from '/vitrina/stream.js';
 
@@ -36,7 +36,17 @@ if (box) {
 
   // ---------- виджет SoundCloud + спектр хранителя ----------
 
-  let w = null, playing = false, pos = 0, at = 0, spec = null, soundId = 0, raw = null;
+  let w = null, playing = false, spec = null, soundId = 0, raw = null, lat = 0;
+  const clock = new Clock();
+  /** Задержка выхода звука этого устройства: виджет играет в своём окне, поэтому меряем своим AudioContext и закрываем его. */
+  function measureLatency() {
+    if (!AC) return;
+    try {
+      const c = new AC();
+      c.resume();
+      setTimeout(() => { lat = outLatency(c); c.close(); }, 1500);
+    } catch {}
+  }
   const spectra = new Map(); // номер трека → Promise<спектр | null>
   const spectrum = (id) => {
     if (!spectra.has(id)) {
@@ -69,6 +79,7 @@ if (box) {
   }
 
   let ifr = null, want = true, idx = 0, loads = 0;
+  const now = () => performance.now();
 
   function widgetStart() {
     const wrap = document.createElement('div');
@@ -96,7 +107,7 @@ if (box) {
   function bind(again) {
     w = window.SC.Widget(ifr);
     const E = window.SC.Widget.Events;
-    const back = again ? { idx, pos } : null;
+    const back = again ? { idx, pos: clock.now(now()) } : null;
     playing = false;
     w.bind(E.READY, () => {
       if (back && kind === 'set' && back.idx > 0) w.skip(back.idx);
@@ -106,17 +117,19 @@ if (box) {
       if (!again) setTimeout(() => { if (!playing) say('нажмите ▶ в плеере SoundCloud'); }, 3000);
     });
     w.bind(E.PLAY, () => {
-      playing = true; at = performance.now(); show(true); say('');
+      playing = true; show(true); say('');
+      w.getPosition((p) => clock.set(p, now(), true));
       w.getCurrentSound(onSound);
       if (kind === 'set') w.getCurrentSoundIndex((i) => { idx = i | 0; });
     });
-    w.bind(E.PAUSE, () => { playing = false; show(false); });
-    w.bind(E.PLAY_PROGRESS, (e) => { pos = e.currentPosition; at = performance.now(); });
-    w.bind(E.SEEK, (e) => { pos = e.currentPosition; at = performance.now(); });
+    w.bind(E.PAUSE, () => { playing = false; show(false); clock.set(clock.now(now()), now(), false); });
+    w.bind(E.PLAY_PROGRESS, (e) => { if (playing) clock.report(e.currentPosition, now()); });
+    w.bind(E.SEEK, (e) => clock.set(e.currentPosition, now(), playing));
     // По кругу: после конца трека (или последнего в плейлисте) — снова с начала.
     w.bind(E.FINISH, () => {
       playing = false;
       show(false);
+      clock.set(0, now(), false);
       setTimeout(() => w.isPaused((p) => {
         if (!p || !want) return;
         if (kind === 'set') w.skip(0); else w.seekTo(0);
@@ -135,18 +148,24 @@ if (box) {
 
   function hearWidget(dt) {
     if (!playing || !spec) return ear.quiet(dt);
-    const ms = pos + Math.min(1000, performance.now() - at); // между сообщениями виджета позиция идёт сама
+    // Слышно сейчас то, что плеер отдал lat секунд назад; показываем на LEAD вперёд (см. sound.js).
+    const ms = clock.now(now()) + (LEAD - lat) * 1000;
     return bandsAt(spec, ms, raw) ? ear.update(fit(raw), dt) : ear.quiet(dt);
   }
 
   // ---------- свой плеер по ключу API ----------
 
   let audio = null, ctx = null, an = null, bytes = null, edges = null;
+  const lag = new Lag(BANDS);
 
   function hearApi(dt) {
     if (an && audio && !audio.paused) {
       an.getByteFrequencyData(bytes);
-      return ear.update(bandsOf(bytes, edges, bands), dt);
+      // Анализатор слышит звук на LEAD раньше колонок (DelayNode); остаток — задержка выхода устройства.
+      const t = now();
+      lag.push(bandsOf(bytes, edges, bands), t);
+      const b = lag.at(t, outLatency(ctx) * 1000);
+      return b ? ear.update(b, dt) : ear.quiet(dt);
     }
     return ear.quiet(dt);
   }
@@ -164,6 +183,7 @@ if (box) {
     audio = null; an = null;
     mode = 'widget';
     show(false);
+    lat = outLatency(ctx);
     widgetStart();
     if (why) setTimeout(() => say('свой плеер не смог (' + why + ') — играет плеер SoundCloud'), 0);
   }
@@ -178,8 +198,11 @@ if (box) {
     an = ctx.createAnalyser();
     an.fftSize = 2048;
     an.smoothingTimeConstant = 0.55;
+    const delay = ctx.createDelay(1);
+    delay.delayTime.value = LEAD; // картинка видит звук раньше, чем его слышно: успевает за сглаживанием
     src.connect(an);
-    an.connect(ctx.destination);
+    an.connect(delay);
+    delay.connect(ctx.destination);
     bytes = new Uint8Array(an.frequencyBinCount);
     edges = bandEdges(BANDS, ctx.sampleRate, an.fftSize);
     audio.addEventListener('play', () => show(true));
@@ -206,7 +229,7 @@ if (box) {
     if (!mode) {
       // Свой плеер — только для трека без спектра, с ключом и в браузере с MediaSource; всё остальное играет официальный виджет.
       mode = kind === 'track' && box.dataset.bands !== '1' && box.dataset.key === '1' && AC && mediaSource(AAC) ? 'api' : 'widget';
-      if (mode === 'widget') widgetStart();
+      if (mode === 'widget') { measureLatency(); widgetStart(); }
     }
     if (mode === 'api') apiClick();
     else if (w) { want = !playing; if (want) w.play(); else w.pause(); }

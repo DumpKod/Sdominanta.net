@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test';
 import { afterEach, describe, expect, it } from 'vitest';
 import { normTrackUrl, parsePlaylist, sc, streamRoute } from '../src/music';
 import { segmentAt, segmentStart } from '../public/vitrina/stream.js';
-import { BANDS, Ear, bandEdges, bandsOf } from '../public/vitrina/sound.js';
+import { BANDS, Clock, Ear, LEAD, Lag, bandEdges, bandsOf } from '../public/vitrina/sound.js';
 import { bandsAt, packBands, spectrumOf, unpackBands } from '../public/vitrina/spectrum.js';
 import { csrfOf, get, login, post } from './helpers';
 import mig11 from '../migrations/0011-music.sql?raw';
@@ -160,6 +160,34 @@ describe('Музыка: поток', () => {
     // mp3 HLS без EXT-X-MAP: куски на sndcdn.
     const mp3 = parsePlaylist('#EXTM3U\n#EXTINF:1.0,\nhttps://cf-hls-media.sndcdn.com/media/0/1/x.128.mp3?Policy=p\n#EXT-X-ENDLIST\n', PL)!;
     expect(mp3).toEqual({ map: null, segments: [['https://cf-hls-media.sndcdn.com/media/0/1/x.128.mp3?Policy=p', 1]] });
+  });
+
+  it('синхрон: часы виджета идут сами и подтягиваются без рывков, прыжок — на перемотке, без сообщений встают', () => {
+    const c = new Clock();
+    c.set(1000, 0, true);
+    expect(c.now(100)).toBe(1100);
+    c.report(1080, 100); // сообщение опоздало на 20 мс: часы не прыгают назад, а подтягиваются на четверть
+    expect(c.now(100)).toBe(1095);
+    c.report(5000, 200); // перемотка
+    expect(c.now(200)).toBe(5000);
+    expect(c.now(200 + 5000)).toBe(5000 + Clock.HOLD);
+    c.set(7000, 300, false);
+    expect(c.now(900)).toBe(7000);
+  });
+
+  it('синхрон: полосы с задержкой выхода звука; ухо отстаёт от шага меньше, чем опережение LEAD', () => {
+    const lag = new Lag(2, 8);
+    for (let t = 0; t <= 100; t += 16) lag.push(new Float32Array([t, 0]), t);
+    expect(lag.at(100, 0)![0]).toBe(96);
+    expect(lag.at(100, 40)![0]).toBe(48);
+    expect(lag.at(100, 1000)).toBeNull();
+    // Шаг громкости: через сколько ухо доходит до половины (кадры по 1/60 с).
+    const ear = new Ear(BANDS), ones = new Float32Array(BANDS).fill(1);
+    ear.update(ones, 1 / 60);
+    expect(ear.beat).toBe(1); // удар — в тот же кадр
+    let t = 1 / 60;
+    while (ear.level < 0.5) { ear.update(ones, 1 / 60); t += 1 / 60; }
+    expect(t).toBeLessThanOrEqual(LEAD);
   });
 
   it('куски по времени: перемотка и луп находят нужный кусок', () => {

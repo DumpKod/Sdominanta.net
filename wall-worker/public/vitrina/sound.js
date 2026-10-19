@@ -70,3 +70,47 @@ export class Ear {
     return this;
   }
 }
+
+/*
+ * Синхрон с музыкой. Кадр на экране должен показывать звук, который слышно в момент, когда кадр виден,
+ * и чуть раньше — на время, которое съедают сглаживания уха и движка. Глаз прощает картинку, которая чуть впереди звука,
+ * и замечает отставшую уже с ~45 мс. Поэтому:
+ * - виджет (спектр заранее): берём полосы на LEAD вперёд от того, что слышно сейчас, — будущее спектра известно;
+ * - свой плеер (живой анализатор): звук задерживаем на LEAD (DelayNode после анализатора), а полосы — на задержку
+ *   выхода звука (Bluetooth — до 0.3 с), чтобы картинка не убегала вперёд.
+ */
+/** Секунды: кадр до глаза (~2 кадра) + сглаживание уха и движка до половины шага (~60 мс). */
+export const LEAD = 0.09;
+
+/** Задержка выхода звука устройства, с: из AudioContext, если браузер её знает. */
+export const outLatency = (ctx) => (ctx ? Math.max(0, (ctx.outputLatency || 0) + (ctx.baseLatency || 0)) : 0);
+
+/**
+ * Часы позиции чужого плеера (мс). Плеер сообщает позицию редко и с задержкой сообщения; между сообщениями часы
+ * идут сами, а сообщение не дёргает их назад-вперёд, а подтягивает плавно. Большой разрыв (перемотка, подгрузка) — прыжок.
+ * Без сообщений дольше HOLD часы встают: плеер, скорее всего, ждёт данных.
+ */
+export class Clock {
+  constructor() { this.pos = 0; this.at = 0; this.run = false; }
+  static HOLD = 600;
+  static JUMP = 250;
+  now(t) { return this.run ? this.pos + Math.min(Clock.HOLD, t - this.at) : this.pos; }
+  /** Позиция p от плеера в момент t (performance.now()). */
+  report(p, t) {
+    const est = this.now(t), err = p - est;
+    this.pos = !this.run || Math.abs(err) > Clock.JUMP ? p : est + err * 0.25;
+    this.at = t;
+  }
+  set(p, t, run) { this.pos = p; this.at = t; this.run = run; }
+}
+
+/** Полосы с задержкой: кольцо снимков, выдаёт снимок, сделанный не позже чем ms назад (до ~0.5 с при 60 кадрах). */
+export class Lag {
+  constructor(n, size = 40) { this.n = n; this.t = new Float64Array(size).fill(NaN); this.b = Array.from({ length: size }, () => new Float32Array(n)); this.i = 0; }
+  push(bands, t) { this.i = (this.i + 1) % this.t.length; this.b[this.i].set(bands); this.t[this.i] = t; }
+  at(t, ms) {
+    if (ms <= 0) return this.b[this.i];
+    for (let k = 0, j = this.i; k < this.t.length; k++, j = (j - 1 + this.t.length) % this.t.length) if (this.t[j] <= t - ms) return this.b[j];
+    return null;
+  }
+}
