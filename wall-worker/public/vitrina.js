@@ -1175,7 +1175,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       }
       cam.panBy(s.cx - gesture.cx, s.cy - gesture.cy);
       gesture = { kind: 'pinch', ...s };
-      userMoved = true;
+      userMoved = true; focused = null;
       cameraChanged();
       return;
     }
@@ -1188,7 +1188,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       if (rama && rama.dive) return; // в провале камеру ведёт только глубина
       cam.panBy(e.clientX * VK - gesture.x, e.clientY * VK - gesture.y);
       gesture.x = e.clientX * VK; gesture.y = e.clientY * VK;
-      userMoved = true;
+      userMoved = true; focused = null;
       cameraChanged();
       return;
     }
@@ -1237,32 +1237,45 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     tween = null;
     // гостю колёсико — масштаб; в инструментах правки — сдвиг, а масштаб — с Ctrl/⌘ (щипок трекпада приходит с Ctrl)
     if (tool === 'view' && depthWheel(e.clientX * VK, e.clientY * VK, e.deltaY * k)) return;
-    const z0 = cam.zoom;
+    const z0 = cam.zoom, sx = e.clientX * VK, sy = e.clientY * VK;
+    // Точка прицела держится за серию прокрутки: у края холста рамка сцены сдвигает камеру, но с ростом масштаба
+    // точка, на которую смотрели в начале, возвращается под курсор (а не уплывает вместе с ним).
+    const now = performance.now();
+    if (!aim || now - aim.t > 1200 || Math.hypot(sx - aim.sx, sy - aim.sy) > 6 * VK) { const [wx, wy] = cam.toWorld(sx, sy, W, H); aim = { wx, wy, sx, sy, t: now }; }
+    aim.t = now;
     // Внутри алеф-нуля вглубь можно только туда, где есть вход (область окна, страницы, следующего алеф-нуля);
     // над пустым местом приближение стоит, и колёсико бьёт басовой волной.
-    if (tool === 'view' && SPACE !== 'main' && e.deltaY < 0 && !portalAt(e.clientX * VK, e.clientY * VK)) {
+    if (tool === 'view' && SPACE !== 'main' && e.deltaY < 0 && !portalAtWorld(aim.wx, aim.wy)) {
       const fitZ = cam.clone().fit(scene.bounds(), W, H, 0.05, 0, ZOOM_MAX).zoom;
-      if (cam.zoom >= fitZ * 1.15) { wheelPulse(e.clientX * VK, e.clientY * VK, Math.abs(e.deltaY * k)); return; }
+      if (cam.zoom >= fitZ * 1.15) { wheelPulse(sx, sy, Math.abs(e.deltaY * k)); return; }
     }
-    if (tool === 'view' || e.ctrlKey || e.metaKey) {
-      cam.zoomAt(e.clientX * VK, e.clientY * VK, W, H, Math.exp(-e.deltaY * k * (e.ctrlKey ? 0.01 : 0.0015)), 0, ZOOM_MAX);
+    if (tool === 'view') {
+      cam.zoom = Math.min(ZOOM_MAX, Math.max(0, cam.zoom * Math.exp(-e.deltaY * k * (e.ctrlKey ? 0.01 : 0.0015))));
+      cam.x = aim.wx - (sx - W / 2) / cam.zoom;
+      cam.y = aim.wy - (sy - H / 2) / cam.zoom;
+    } else if (e.ctrlKey || e.metaKey) {
+      cam.zoomAt(sx, sy, W, H, Math.exp(-e.deltaY * k * (e.ctrlKey ? 0.01 : 0.0015)), 0, ZOOM_MAX);
     } else {
       cam.panBy(-e.deltaX * k, -e.deltaY * k);
     }
-    userMoved = true;
+    userMoved = true; focused = null;
     cameraChanged();
     // приближать дальше некуда: над областью-входом — объект фиксируется в раму, иначе пространство вздрагивает
     if (tool === 'view' && e.deltaY < 0 && cam.zoom <= z0 * 1.002) {
       // переход играет сам, своей скоростью: колёсико его только запускает (см. stepFrame)
-      const en = portalAt(e.clientX * VK, e.clientY * VK);
+      const en = portalAtWorld(aim.wx, aim.wy) || portalAt(sx, sy);
       if (en) { openFrame(en, false); if (rama) frameWheel(e.deltaY * k); }
-      else wheelPulse(e.clientX * VK, e.clientY * VK, Math.abs(e.deltaY * k)); // упор в пределе над пустым местом — басовая волна по сети
+      else wheelPulse(sx, sy, Math.abs(e.deltaY * k)); // упор в пределе над пустым местом — басовая волна по сети
     }
   }, { passive: false });
 
   cv.addEventListener('dblclick', (e) => {
     if (tool !== 'view') { if (editorInput && editorInput.dblclick) editorInput.dblclick(e); return; }
-    if (!win && hit(e.clientX * VK, e.clientY * VK) < 0) fitAll();
+    if (win || going) return;
+    // двойной щелчок по области-входу — сразу внутрь (взрыв играет сам); по пустому месту — вся сцена
+    const en = rama ? null : portalAt(e.clientX * VK, e.clientY * VK);
+    if (en) { focused = null; openFrame(en, true); return; }
+    if (!rama && hit(e.clientX * VK, e.clientY * VK) < 0) fitAll();
   });
 
   window.addEventListener('keydown', (e) => {
@@ -1318,11 +1331,15 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     if (!o) return;
     // окно открывает только приближение в область; клик подлетает к той области, по которой кликнули (вход объекта),
     // мимо областей — к основной
+    // второй клик по той же области (камера уже подлетела и с тех пор не двигалась) — вход, как двойной щелчок
     const at = sx == null ? null : portalAt(sx, sy);
-    if (at) flyTo(expand(areaBounds(at), 0));
-    else if (kindOf(o)) flyTo(expand(areaBounds(o), 0));
+    const en = at || (kindOf(o) ? o : null);
+    if (en && focused === en) { focused = null; openFrame(en, true); return; }
+    if (en) { flyTo(expand(areaBounds(en), 0)); focused = en; }
     else if (o.href) location.href = new URL(o.href, location.origin).href;
   }
+  let focused = null; // вход, к которому подлетели кликом: второй клик по нему входит
+  let aim = null; // точка мира, на которую смотрели в начале прокрутки колёсиком
   function tap(x, y) {
     if (rama) { if (x < rama.x || y < rama.y || x > rama.x + rama.w || y > rama.y + rama.h) frameBack(); return; }
     if (win) {
@@ -1413,6 +1430,9 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   /** Вход под точкой экрана: объект, в чью область (многоугольник узлов) смотрит курсор; из нескольких — меньший. */
   function portalAt(sx, sy) {
     const [wx, wy] = cam.toWorld(sx, sy, W, H);
+    return portalAtWorld(wx, wy);
+  }
+  function portalAtWorld(wx, wy) {
     let best = null, area = Infinity;
     for (const o of entriesOf(scene)) {
       if (!kindOf(o) || !inPoly(o.area, wx, wy)) continue;
@@ -1821,7 +1841,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   // Переход играет сам — взрывом, одной скоростью: колёсико (щипок) только копит напор в пределе над областью.
   // Напор затухает: медленная прокрутка его не набирает, сильная — набирает; за порогом окна (frame.push) — взрыв.
   // До порога область натягивается (камера чуть отходит, узлы области светятся); отпустили — напор стекает, всё как было.
-  const BURST_IN = 1.25, BURST_OUT = 0.8, BOOM_AT = 0.2, PRESS_DECAY = 2.2;
+  const BURST_IN = 1.25, BURST_OUT = 0.8, BOOM_AT = 0.2, PRESS_DECAY = 1.0;
   let flash = 0, flashX = 0, flashY = 0; // вспышка взрыва: мягкий свет из точки, гаснет сам
   let diveK = 0; // насколько глубоко провал (0…1): жилы и плазма тают, остаются растянутые узлы
   const pages = []; // стопка страниц внутри рамы
@@ -1861,12 +1881,15 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
     pageEl.addEventListener('click', (e) => {
       const a = e.target.closest && e.target.closest('a[href]');
       if (!a) return;
+      let u = null;
+      try { u = new URL(a.getAttribute('href'), location.origin); } catch { return; }
+      // ссылка на пространство (узел выше, внутри, связь) — переход по пространствам без перезагрузки
+      const sp = u.origin === location.origin && /^\/in\/([a-z0-9-]{1,32})$/.exec(u.pathname);
+      if (sp) { e.preventDefault(); toSpace(sp[1]); return; }
       const path = ownPath(a.getAttribute('href'));
       if (!path) return;
       e.preventDefault();
-      const sp = /^\/in\/([a-z0-9-]{1,32})$/.exec(path);
-      if (sp) toSpace(sp[1]);
-      else deeper(path);
+      deeper(path);
     });
     document.body.append(pageEl);
   }
