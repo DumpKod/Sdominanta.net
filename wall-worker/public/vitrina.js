@@ -1307,11 +1307,14 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
   }
 
   /** Объект открывает окно, если оно у него есть, иначе — свою ссылку. */
-  function activate(i) {
+  function activate(i, sx, sy) {
     const o = scene.objects[i];
     if (!o) return;
-    // окно открывает только приближение в область; клик по такому объекту подлетает к области
-    if (kindOf(o)) flyTo(expand(areaBounds(o), 0));
+    // окно открывает только приближение в область; клик подлетает к той области, по которой кликнули (вход объекта),
+    // мимо областей — к основной
+    const at = sx == null ? null : portalAt(sx, sy);
+    if (at) flyTo(expand(areaBounds(at), 0));
+    else if (kindOf(o)) flyTo(expand(areaBounds(o), 0));
     else if (o.href) location.href = new URL(o.href, location.origin).href;
   }
   function tap(x, y) {
@@ -1328,7 +1331,7 @@ const { Camera, Scene, ZOOM_MAX, contains, expand, inPoly, intersects, isEmpty }
       if (t) { goOut(false, undefined, t.id); return; }
       if (onHorizon(x, y) && ups.length) { goOut(); return; }
     }
-    activate(i);
+    activate(i, x, y);
   }
 
   function highlight(i) {
