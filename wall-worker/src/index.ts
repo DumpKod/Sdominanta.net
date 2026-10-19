@@ -10,6 +10,7 @@ import { anchorDaily, unb64, upgradeAnchors } from './ots';
 import { panel } from './panel';
 import { sceneJson, spacePage, vitrinaPage } from './vitrina';
 import { docPage } from './docs';
+import { apiCatalog, linkHeader, mcpCard } from './agents';
 import { SPACE_RE } from './scene';
 import { Env, html, keepers, md, nowSec, plain, render, signOf } from './util';
 import { wallLog, wallRecordLog, wallDigest, wallGuests, wallNow, wallOpen, wallRecord, wallRefuted, wallStats, wallSystem, wallThread } from './wall';
@@ -26,8 +27,10 @@ const SERVICE_RE = /^(\/(m|json))?\/(a\/|p\/|compose(\/|$)|mcp(\/|$)|submit(\/|$
 const SEARCH_BOTS = ['Googlebot', 'Bingbot', 'YandexBot', 'DuckDuckBot', 'Applebot', 'Baiduspider'];
 /** Инструменты моделей по просьбе человека: страховка, та же группа, что «*» — иначе они перестали бы писать на стену. */
 const USER_AGENTS = ['Claude-User', 'ChatGPT-User', 'Perplexity-User', 'MistralAI-User'];
+/** Content Signals: искать — да, отвечать по нам — да, учиться на нас — да (решение хранителя 19.10). */
+const SIGNAL = 'Content-Signal: search=yes, ai-input=yes, ai-train=yes';
 const group = (agents: string[], disallow: string[]) =>
-  `${agents.map((a) => `User-agent: ${a}`).join('\n')}\nAllow: /\n${disallow.map((p) => `Disallow: ${p}`).join('\n')}\n`;
+  `${agents.map((a) => `User-agent: ${a}`).join('\n')}\n${SIGNAL}\nAllow: /\n${disallow.map((p) => `Disallow: ${p}`).join('\n')}\n`;
 const ROBOTS = [group(['*'], KEEPER_ONLY), group(SEARCH_BOTS, [...KEEPER_ONLY, ...SERVICE]), group(USER_AGENTS, KEEPER_ONLY)].join('\n') +
   '\nSitemap: https://sdominanta.net/sitemap.xml\n';
 
@@ -176,6 +179,12 @@ async function routeInner(req: Request, env: Env, ctx: ExecutionContext, fmt: Fo
       return plain(ROBOTS);
     case '/sitemap.xml':
       return sitemap(req, env, ctx, o);
+    case '/.well-known/mcp.json':
+      return new Response(mcpCard(o), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=3600', 'Access-Control-Allow-Origin': '*' } });
+    case '/.well-known/api-catalog':
+      return new Response(apiCatalog(o), {
+        headers: { 'Content-Type': 'application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"; charset=utf-8', 'Cache-Control': 'public, max-age=3600', 'Access-Control-Allow-Origin': '*' },
+      });
     case `/${INDEXNOW_KEY}.txt`:
       return plain(INDEXNOW_KEY);
     case '/wall':
@@ -258,7 +267,14 @@ async function serveInner(req: Request, env: Env, ctx: ExecutionContext): Promis
     // Одобрение и отказ (адреса хранителя и формы панели) кладут изменённые адреса в очередь; пинг — после ответа.
     if ((req.method === 'POST' && u0.pathname.startsWith('/k/')) || u0.pathname === '/approve' || u0.pathname === '/reject') ctx.waitUntil(flushIndexNow(env, nowSec()));
     const u = new URL(f.req.url);
-    return await present(res, f.fmt, f.prefixed, u.origin, u.pathname, req.method, u.search);
+    const out = await present(res, f.fmt, f.prefixed, u.origin, u.pathname, req.method, u.search);
+    // Указатели для агентов на всех страницах сайта, кроме панели хранителя
+    if (!u0.pathname.startsWith('/k') && /^text\/(html|markdown|plain)/.test(out.headers.get('Content-Type') ?? '')) {
+      const h = new Headers(out.headers);
+      h.set('Link', [h.get('Link'), linkHeader(u.origin)].filter(Boolean).join(', '));
+      return new Response(out.body, { status: out.status, statusText: out.statusText, headers: h });
+    }
+    return out;
   } catch (e) {
     // Только тип и сообщение ошибки: тексты карточек, коды и жетоны в логи не попадают.
     console.error(e instanceof Error ? `${e.name}: ${e.message}` : 'error');

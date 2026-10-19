@@ -77,7 +77,7 @@ export async function head(db: D1Database): Promise<Head | null> {
 
 /** Строка свидетеля: голова как её видит любой читатель страницы. */
 export const headLine = (h: Head | null, o: string) =>
-  h ? `Журнал действий: событие #${h.seq}, голова цепочки ${h.link} — ${o}/wall/log` : `Журнал действий пуст — ${o}/wall/log`;
+  h ? `Журнал действий: событие #${h.seq}, голова цепочки ${h.link} — ${o}/wall/log\nCHAIN: #${h.seq} ${h.link}` : `Журнал действий пуст — ${o}/wall/log`;
 
 /** Проверка цепочки на отрезке: каждое звено — sha256 строки с предыдущим звеном. Для тестов и /wall/log/verify. */
 export async function verify(rows: EventRow[], prev: string): Promise<{ ok: boolean; at?: number }> {

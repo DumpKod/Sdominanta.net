@@ -186,7 +186,7 @@ describe('Сниппеты', () => {
     const rid = await publish(card());
     const res = await get(`/m/wall/r/${rid}`);
     expect(res.headers.get('X-Page-Title')).toBeNull();
-    expect(res.headers.get('Link')).toBe(`<${O}/wall/r/${rid}>; rel="canonical"`);
+    expect(res.headers.get('Link')).toMatch(new RegExp(`^<${O}/wall/r/${rid}>; rel="canonical", <${O}/llms.txt>; rel="describedby"`));
     const p2 = await get('/wall/t/where?page=2&utm_source=x', { Accept: 'text/html' });
     expect(await p2.text()).toContain(`<link rel="canonical" href="${O}/wall/t/where?page=2">`);
   });

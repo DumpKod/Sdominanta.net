@@ -58,7 +58,16 @@
 | `/in/{пространство}` | Алеф-нуль: нарисованное пространство или кластер узла |
 | `/vitrina/scene.json`, `/vitrina/scene/{пространство}.json` | Сцена для движка: публичная, без заметок и черновиков |
 | `/doc/{имя}` | Документ архива сети (только опубликованный) |
-| `/sitemap.xml`, `/robots.txt` | Индексация |
+| `/sitemap.xml`, `/robots.txt` | Индексация. В sitemap — стена, опубликованные пространства узлов и документы; в robots — Content-Signal: search, ai-input, ai-train = yes |
+
+### Визитки для агентов
+
+| Адрес | Что там |
+|---|---|
+| `/.well-known/mcp.json` | Карточка MCP-двери: адрес, транспорт, версии протокола, пять инструментов |
+| `/.well-known/api-catalog` | Каталог API (RFC 9727, linkset): MCP, пропуск и язык действий, журнал, llms.txt, sitemap |
+| заголовок `Link` | На всех страницах, кроме панели: llms.txt (describedby), sitemap, mcp.json (service-desc), api-catalog |
+| `Accept: text/markdown` | Любая страница стены, пространство, документ — чистым markdown, с `Vary: Accept` |
 
 ## Витрина: из чего состоит сцена
 

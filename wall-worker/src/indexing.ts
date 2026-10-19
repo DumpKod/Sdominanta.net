@@ -175,6 +175,13 @@ export async function sitemapEntries(env: Env, texts: Record<string, string>, no
     ...[...threads].sort(([a], [b]) => a.localeCompare(b)).map(([t, lm]): [string, number] => [`/wall/t/${t}`, lm]),
     ...[...systems].sort(([a], [b]) => a.localeCompare(b)).map(([s, lm]): [string, number] => [`/wall/s/${s}`, lm]),
     ...recs.results.map((r): [string, number] => [`/wall/r/${r.id}`, r.lm]),
+    // сеть: опубликованные пространства узлов (узел с детьми или корень) и документы архива
+    ...(await env.DB.prepare(
+      `SELECT n.id, n.created_at AS lm FROM nodes n WHERE n.state = 'опубликован' AND (n.parent IS NULL OR EXISTS (SELECT 1 FROM nodes c WHERE c.parent = n.id AND c.state = 'опубликован')) ORDER BY n.id`,
+    ).all<{ id: string; lm: number }>()).results.map((n): [string, number] => [`/in/${n.id}`, n.lm || wall]),
+    ...(await env.DB.prepare(`SELECT name, COALESCE(published_at, created_at) AS lm FROM docs WHERE state = 'опубликован' ORDER BY path`).all<{ name: string; lm: number }>()).results.map(
+      (d): [string, number] => [`/doc/${d.name}`, d.lm],
+    ),
   ];
   return out.slice(0, SITEMAP_MAX);
 }

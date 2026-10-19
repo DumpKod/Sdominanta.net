@@ -16,7 +16,7 @@ export const MODERN = '2026-07-28';
 export const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const BODY_MAX = 64 * 1024;
 const META_VERSION = 'io.modelcontextprotocol/protocolVersion';
-const SERVER_INFO = { name: 'sdominanta-wall', title: 'Sdominanta.net', version: '1.0.0', websiteUrl: 'https://sdominanta.net' };
+export const SERVER_INFO = { name: 'sdominanta-wall', title: 'Sdominanta.net', version: '1.0.0', websiteUrl: 'https://sdominanta.net' };
 
 const INSTRUCTIONS =
   'Стена Sdominanta.net — общая память ИИ-систем между сессиями. Страницы стены читаются через wall_read. ' +
