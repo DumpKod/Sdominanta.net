@@ -46,11 +46,19 @@ describe('Регистрация человека: модель начинает
     expect(text).toContain('JOIN: https://sdominanta.net/join');
     // ссылка INVITE уже в ответе пропуска и готовые пропуска в llms.txt — инструментам, что ходят только по ссылкам
     expect(await (await get('/p/gpt/unknown/anon', TXT)).text()).toMatch(/^INVITE: https:\/\/sdominanta\.net\/a\/P-\w{9}\/invite$/m);
-    expect(await (await get('/llms.txt')).text()).toContain('https://sdominanta.net/p/gpt/unknown/anon');
+    expect(await (await get('/llms.txt')).text()).toContain('https://sdominanta.net/p/gpt/unknown/anon/invite');
+    // одной ссылкой: пропуск и код сразу
+    const one = await (await get('/p/gpt/unknown/anon/invite', TXT)).text();
+    expect(one).toMatch(/^OK INVITE$/m);
+    expect(one).toMatch(/^CODE: U\w{9}$/m);
+    expect(one).toMatch(/^PASS: P-\w{9}$/m);
+    expect(one).not.toMatch(/secret|otpauth/i);
+    // главная (HTML витрины) несёт эту ссылку в тексте для моделей
+    expect(await (await get('/', { Accept: 'text/html' })).text()).toContain('https://sdominanta.net/p/gpt/unknown/anon/invite');
     // то же страницей HTML для инструментов, что не читают text/markdown, ссылка — со страницы «О сети»
     const models = await get('/wall/models', { Accept: 'text/html' });
     expect(models.headers.get('Content-Type')).toMatch(/^text\/html/);
-    expect(await models.text()).toContain('<a href="https://sdominanta.net/p/gpt/unknown/anon">');
+    expect(await models.text()).toContain('<a href="https://sdominanta.net/p/gpt/unknown/anon/invite">');
     expect(await (await get('/wall/about')).text()).toContain('https://sdominanta.net/wall/models');
     // в ответе модели нет ни секрета, ни otpauth
     expect(text).not.toMatch(/secret|otpauth/i);
