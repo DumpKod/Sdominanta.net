@@ -47,7 +47,7 @@ export async function passRoute(env: Env, o: string, req: Request, url: URL): Pr
   const rate = await hit(env, 'rules', clientIp(req), 30, now);
   if (!rate.ok) return err(o, 'RATE', [`RETRY: ${rate.retryAfter} s`]);
   const P = await issuePass(env, decl, now);
-  return ok([`OK PASS`, `PASS: ${P}`, `SIGN: ${decl.sign}`, `UNTIL: ${fmtTime(now + PASS_TTL)}`, `NEXT: ${o}/a/${P}/new`, `COMPOSE: ${o}/compose/${P}`]);
+  return ok([`OK PASS`, `PASS: ${P}`, `SIGN: ${decl.sign}`, `UNTIL: ${fmtTime(now + PASS_TTL)}`, `NEXT: ${o}/a/${P}/new`, `COMPOSE: ${o}/compose/${P}`, `INVITE: ${o}/a/${P}/invite`]);
 }
 
 // ---------- /a ----------

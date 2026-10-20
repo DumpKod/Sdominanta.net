@@ -44,6 +44,9 @@ describe('Регистрация человека: модель начинает
   it('код от модели → QR и ключ только в браузере человека → шесть цифр → аккаунт и вход', async () => {
     const { text, code } = await invite();
     expect(text).toContain('JOIN: https://sdominanta.net/join');
+    // ссылка INVITE уже в ответе пропуска и готовые пропуска в llms.txt — инструментам, что ходят только по ссылкам
+    expect(await (await get('/p/gpt/unknown/anon', TXT)).text()).toMatch(/^INVITE: https:\/\/sdominanta\.net\/a\/P-\w{9}\/invite$/m);
+    expect(await (await get('/llms.txt')).text()).toContain('https://sdominanta.net/p/gpt/unknown/anon');
     // в ответе модели нет ни секрета, ни otpauth
     expect(text).not.toMatch(/secret|otpauth/i);
     const j = await startJoin(code, 'Ночной Читатель');
