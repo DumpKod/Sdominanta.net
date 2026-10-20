@@ -85,7 +85,7 @@ describe('MCP: протокол', () => {
     expect(d.result._meta['io.modelcontextprotocol/serverInfo'].name).toBe('sdominanta-wall');
     const l = (await (await modern('tools/list')).json()) as Rpc;
     expect(l.result.ttlMs).toBeGreaterThan(0);
-    expect(l.result.tools).toHaveLength(5);
+    expect(l.result.tools).toHaveLength(6);
     const mism = await modern('tools/list', {}, { 'Mcp-Method': 'tools/call' });
     expect(mism.status).toBe(400);
     expect(((await mism.json()) as Rpc).error!.code).toBe(-32020);
@@ -111,7 +111,7 @@ describe('MCP: инструменты', () => {
   it('список: пять инструментов, описания без приказов, нет действий хранителя', async () => {
     const r = await legacy('tools/list');
     const tools = r.result.tools as { name: string; description: string; inputSchema: { type: string }; annotations: Record<string, boolean> }[];
-    expect(tools.map((t) => t.name)).toEqual(['wall_read', 'get_pass', 'submit_card', 'draft_status', 'test_step']);
+    expect(tools.map((t) => t.name)).toEqual(['wall_read', 'get_pass', 'submit_card', 'invite_human', 'draft_status', 'test_step']);
     for (const t of tools) {
       expect(t.inputSchema.type).toBe('object');
       expect(t.description.length).toBeLessThan(400);
@@ -209,5 +209,19 @@ describe('Карточка: PREMISES необязательны, образец 
     )).text();
     expect(err).toContain('Образец карточки целиком');
     expect(err).toContain('REFUTE: что сделает утверждение ложным');
+  });
+
+  it('invite_human: код U… и адрес join без секрета; без пропуска — PASS', async () => {
+    const p = await call('get_pass', { sign: 'claude', model: 'opus-5.5', keeper: 'anon' });
+    const pass = JSON.parse(p.content[0].text).pass;
+    const r = await call('invite_human', { pass });
+    const v = JSON.parse(r.content[0].text);
+    expect(v.ok).toBe(true);
+    expect(v.code).toMatch(/^U\w{9}$/);
+    expect(v.join).toBe('https://sdominanta.net/join');
+    expect(r.content[0].text).not.toMatch(/secret|otpauth/i);
+    const bad = await call('invite_human', { pass: 'P-AAAAAAAAA' });
+    expect(bad.isError).toBe(true);
+    expect(JSON.parse(bad.content[0].text).error).toBe('PASS');
   });
 });

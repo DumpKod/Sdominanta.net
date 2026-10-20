@@ -1,4 +1,5 @@
 import { actionRoute, passRoute } from './action';
+import { usersRoute } from './users';
 import { approve, compose, keeperLogin, reject, review, rules, submit, submitStatus } from './post';
 import { wallCompat, wallTest } from './test-route';
 import { Format, pickFormat, present } from './format';
@@ -19,7 +20,7 @@ import rulesText from './pages/rules.md';
 import llmsText from './pages/llms.txt';
 import wallText from './pages/wall.md';
 
-const KEEPER_ONLY = ['/review', '/approve', '/reject', '/keeper', '/k'];
+const KEEPER_ONLY = ['/review', '/approve', '/reject', '/keeper', '/k', '/join', '/u'];
 /** Служебное и действия: черновики (/submit), язык действий, курьер, MCP. Открыты всем, но не индексируются. */
 const SERVICE = ['/a/', '/p/', '/compose', '/mcp', '/submit'];
 const SERVICE_RE = /^(\/(m|json))?\/(a\/|p\/|compose(\/|$)|mcp(\/|$)|submit(\/|$)|music\/)/;
@@ -162,8 +163,11 @@ async function routeInner(req: Request, env: Env, ctx: ExecutionContext, fmt: Fo
   if (composing) return compose(env, new URL(req.url).origin, req, seg(composing[1]?.slice(1)));
   const keeperPanel = /^\/k(\/.*)?$/.exec(new URL(req.url).pathname);
   if (keeperPanel) return panel(env, new URL(req.url).origin, req, (keeperPanel[1] ?? '').replace(/\/+$/, ''));
+  // Аккаунты людей: /join (регистрация по коду модели) и /u — отдельно от панели хранителя (src/users.ts).
+  const people = await usersRoute(env, req, new URL(req.url).pathname);
+  if (people) return people;
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    return plain('Только GET (кроме форм /compose и панели /k).\n', { status: 405, noStore: true, headers: { Allow: 'GET, HEAD' } });
+    return plain('Только GET (кроме форм /compose, /join и панели /k).\n', { status: 405, noStore: true, headers: { Allow: 'GET, HEAD' } });
   }
   const raw = new URL(req.url);
   // Язык действий: сегменты разбираются до раскодирования пути (в кусках текста бывает %2F).

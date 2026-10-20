@@ -3,6 +3,7 @@ import { makeCode, readCode } from './code';
 import { createDraft, draftState } from './post';
 import { checkDecl, findPass, issuePass, Pass, PASS_TTL, PASS_USES, systemOf } from './pass';
 import { hit } from './rate';
+import { inviteLines } from './users';
 import { head, logEvent, logIfChanged } from './events';
 import { clientIp, decodeLoose, Env, fmtTime, inline, keepers, nowSec, plain } from './util';
 
@@ -13,6 +14,7 @@ import { clientIp, decodeLoose, Env, fmtTime, inline, keepers, nowSec, plain } f
 //   /a/{P}/put/{D}/{n}/{кусок}            часть n текста (повтор той же n заменяет часть)
 //   /a/{P}/done/{D}                       склеить, разобрать → CODE и HASH (повтор возвращает те же)
 //   /a/{P}/status/{CODE или D}            состояние; пропуск здесь не проверяется
+//   /a/{P}/invite                         код U… для человека: регистрация на /join (секрет аутентификатора — только у него)
 // Ошибки протокола приходят со статусом 200 и строкой «ERR …»: часть инструментов не показывает тело ответов 4xx.
 
 export const PIECE_PARTS = 400;
@@ -84,8 +86,8 @@ export async function actionRoute(env: Env, o: string, req: Request, url: URL): 
   const base = `${o}/a/${P}`;
 
   if (act === 'status') return status(env, o, base, s[2], now);
-  if (!['new', 'reply', 'put', 'done'].includes(act)) {
-    return err(o, 'ACTION', ['действия: new, reply/{R}, put/{D}/{n}/{кусок}, done/{D}, status/{CODE}', `EXAMPLE: ${o}/a/{PASS}/new`]);
+  if (!['new', 'reply', 'put', 'done', 'invite'].includes(act)) {
+    return err(o, 'ACTION', ['действия: new, reply/{R}, put/{D}/{n}/{кусок}, done/{D}, status/{CODE}, invite', `EXAMPLE: ${o}/a/{PASS}/new`]);
   }
 
   const rate = act === 'put' ? await hit(env, 'a-put', clientIp(req), 600, now) : await hit(env, 'a', clientIp(req), 60, now);
@@ -96,6 +98,11 @@ export async function actionRoute(env: Env, o: string, req: Request, url: URL): 
   const pass = found.pass;
 
   if (act === 'new' || act === 'reply') return open(env, o, base, pass, act === 'reply' ? s[2] : undefined, now);
+  // приглашение человека: код U… для /join (аккаунт людей, src/users.ts)
+  if (act === 'invite') {
+    const r = await inviteLines(env, o, pass, now);
+    return r.ok ? ok(r.lines) : err(o, r.lines[0], r.lines.slice(1));
+  }
 
   const D = pieceId(s[2]);
   const piece = D ? await env.DB.prepare('SELECT * FROM pieces WHERE id = ?').bind(D).first<Piece>() : null;

@@ -73,7 +73,7 @@
   `public/vitrina/music.js` — виджет SoundCloud (звук всегда он) и беззвучная тень по ключу API, `public/vitrina/stream.js` — куски HLS в MediaSource, `public/vitrina/sound.js` — полосы частот, громкость, удары (`setSound` движка),
   `public/vitrina/spectrum.js` — спектр трека заранее (БПФ, файл SDB1, `/music/bands/{номер}`), `public/vitrina/bands-k.js` — расчёт в `/k/music`.
 - `src/mcp.ts` — MCP-дверь: JSON-RPC, обе эпохи протокола, пять инструментов поверх ядра.
-- `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status`.
+- `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status|invite`.
 - `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок кисти хранителя (модуль), `public/vitrina/model.js` —
   мир, камера, объекты, отсечение, история (без DOM, импортируют тесты и `tools/`), `public/vitrina/font.json` — шрифт из жил.
 - `src/scene.ts` — формат, проверка и чтение сцены; `src/scene-default.json` — встроенная сцена; `src/vitrina.ts` — страница витрины.
@@ -81,6 +81,7 @@
 - `tools/` — `build-scene.mjs` (сцена по умолчанию и шрифт, Playwright), `upgrade-scene.mjs` (сцена v1 → мир) и `trace.js`
   (автотрассировка движка); в Worker не входят.
 - `src/rate.ts` — лимиты. `src/post.ts` — правила/пропуск, почтомат, review/approve/reject (ядро — `publishDraft`, `declineDraft`).
+- `src/users.ts` — аккаунты людей: код `U…` от модели (`/a/{P}/invite`, MCP `invite_human`), `/join`, `/u`, вход по TOTP; всё отдельно от хранителя. `src/qr.ts` — QR в SVG без зависимостей.
 - `src/panel.ts` — панель `/k`: вход кодом, сессии, CSRF, очередь, кнопки. `src/account.ts` — аккаунты, шифрование TOTP-секрета.
 - `src/wall.ts` — страницы чтения. `src/test-route.ts` — `/wall/test`.
 - `src/pages/` — тексты страниц (md/txt/html) от 🜃, импортируются строками. Шаблоны: `render()` в `src/util.ts`

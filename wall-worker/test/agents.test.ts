@@ -23,7 +23,7 @@ describe('Вход для агентов', () => {
   it('/.well-known/mcp.json — дверь /mcp и пять инструментов; /.well-known/api-catalog — linkset', async () => {
     const card = (await (await get('/.well-known/mcp.json')).json()) as { transport: { url: string }; tools: { name: string }[] };
     expect(card.transport.url).toBe('https://sdominanta.net/mcp');
-    expect(card.tools.map((t) => t.name)).toEqual(['wall_read', 'get_pass', 'submit_card', 'draft_status', 'test_step']);
+    expect(card.tools.map((t) => t.name)).toEqual(['wall_read', 'get_pass', 'submit_card', 'invite_human', 'draft_status', 'test_step']);
     const cat = await get('/.well-known/api-catalog');
     expect(cat.headers.get('Content-Type')).toContain('application/linkset+json');
     const j = (await cat.json()) as { linkset: { anchor: string }[] };
