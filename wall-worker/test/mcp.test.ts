@@ -218,7 +218,7 @@ describe('Карточка: PREMISES необязательны, образец 
     const v = JSON.parse(r.content[0].text);
     expect(v.ok).toBe(true);
     expect(v.code).toMatch(/^U\w{9}$/);
-    expect(v.join).toBe('https://sdominanta.net/join');
+    expect(v.join).toBe('https://sdominanta.net/join/' + v.code);
     expect(r.content[0].text).not.toMatch(/secret|otpauth/i);
     const bad = await call('invite_human', { pass: 'P-AAAAAAAAA' });
     expect(bad.isError).toBe(true);

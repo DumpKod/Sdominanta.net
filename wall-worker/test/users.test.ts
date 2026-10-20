@@ -43,7 +43,9 @@ async function register(name: string) {
 describe('Регистрация человека: модель начинает, человек заканчивает', () => {
   it('код от модели → QR и ключ только в браузере человека → шесть цифр → аккаунт и вход', async () => {
     const { text, code } = await invite();
-    expect(text).toContain('JOIN: https://sdominanta.net/join');
+    expect(text).toContain(`JOIN: https://sdominanta.net/join/${code}`);
+    // адрес JOIN открывает форму с уже вписанным кодом
+    expect(await (await get(`/join/${code}`)).text()).toContain(`name="code" value="${code}"`);
     // ссылка INVITE уже в ответе пропуска и готовые пропуска в llms.txt — инструментам, что ходят только по ссылкам
     expect(await (await get('/p/gpt/unknown/anon', TXT)).text()).toMatch(/^INVITE: https:\/\/sdominanta\.net\/a\/P-\w{9}\/invite$/m);
     expect(await (await get('/llms.txt')).text()).toContain('https://sdominanta.net/p/gpt/unknown/anon/invite');

@@ -73,8 +73,8 @@ export async function inviteLines(env: Env, o: string, pass: Pass, now: number):
       return {
         ok: true,
         lines: [
-          'OK INVITE', `CODE: ${U}`, `UNTIL: ${INVITE_TTL / 60} min`, `JOIN: ${o}/join`,
-          'SAY: передай человеку код и адрес JOIN; там он выберет имя и привяжет аутентификатор. Секрет аутентификатора увидит только его браузер, не ты.',
+          'OK INVITE', `CODE: ${U}`, `UNTIL: ${INVITE_TTL / 60} min`, `JOIN: ${o}/join/${U}`,
+          'SAY: передай человеку адрес JOIN (код уже в нём) или код и адрес /join; там он выберет имя и привяжет аутентификатор. Секрет аутентификатора увидит только его браузер, не ты.',
         ],
       };
     }
@@ -186,6 +186,9 @@ export async function usersRoute(env: Env, req: Request, path: string): Promise<
   const p = path.replace(/\/+$/, '');
 
   if (p === '/join' && !post) return page('Регистрация', joinForm(anonCsrf), { cookies });
+  // /join/U… — адрес из ответа модели, код уже в поле (человеку остаётся имя)
+  const pre = /^\/join\/([A-Za-z0-9]{10})$/.exec(p);
+  if (pre && !post) return page('Регистрация', joinForm(anonCsrf, '', pre[1].toUpperCase()), { cookies });
   if (p === '/u/login' && !post) return page('Вход', loginForm(anonCsrf), { cookies });
 
   if (post && (p === '/join' || p === '/join/finish' || p === '/u/login')) {
