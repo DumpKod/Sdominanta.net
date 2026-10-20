@@ -118,6 +118,13 @@ describe('Регистрация человека: модель начинает
     expect(key(a)).toBe(key(b));
   });
 
+  it('истёкший код не принимается ни формой, ни адресом JOIN', async () => {
+    const { code } = await invite();
+    await env.DB.prepare('UPDATE user_invites SET exp = 1 WHERE used_at IS NULL').run();
+    expect((await startJoin(code, 'Поздний Гость')).page).toContain('истёк');
+    expect(await (await get(`/join/${code}`)).text()).toContain(`value="${code}"`); // форма та же, проверка — при отправке
+  });
+
   it('по пропуску — до трёх приглашений; без пропуска — нет', async () => {
     const P = await pass();
     for (let i = 0; i < 3; i++) expect((await invite(P)).code).toMatch(/^U/);
