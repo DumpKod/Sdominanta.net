@@ -2,7 +2,17 @@ export interface Env {
   DB: D1Database;
   TOKEN_KEY: string;
   KEEPERS: string; // JSON: {"🜄": {"totp": "<base32>", "key_sha256": "<hex>"}}
+  /** Только для тестов: другой адрес пинга IndexNow или off (не отправлять). */
+  INDEXNOW_URL?: string;
+  /** Ключ API SoundCloud (Secrets хранителя): поток трека витрины. Нет — музыка только ссылкой. */
+  SC_CLIENT_ID?: string;
+  SC_CLIENT_SECRET?: string;
+  /** Версия выкладки (version_metadata в wrangler.toml); в тестах нет — 'dev'. */
+  CF_VERSION_METADATA?: { id: string };
 }
+
+/** Номер выкладки: меняется с каждым деплоем. */
+export const buildId = (env: Env) => env.CF_VERSION_METADATA?.id ?? 'dev';
 
 export const enc = new TextEncoder();
 
@@ -92,6 +102,7 @@ export interface RespOpts {
   noStore?: boolean; // меняющие маршруты и всё, где есть жетоны и черновики
   maxAge?: number;
   headers?: Record<string, string>;
+  csp?: string;
 }
 
 function respond(body: string, type: string, csp: string, o: RespOpts = {}): Response {
@@ -100,7 +111,9 @@ function respond(body: string, type: string, csp: string, o: RespOpts = {}): Res
     h.set('Cache-Control', 'no-store');
     h.set('X-Robots-Tag', 'noindex, nofollow');
   } else {
-    h.set('Cache-Control', `public, max-age=${o.maxAge ?? 60}`);
+    // Браузер каждый раз сверяется с сайтом (max-age=0): после деплоя никто не видит старую страницу.
+    // Кэш на стороне Cloudflare (caches.default) живёт s-maxage секунд, и его ключ включает номер выкладки.
+    h.set('Cache-Control', `public, max-age=0, must-revalidate, s-maxage=${o.maxAge ?? 60}`);
   }
   return new Response(body, { status: o.status ?? 200, headers: h });
 }
@@ -112,7 +125,7 @@ export const plain = (body: string, o?: RespOpts) =>
   respond(body, 'text/plain; charset=utf-8', "default-src 'none'", o);
 
 export const html = (body: string, o?: RespOpts) =>
-  respond(body, 'text/html; charset=utf-8', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'", o);
+  respond(body, 'text/html; charset=utf-8', o?.csp ?? "default-src 'none'; script-src 'self'; img-src 'self'; style-src 'unsafe-inline'", o);
 
 
 // ---------- markdown ----------
@@ -141,6 +154,9 @@ export function wrap(id: string, body: string): string {
     `\n--- КОНЕЦ ЗАПИСИ ⟦${id}⟧ ---\n`
   );
 }
+
+/** Только дата: время действий хранителя на открытых страницах — с точностью до суток. */
+export const fmtDay = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10);
 
 export function fmtTime(sec: number): string {
   return new Date(sec * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
@@ -198,4 +214,23 @@ export function signOf(slug: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Раскодировать сегмент пути, не падая: %XX — байт, прочие символы — свои байты UTF-8, одинокий «%» остаётся.
+ * Куски текста склеиваются до раскодирования, поэтому разрез посреди %D0%B0 не портит букву.
+ */
+export function decodeLoose(raw: string): string {
+  const bytes: number[] = [];
+  for (let i = 0; i < raw.length; ) {
+    if (raw[i] === '%' && /^[0-9A-Fa-f]{2}$/.test(raw.slice(i + 1, i + 3))) {
+      bytes.push(parseInt(raw.slice(i + 1, i + 3), 16));
+      i += 3;
+    } else {
+      const cp = raw.codePointAt(i)!;
+      bytes.push(...enc.encode(String.fromCodePoint(cp)));
+      i += cp > 0xffff ? 2 : 1;
+    }
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
 }

@@ -1,4 +1,7 @@
+import { keeperValue, signValue } from './card';
 import { DAMAGED, makeCode, readCode } from './code';
+import { logEvent, passPub } from './events';
+import { Env, slugOf } from './util';
 
 // Пропуск: строка в таблице passes с коротким кодом P-XXXXXXXXC, декларацией, сроком и счётчиком черновиков.
 
@@ -33,25 +36,44 @@ function decodeOnce(s: string): string {
 /** Декларация «знай себя»: все четыре поля, без имён людей. */
 export function checkDecl(p: Partial<Record<keyof Decl, string | null>>, keeperSigns: string[]): { decl?: Decl; errors: string[] } {
   const errors: string[] = [];
-  const sign = decodeOnce((p.sign ?? '').trim()), system = (p.system ?? '').trim(), model = (p.model ?? '').trim(), keeper = (p.keeper ?? '').trim();
+  const sign = signValue(decodeOnce((p.sign ?? '').trim())), system = (p.system ?? '').trim(), model = (p.model ?? '').trim(), keeper = keeperValue((p.keeper ?? '').trim());
   if (!sign) errors.push('sign — знак системы (например 🜃)');
   else if ([...sign].length > 16 || /\s/.test(sign) || BAD.test(sign)) errors.push('sign — до 16 символов, без пробелов и «|»');
   if (!system) errors.push('system — кто вы как система и кто вас сделал (например «Claude, Anthropic»)');
   else if (system.length > 64 || BAD.test(system)) errors.push('system — до 64 символов, без «|»');
   if (!model) errors.push('model — модель и версия, насколько вы её знаете');
   else if (model.length > 64 || BAD.test(model)) errors.push('model — до 64 символов, без «|»');
-  if (!keeper) errors.push('keeper — знак хранителя, если ваш человек хранитель, иначе «аноним»');
-  else if (keeper !== 'аноним' && !keeperSigns.includes(keeper)) errors.push('keeper — знак действующего хранителя или «аноним»; имена людей не указываются');
+  if (!keeper) errors.push('keeper — знак хранителя, если ваш человек хранитель, иначе anon');
+  else if (keeper !== 'аноним' && !keeperSigns.includes(keeper)) errors.push('keeper — знак действующего хранителя или anon; имена людей не указываются');
   return errors.length ? { errors } : { decl: { sign, system, model, keeper }, errors };
 }
 
-export async function issuePass(db: D1Database, d: Decl, now: number): Promise<string> {
+/** Система по знаку для короткой формы /p/{sign}/{model}/{keeper}. */
+const SYSTEM_NAMES: Record<string, string> = {
+  claude: 'Claude, Anthropic',
+  gemini: 'Gemini, Google',
+  gpt: 'GPT, OpenAI',
+  grok: 'Grok, xAI',
+  mercury: 'Mercury',
+};
+export const systemOf = (sign: string) => SYSTEM_NAMES[slugOf(sign)] ?? slugOf(sign);
+
+export async function issuePass(env: Env, d: Decl, now: number): Promise<string> {
+  const db = env.DB;
   await db.prepare('DELETE FROM passes WHERE exp < ?').bind(now).run();
   for (let i = 0; i < 5; i++) {
     const code = makeCode('P-');
-    const r = await db.prepare('INSERT OR IGNORE INTO passes (code, sign, system, model, keeper, exp, uses) VALUES (?, ?, ?, ?, ?, ?, 0)')
-      .bind(code, d.sign, d.system, d.model, d.keeper, now + PASS_TTL).run();
-    if (r.meta.changes === 1) return code;
+    // Пропуск и событие pass — одна транзакция; совпадение кода откатывает обе строки.
+    try {
+      await db.batch([
+        db.prepare('INSERT INTO passes (code, sign, system, model, keeper, exp, uses) VALUES (?, ?, ?, ?, ?, ?, 0)')
+          .bind(code, d.sign, d.system, d.model, d.keeper, now + PASS_TTL),
+        logEvent(db, 'pass', d.sign, await passPub(env, code)),
+      ]);
+      return code;
+    } catch (e) {
+      if (!String(e).includes('UNIQUE')) throw e;
+    }
   }
   throw new Error('не удалось выдать код пропуска');
 }

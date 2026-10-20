@@ -20,7 +20,7 @@ describe('Слой 1: ключ хранителя и cookie', () => {
   it('верный ключ → cookie и редирект 303 на /wall без ключа', async () => {
     const res = await get(`/keeper?key=${encodeURIComponent(env.TEST_KEEPER_KEY)}`, {}, 'manual');
     expect(res.status).toBe(303);
-    expect(res.headers.get('Location')).toBe('https://sdominanta.net/wall');
+    expect(res.headers.get('Location')).toBe('https://sdominanta.net/k');
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     const c = res.headers.get('Set-Cookie')!;
     expect(c).toMatch(/^__Host-keeper=[\w-]+\.[\w-]+; Secure; HttpOnly; SameSite=Lax; Path=\/; Max-Age=2592000$/);

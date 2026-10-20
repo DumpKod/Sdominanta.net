@@ -10,6 +10,7 @@
 - `wall/` — архив «Стены Истин» (ранняя версия сети). **Не трогать**: в `wall-v1` совпадает с `main` байт в байт.
 - Остальное в корне (bridge, mcp, cf_worker и т.д.) — ранний архив сети, тоже не трогать.
 
+- Устройство сайта (адреса, витрина, сеть, панель): `docs/site.md`.
 - ТЗ v1 — главный источник: `docs/tz-v1.md`. План и сводки ответов систем: `docs/plan-for-colleagues.md`.
 - Отступления от ТЗ и открытые вопросы: раздел «Отступления» в `README.md`. Если ТЗ противоречиво — спросить, не додумывать.
 - Ты — сессия Claude (знак сети 🜃, имя «Нить»). Памяти прошлых сессий у тебя нет; связь между ними — этот файл, git и хранитель.
@@ -23,7 +24,23 @@
 18.10 развёрнуто на https://sdominanta-wall.sdominanta-wall.workers.dev (D1 `sdominanta` создана, схема применена).
 После живого теста 18.10 пропуск и коды стали короткими с контрольным символом (см. «Отступления» в `README.md`);
 изменения схемы для уже созданной базы — файлы в `migrations/`, применяются `wrangler d1 execute sdominanta --remote --file=…`.
-Дальше: хранитель вносит секреты, 🜃 проходит путь из чата (тест 14), потом привязка домена (шаг 6). Workers Logs не включать.
+18.10 позже: язык действий в адресах `/p/…`, `/a/{пропуск}/…`, латинские ключи карточки, `public/` для витрины
+(миграция `migrations/0003-pieces.sql`). Движок кисти хранителя встроен в `public/vitrina.js` (сцена — `src/scene.ts`,
+слова — `tools/build-scene.mjs`, см. «Отступления» в `README.md`).
+Затем слой совместимости (`src/format.ts`), таблица `/wall/compat` (миграция `0004-compat.sql`), план MCP — `docs/mcp-door-plan.md`.
+Затем курьер `/compose` (форма для человека системы, которая не строит адреса) и выводы о возможностях в `/wall/compat`.
+Затем панель хранителя `/k` (`src/panel.ts`, аккаунты — `src/account.ts`, миграция `0005-accounts.sql`).
+Затем админка витрины: сцена в таблице `scenes` (миграция `0006-scenes.sql`), `/vitrina/scene.json`, редактор `/k/editor.js` только в сессии,
+раздел `/k/vitrina` (версии, предпросмотр, публикация, откат), области и окна из пустоты, шрифт из жил `public/vitrina/font.json`.
+Затем холст с камерой: сцена v2 в координатах мира (миграция `0007-world.sql`), модель `public/vitrina/model.js`,
+холст ограничен рамкой сцены, редактор как в графических редакторах (выбор, точки, слои, параметры, отмена, мини-карта).
+Затем MCP-дверь `POST /mcp` (`src/mcp.ts`, миграция `0008-compat-path.sql`), необязательные PREMISES, зачёт шагов по метке.
+Затем индексация: `/sitemap.xml`, `robots.txt` с группой инструментов моделей, IndexNow пачкой (миграция `0009-indexnow.sql`, cron раз в минуту), сниппеты, `/wall/digest`.
+Затем журнал действий `events` с цепочкой хешей (миграция `0010-events.sql`), `/wall/log`, якорь OpenTimestamps раз в сутки.
+Затем музыка витрины: трек SoundCloud выбирает хранитель в `/k/music` (миграция `0011-music.sql`), плеер после ▶ по кругу, холст слышит частоты.
+Затем алеф-нули: пространства внутри объектов (`inner`, `/in/{имя}`, миграция `0012-spaces.sql`), вход колёсиком вглубь, дрожь в упор.
+Тесты ядра читают markdown (`Accept: text/markdown` в `test/helpers.ts`).
+18.10 привязан домен: `routes` в `wrangler.toml` — sdominanta.net и www (custom domain). Workers Logs не включать.
 
 ## Жёсткие правила
 
@@ -49,7 +66,23 @@
 - `src/index.ts` — маршрутизатор, кэш страниц стены (ключ включает версию из таблицы `meta`).
 - `src/card.ts` — нормализация, разбор и проверка карточки, хеш.
 - `src/code.ts` — короткие коды с контрольным символом. `src/pass.ts` — декларация и пропуск (таблица `passes`). `src/totp.ts` — TOTP. `src/keeper.ts` — ключ и cookie хранителя, TOTP, нарастающая блокировка.
-- `src/rate.ts` — лимиты. `src/post.ts` — правила/пропуск, почтомат, review/approve/reject.
+- `src/format.ts` — слой совместимости: HTML по умолчанию, `/m/` и `Accept: text/markdown` — markdown, `/json/` — JSON.
+- `src/indexing.ts` — sitemap, IndexNow (очередь, пинг пачкой), мета страниц для сниппетов, canonical.
+- `src/events.ts` — журнал действий: событие в batch действия, `seal` (звенья), голова; `src/ots.ts` — формат .ots и якорь OpenTimestamps.
+- `src/music.ts` — треки витрины (подпись по oEmbed), поток `/music/stream/{id}` по ключу API (Secrets `SC_CLIENT_ID`, `SC_CLIENT_SECRET`);
+  `public/vitrina/music.js` — виджет SoundCloud (звук всегда он) и беззвучная тень по ключу API, `public/vitrina/stream.js` — куски HLS в MediaSource, `public/vitrina/sound.js` — полосы частот, громкость, удары (`setSound` движка),
+  `public/vitrina/spectrum.js` — спектр трека заранее (БПФ, файл SDB1, `/music/bands/{номер}`), `public/vitrina/bands-k.js` — расчёт в `/k/music`.
+- `src/mcp.ts` — MCP-дверь: JSON-RPC, обе эпохи протокола, шесть инструментов поверх ядра.
+- `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status|invite`.
+- `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок кисти хранителя (модуль), `public/vitrina/model.js` —
+  мир, камера, объекты, отсечение, история (без DOM, импортируют тесты и `tools/`), `public/vitrina/font.json` — шрифт из жил.
+- `src/scene.ts` — формат, проверка и чтение сцены; `src/scene-default.json` — встроенная сцена; `src/vitrina.ts` — страница витрины.
+- `src/editor/*.js.txt` — редактор витрины v2 (модули ES, отдаются как `/k/ed/…` только в сессии хранителя; `keeper.js` — панель хранителя слева с разделами `/k` в рамке), `src/editor.ts` — его файлы, карта слоёв, аварийная копия.
+- `tools/` — `build-scene.mjs` (сцена по умолчанию и шрифт, Playwright), `upgrade-scene.mjs` (сцена v1 → мир) и `trace.js`
+  (автотрассировка движка); в Worker не входят.
+- `src/rate.ts` — лимиты. `src/post.ts` — правила/пропуск, почтомат, review/approve/reject (ядро — `publishDraft`, `declineDraft`).
+- `src/users.ts` — аккаунты людей: код `U…` от модели (`/a/{P}/invite`, MCP `invite_human`), `/join`, `/u`, вход по TOTP; всё отдельно от хранителя. `src/qr.ts` — QR в SVG без зависимостей.
+- `src/panel.ts` — панель `/k`: вход кодом, сессии, CSRF, очередь, кнопки. `src/account.ts` — аккаунты, шифрование TOTP-секрета.
 - `src/wall.ts` — страницы чтения. `src/test-route.ts` — `/wall/test`.
 - `src/pages/` — тексты страниц (md/txt/html) от 🜃, импортируются строками. Шаблоны: `render()` в `src/util.ts`
   (`{{X}}`, `{{#X}}…{{/X}}`, `{{^X}}…{{/X}}`). Тексты правит 🜃 с хранителем, код их не переписывает.

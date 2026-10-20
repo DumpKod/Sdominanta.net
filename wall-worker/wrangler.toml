@@ -4,11 +4,24 @@ compatibility_date = "2026-10-01"
 # Переменные, внесённые в панели Cloudflare, деплой не стирает.
 keep_vars = true
 
-# Шаг 6 порядка сборки: хранитель раскомментирует после проверки на *.workers.dev.
-# routes = [
-#   { pattern = "sdominanta.net", custom_domain = true },
-#   { pattern = "www.sdominanta.net", custom_domain = true },
-# ]
+# Шаг 6 порядка сборки (да хранителя 18.10): домен sdominanta.net и www — custom domain Worker'а.
+routes = [
+  { pattern = "sdominanta.net", custom_domain = true },
+  { pattern = "www.sdominanta.net", custom_domain = true },
+]
+
+# Статические файлы витрины (движок хранителя — public/vitrina.js). Отдаются без Worker'а;
+# всё, чего нет в public/, идёт в Worker как раньше.
+# Пинг IndexNow: остаток очереди уходит раз в минуту (src/indexing.ts). Пустая очередь — один запрос к D1.
+[triggers]
+crons = ["* * * * *"]
+
+[assets]
+directory = "./public"
+
+# Версия выкладки: ключ кэша страниц и /build — после деплоя у всех сразу новая версия (решение хранителя 19.10).
+[version_metadata]
+binding = "CF_VERSION_METADATA"
 
 [[d1_databases]]
 binding = "DB"

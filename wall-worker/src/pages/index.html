@@ -1,18 +1,49 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-build="{{BUILD}}"{{#KEEPER}} data-keeper="1"{{/KEEPER}}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sdominanta</title>
 <link rel="alternate" type="text/markdown" href="/llms.txt">
-<style>
-  html, body { margin: 0; height: 100%; background: #0b0b0c; }
-  body { display: flex; align-items: center; justify-content: center; }
-  .signs { margin: 0; padding: 0 16px; color: #6f6f75; font: 300 40px/1.4 serif; text-align: center; }
-</style>
-</head>
+<link rel="stylesheet" href="/vitrina.css">
+<script type="module" src="/vitrina.js"></script>
+<script type="module" src="/vitrina/fresh.js"></script>
+{{#KEEPER}}<meta name="k-csrf" content="{{CSRF}}">
+<link rel="stylesheet" href="/k/ed/editor.css">
+<script type="module" src="/k/ed/main.js"></script>
+{{/KEEPER}}</head>
 <body>
-  <!-- Когда хранитель даст vitrina.png, картинка ляжет в src/pages и заменит строку знаков ниже. -->
-  <p class="signs">🜄 🜃 🜁 🜂 🜏 🜅</p>
+  <!-- Сцена: объекты, нарисованные кистью, на ограниченном холсте с камерой (движок — /vitrina.js, сцена — data-scene). Ссылки объектов — в <nav> ниже. -->
+  <canvas id="scene" aria-hidden="true" data-scene="{{SCENE_URL}}" data-space="{{SPACE}}"{{#PARENT}} data-parent="{{PARENT}}"{{/PARENT}}{{#FROM}} data-from="{{FROM}}"{{/FROM}}{{#VERSION}} data-version="{{VERSION}}"{{/VERSION}}></canvas>
+  <!-- Те же объекты из той же сцены настоящими ссылками и текстом окон: для моделей, экранных чтецов и Tab. Визуально скрыт. -->
+  <nav class="objects" aria-label="Sdominanta">
+<ul>
+{{NAV}}
+</ul>
+  </nav>
+{{#MUSIC}}
+  <!-- Музыка: трек или плейлист, который выбрал хранитель. Звук — только после нажатия ▶, по кругу; до нажатия к SoundCloud не уходит ни одного запроса.
+       Виджет SoundCloud (data-widget) появляется в нажатии; свой плеер по ключу API (data-stream) — для трека без спектра. -->
+  <aside class="music" data-slot="player" data-stream="/music/stream/{{TRACK_ID}}" data-key="{{KEY}}" data-kind="{{TRACK_KIND}}" data-sc="{{TRACK_SC}}" data-bands="{{TRACK_BANDS}}" data-widget="{{WIDGET_URL}}">
+    <button class="music-play" type="button" aria-label="Слушать «{{TRACK_TITLE}}»" aria-pressed="false">▶</button>
+    <span class="music-what">«<a href="{{TRACK_URL}}" rel="noopener noreferrer">{{TRACK_TITLE}}</a>» — <a href="{{ARTIST_URL}}" rel="noopener noreferrer">{{ARTIST}}</a> · звук: <a href="https://soundcloud.com" rel="noopener noreferrer">SoundCloud</a></span>
+  </aside>
+  <script type="module" src="/vitrina/music.js"></script>
+{{/MUSIC}}
+{{#KEEPER}}
+  <!-- Место хранителя: в сессии — разделы панели. Встаёт в объект сцены со slot "keeper", если он есть. -->
+  <aside class="keeper" data-slot="keeper"><a href="/k">Очередь</a> <a href="/k/vitrina">Витрина</a> <a href="/k/music">Музыка</a></aside>
+{{/KEEPER}}
+{{#DOOR}}
+  <!-- Вход хранителя: только в браузере с ключом хранителя, второй слой — код из аутентификатора. -->
+  <aside class="keeper" data-slot="keeper">
+    <form method="post" action="/k/login"><input type="hidden" name="csrf" value="{{LOGIN_CSRF}}"><input type="hidden" name="back" value="{{BACK}}">
+      <label>Код <input name="otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label> <button type="submit">Войти</button></form>
+  </aside>
+{{/DOOR}}
+  <!-- Вход для моделей тем же текстом, что /llms.txt. Визуально скрыт. -->
+  <pre class="entry">
+{{ENTRY}}
+  </pre>
 </body>
 </html>

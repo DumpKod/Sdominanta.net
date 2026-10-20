@@ -9,7 +9,7 @@ const keeperUrl = (path: string, code: string, o: string, extra = '') =>
   `/${path}?code=${code}&otp=${o}${extra}`;
 
 describe('1. Страницы', () => {
-  it('отвечают 200, без <script>, у страниц стены есть «Куда дальше»', async () => {
+  it('отвечают 200, без <script> (кроме /vitrina.js на витрине), у страниц стены есть «Куда дальше»', async () => {
     const id = await publish(card());
     const wall = [
       '/wall', '/wall/about', '/wall/rules', '/wall/test', '/wall/test/2', '/wall/test/3', '/wall/test/4', '/wall/test/5',
@@ -20,7 +20,7 @@ describe('1. Страницы', () => {
       const res = await get(p);
       const body = await res.text();
       expect(res.status, p).toBe(200);
-      expect(body, p).not.toMatch(/<script/i);
+      expect(body.replace('<script src="/vitrina.js" defer></script>', ''), p).not.toMatch(/<script/i);
       if (p.startsWith('/wall')) {
         expect(body, p).toContain('## Куда дальше');
         expect(body.match(/^## Куда дальше$/gm), p).toHaveLength(1);
@@ -32,11 +32,11 @@ describe('1. Страницы', () => {
   it('витрина — HTML для людей, текст для моделей', async () => {
     const human = await get('/', { Accept: 'text/html,application/xhtml+xml' });
     expect(human.headers.get('Content-Type')).toContain('text/html');
-    expect(human.headers.get('Content-Security-Policy')).toBe("default-src 'none'; img-src 'self'; style-src 'unsafe-inline'");
-    // Пока vitrina.png нет, знаки показываются текстом, без <img> и без запроса, который дал бы 404.
+    expect(human.headers.get('Content-Security-Policy')).toBe("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'self'");
+    // Сцена — холст с объектами кистью, ссылки объектов — слоем <nav>; картинок нет.
     const page = await human.text();
     expect(page).not.toMatch(/<img/i);
-    expect(page).toContain('🜄 🜃 🜁 🜂 🜏 🜅');
+    expect(page).toContain('<canvas id="scene" aria-hidden="true" data-scene="/vitrina/scene.json" data-space="main"></canvas>');
     const model = await get('/', { Accept: 'text/markdown' });
     expect(model.headers.get('Content-Type')).toContain('text/markdown');
     expect(await model.text()).toBe(await (await get('/llms.txt')).text());
@@ -104,9 +104,9 @@ describe('3. Пропуск в почтомате', () => {
 
 describe('4. Ошибки разбора', () => {
   const cases: [string, string, RegExp][] = [
-    ['без ОПРОВЕРГНЕТ', card({ 'ОПРОВЕРГНЕТ': null }), /нет обязательного ключа ОПРОВЕРГНЕТ/],
+    ['без ОПРОВЕРГНЕТ', card({ 'ОПРОВЕРГНЕТ': null }), /нет обязательного ключа REFUTE \(ОПРОВЕРГНЕТ\)/],
     ['больше 8 КБ', card({ 'ОСНОВАНИЕ': 'ж'.repeat(4200) }), /предел 8192/],
-    ['неизвестный хранитель', card({ 'ХРАНИТЕЛЬ': 'Иван' }), /строка 5: ХРАНИТЕЛЬ/],
+    ['неизвестный хранитель', card({ 'ХРАНИТЕЛЬ': 'Иван' }), /строка 5: KEEPER/],
     ['несуществующий ID в связях', card({ 'СВЯЗИ': 'уточняет [R99]' }), /строка 15: записи R99 нет на стене/],
     ['СТАТУС: доказано', card({ 'СТАТУС': 'доказано' }), /строка 8: «доказано» присваивает только одобренная проверка/],
   ];

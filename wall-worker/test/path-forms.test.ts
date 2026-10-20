@@ -8,11 +8,46 @@ const enc = encodeURIComponent;
 const draftCount = async () => (await env.DB.prepare('SELECT COUNT(*) AS n FROM drafts').first<{ n: number }>())!.n;
 
 describe('robots.txt', () => {
-  it('не закрывает почтомат и тест, закрывает только хранителя', async () => {
+  // Группа — блок строк до пустой строки; робот читает группу своего User-agent, остальные — группу «*».
+  const group = (r: string, ua: string) => r.split(/\n\n+/).find((g) => g.split('\n').includes(`User-agent: ${ua}`)) ?? '';
+
+  /** Правила для робота: его группа, иначе «*». */
+  const rules = (r: string, ua: string) => (group(r, ua) || group(r, '*')) + '\n';
+  const KEEPER = ['/review', '/approve', '/reject', '/keeper', '/k'];
+  const SERVICE = ['/a/', '/p/', '/compose', '/mcp', '/submit'];
+
+  it('неизвестный робот: закрыт только хранитель, /a/ и /p/ открыты; Sitemap', async () => {
     const r = await (await get('/robots.txt')).text();
-    expect(r).not.toMatch(/Disallow: \/submit/);
+    const g = rules(r, 'SomeNewBot');
+    for (const p of KEEPER) expect(g).toContain(`Disallow: ${p}\n`);
+    for (const p of SERVICE) expect(g).not.toContain(`Disallow: ${p}`);
     expect(r).not.toMatch(/Disallow: \/wall/);
-    for (const p of ['/review', '/approve', '/reject', '/keeper']) expect(r).toContain(`Disallow: ${p}\n`);
+    expect(r).toContain('\nSitemap: https://sdominanta.net/sitemap.xml\n');
+  });
+
+  it('поисковые роботы: закрыты ещё и служебные пути', async () => {
+    const r = await (await get('/robots.txt')).text();
+    for (const ua of ['Googlebot', 'Bingbot', 'YandexBot', 'DuckDuckBot', 'Applebot', 'Baiduspider']) {
+      const g = rules(r, ua);
+      for (const p of [...KEEPER, ...SERVICE]) expect(g, ua).toContain(`Disallow: ${p}\n`);
+    }
+  });
+
+  it('инструменты моделей по просьбе человека: как «*»', async () => {
+    const r = await (await get('/robots.txt')).text();
+    for (const ua of ['Claude-User', 'ChatGPT-User', 'Perplexity-User', 'MistralAI-User']) {
+      const g = rules(r, ua);
+      expect(group(r, ua)).not.toBe('');
+      for (const p of KEEPER) expect(g).toContain(`Disallow: ${p}\n`);
+      for (const p of SERVICE) expect(g).not.toContain(`Disallow: ${p}`);
+    }
+  });
+
+  it('служебные адреса открыты, но с X-Robots-Tag: noindex, nofollow; страницы стены — без него', async () => {
+    for (const p of ['/p/claude/opus-5.5/anon', '/a/P-22222222A/new', '/m/a/P-22222222A/new', '/compose', '/submit?t=x', '/mcp']) {
+      expect((await get(p)).headers.get('X-Robots-Tag'), p).toBe('noindex, nofollow');
+    }
+    expect((await get('/wall')).headers.get('X-Robots-Tag')).toBeNull();
   });
 });
 
@@ -77,7 +112,8 @@ describe('Тестовый маршрут', () => {
     expect(await (await get(`/wall/test/4?n=${n}&code=${code}&hash=${hash}`)).text()).toContain('Точное копирование: работает');
     expect(await (await get(`/wall/test/4/${n}/${code}/000000000000`)).text()).toContain('не совпало');
     const s4 = await (await get(`/wall/test/4/${n}/${code}/${hash}`)).text();
-    expect(s4).toContain('ССЫЛКА НА ШАГ 5: https://sdominanta.net/wall/test/5/\n');
+    expect(s4).toContain(`ССЫЛКА НА ШАГ 5: https://sdominanta.net/wall/test/5/${n}/\n`);
+    expect(await (await get(`/wall/test/5/${n}/${enc(card())}`)).text()).toContain('разбор пройден');
     expect(await (await get(`/wall/test/5/${enc(card())}`)).text()).toContain('разбор пройден');
     expect(await (await get(`/wall/test/5?text=${enc(card())}`)).text()).toContain('разбор пройден');
   });
