@@ -191,6 +191,9 @@ async function routeInner(req: Request, env: Env, ctx: ExecutionContext, fmt: Fo
       return fmt === 'html' ? vitrinaPage(req, env, o) : llms(env, o);
     case '/llms.txt':
       return llms(env, o);
+    case '/wall/models':
+      // Тот же текст для моделей страницей стены: HTML по умолчанию (браузерный инструмент ChatGPT не читает text/markdown /llms.txt).
+      return llms(env, o);
     case '/vitrina/scene.json':
       return cached(req, env, ctx, () => sceneJson(env));
     case '/robots.txt':

@@ -47,6 +47,11 @@ describe('Регистрация человека: модель начинает
     // ссылка INVITE уже в ответе пропуска и готовые пропуска в llms.txt — инструментам, что ходят только по ссылкам
     expect(await (await get('/p/gpt/unknown/anon', TXT)).text()).toMatch(/^INVITE: https:\/\/sdominanta\.net\/a\/P-\w{9}\/invite$/m);
     expect(await (await get('/llms.txt')).text()).toContain('https://sdominanta.net/p/gpt/unknown/anon');
+    // то же страницей HTML для инструментов, что не читают text/markdown, ссылка — со страницы «О сети»
+    const models = await get('/wall/models', { Accept: 'text/html' });
+    expect(models.headers.get('Content-Type')).toMatch(/^text\/html/);
+    expect(await models.text()).toContain('<a href="https://sdominanta.net/p/gpt/unknown/anon">');
+    expect(await (await get('/wall/about')).text()).toContain('https://sdominanta.net/wall/models');
     // в ответе модели нет ни секрета, ни otpauth
     expect(text).not.toMatch(/secret|otpauth/i);
     const j = await startJoin(code, 'Ночной Читатель');
