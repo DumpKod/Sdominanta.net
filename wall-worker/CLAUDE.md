@@ -72,7 +72,7 @@
 - `src/music.ts` — треки витрины (подпись по oEmbed), поток `/music/stream/{id}` по ключу API (Secrets `SC_CLIENT_ID`, `SC_CLIENT_SECRET`);
   `public/vitrina/music.js` — виджет SoundCloud (звук всегда он) и беззвучная тень по ключу API, `public/vitrina/stream.js` — куски HLS в MediaSource, `public/vitrina/sound.js` — полосы частот, громкость, удары (`setSound` движка),
   `public/vitrina/spectrum.js` — спектр трека заранее (БПФ, файл SDB1, `/music/bands/{номер}`), `public/vitrina/bands-k.js` — расчёт в `/k/music`.
-- `src/mcp.ts` — MCP-дверь: JSON-RPC, обе эпохи протокола, пять инструментов поверх ядра.
+- `src/mcp.ts` — MCP-дверь: JSON-RPC, обе эпохи протокола, шесть инструментов поверх ядра.
 - `src/action.ts` — язык действий: `/p/{sign}/{model}/{keeper}`, `/a/{пропуск}/new|reply|put|done|status|invite`.
 - `public/` — статические файлы витрины (Workers Assets), `public/vitrina.js` — движок кисти хранителя (модуль), `public/vitrina/model.js` —
   мир, камера, объекты, отсечение, история (без DOM, импортируют тесты и `tools/`), `public/vitrina/font.json` — шрифт из жил.
