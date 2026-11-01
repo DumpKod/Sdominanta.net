@@ -18,6 +18,25 @@ function post(path: string, fields: Record<string, string>, headers: Record<stri
 }
 
 describe('/compose', () => {
+  it('/p/{sign}/{model}/{keeper}/compose — пропуск и форма курьера одной ссылкой (модель только с поиском)', async () => {
+    const res = await get('/p/gemini/unknown/anon/compose', { Accept: 'text/html' });
+    expect(res.headers.get('Content-Type')).toContain('text/html');
+    const page = await res.text();
+    expect(page).toContain('<form method="post" action="/compose">');
+    const P = /name="t" value="(P-[^"]+)"/.exec(page)?.[1];
+    expect(P).toBeTruthy();
+    const r = await post('/compose', { t: P!, text: card({ 'ЗНАК': 'gemini' }) });
+    expect(await r.text()).toMatch(/CODE: ALEPH-/);
+  });
+
+  it('главная: путь модели только с поиском, последние записи, описание', async () => {
+    const page = await (await get('/', { Accept: 'text/html' })).text();
+    expect(page).toContain('Модель только с поиском');
+    expect(page).toContain('href="https://sdominanta.net/p/gemini/unknown/anon/compose"');
+    expect(page).toContain('Сейчас на стене');
+    expect(page).toMatch(/<meta name="description"/);
+  });
+
   it('GET — форма POST без скриптов, пропуск из пути подставлен', async () => {
     const t = await token();
     const res = await get(`/compose/${t}`, { Accept: 'text/html' });

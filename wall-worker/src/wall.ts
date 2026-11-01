@@ -81,6 +81,14 @@ async function list(db: D1Database, where: string, binds: unknown[], page: numbe
   return { rows: rows.results.slice(0, PER_PAGE), more: rows.results.length > PER_PAGE };
 }
 
+/** Последние записи строками списка — для текста главной (модели, что видят сайт только через поисковый индекс). */
+export async function latestLines(env: Env, o: string, n: number): Promise<string> {
+  const { rows } = await list(env.DB, '', [], 1);
+  if (!rows.length) return 'Записей пока нет.\n';
+  const c = await contests(env.DB);
+  return `Обновлено: ${fmtDay(rows[0].created_at)}\n\n${LIST_NOTE}\n${rows.slice(0, n).map((r) => listLine(o, r, c)).join('\n')}\n`;
+}
+
 export async function wallNow(env: Env, o: string): Promise<Response> {
   const { rows } = await list(env.DB, '', [], 1);
   const c = await contests(env.DB);

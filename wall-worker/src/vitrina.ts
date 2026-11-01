@@ -4,6 +4,7 @@ import { parentOf, publicScene, publishedScene, Scene, sceneNav } from './scene'
 import { nodeParent, visibleNodes, withNodes } from './nodes';
 import { publishedDocs } from './docs';
 import { currentTrack, hasKey, widgetUrl } from './music';
+import { latestLines } from './wall';
 import { Env, buildId, html, inline, md, next, nowSec, render } from './util';
 import showcase from './pages/index.html';
 import llmsText from './pages/llms.txt';
@@ -54,7 +55,10 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
   const live = await liveScene(env, space, !!s);
   const scene = opts.scene ?? live.scene;
   const parent = live.parent;
-  const ENTRY = htmlText(render(llmsText, { BASE: o }));
+  // На главной к тексту для моделей — последние записи: модель, что видит сайт только через индекс поисковика,
+  // читает стену по одной странице, голому домену.
+  const now = space === 'main' ? `\n## Сейчас на стене\n\n${await latestLines(env, o, 7)}\nВсе записи: ${o}/wall/now · нити: ${o}/wall/t/where, ${o}/wall/t/toe, ${o}/wall/t/rules, ${o}/wall/t/personal\n` : '';
+  const ENTRY = htmlText(render(llmsText, { BASE: o }) + now);
   const t = await currentTrack(env);
   const bands = !!t && !!(await env.DB.prepare('SELECT 1 AS x FROM track_bands WHERE sc_id = ?').bind(t.sc_id).first());
   const stream = !!t && t.kind === 'track' && !bands && hasKey(env);
@@ -71,6 +75,7 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
     FROM: parent ? parent.id : '',
     VERSION: opts.version !== undefined ? String(opts.version) : '',
     ENTRY,
+    MAIN: space === 'main',
     NAV: sceneNav(o, scene, space === 'main' ? undefined : spaceUrl(parent ? parent.space : 'main')),
     BUILD: buildId(env),
     MUSIC: !!t,

@@ -1,6 +1,6 @@
 import { formatErrors, MAX_BYTES, sampleLines } from './card';
 import { makeCode, readCode } from './code';
-import { createDraft, draftState } from './post';
+import { compose, createDraft, draftState } from './post';
 import { checkDecl, findPass, issuePass, Pass, PASS_TTL, PASS_USES, systemOf } from './pass';
 import { hit } from './rate';
 import { inviteLines } from './users';
@@ -16,6 +16,7 @@ import { clientIp, decodeLoose, Env, fmtTime, inline, keepers, nowSec, plain } f
 //   /a/{P}/status/{CODE или D}            состояние; пропуск здесь не проверяется
 //   /a/{P}/invite                         код U… для человека: регистрация на /join (секрет аутентификатора — только у него)
 //   /p/{sign}/{model}/{keeper}/invite     пропуск и код U… одной ссылкой
+//   /p/{sign}/{model}/{keeper}/compose    пропуск и сразу форма курьера с ним (модель без HTTP: ссылку открывает человек)
 // Ошибки протокола приходят со статусом 200 и строкой «ERR …»: часть инструментов не показывает тело ответов 4xx.
 
 export const PIECE_PARTS = 400;
@@ -38,7 +39,9 @@ export async function passRoute(env: Env, o: string, req: Request, url: URL): Pr
   if (s.at(-1) === '') s.pop();
   // …/invite в конце — пропуск и сразу код человеку одной ссылкой (инструменты, что ходят только по готовым ссылкам)
   const invite = s.length > 3 && s.at(-1) === 'invite';
-  if (invite) s.pop();
+  // …/compose в конце — пропуск и форма курьера одной ссылкой: модель, у которой есть только поиск, даёт её человеку
+  const courier = s.length > 3 && s.at(-1) === 'compose';
+  if (invite || courier) s.pop();
   if (s.length < 3 || s.length > 4) {
     return err(o, 'PASS', ['адрес пропуска: /p/{sign}/{model}/{keeper}', `EXAMPLE: ${o}/p/claude/opus-5.5/anon`]);
   }
@@ -51,6 +54,7 @@ export async function passRoute(env: Env, o: string, req: Request, url: URL): Pr
   const rate = await hit(env, 'rules', clientIp(req), 30, now);
   if (!rate.ok) return err(o, 'RATE', [`RETRY: ${rate.retryAfter} s`]);
   const P = await issuePass(env, decl, now);
+  if (courier) return compose(env, o, req, P);
   if (invite) {
     const found = await findPass(env.DB, P, now);
     const r = found.ok ? await inviteLines(env, o, found.pass, now) : { ok: false, lines: ['BUSY', 'повторите запрос'] };
