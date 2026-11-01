@@ -1,0 +1,56 @@
+// Панель хранителя на витрине: та же панель слева, что у редактора, — с разделами /k (очередь, пространства,
+// музыка, узлы, документы). Открывается кликом по области объекта с разделом хранителя (виджет queue, music, …:
+// «Что внутри» → «Виджет» в редакторе) или кнопкой «Панель». Раздел — страница /k в рамке: те же формы, CSRF и
+// сессия; страница в рамке приходит без оболочки панели (сервер видит Sec-Fetch-Dest: iframe).
+
+import { Win, button, dock, el, store } from './dom.js';
+
+const SECTIONS = [
+  ['queue', 'Очередь', '/k'],
+  ['vitrina', 'Пространства', '/k/vitrina'],
+  ['music', 'Музыка', '/k/music'],
+  ['nodes', 'Узлы', '/k/nodes'],
+  ['docs', 'Документы', '/k/docs'],
+];
+
+export function makeKeeper(E, openEditor) {
+  const root = document.documentElement;
+  let win = null, frame = null, tabs = {}, cur = null;
+
+  function build() {
+    document.body.append(dock('kp', 420));
+    win = new Win({ id: 'keeper', title: 'Хранитель', dock: 'kp', closable: true, grow: true, cls: 'kp-win' });
+    win.onhide = () => root.classList.remove('kp-on');
+    const row = el('nav', 'kp-tabs');
+    row.setAttribute('aria-label', 'Разделы хранителя');
+    for (const [id, name, path] of SECTIONS) {
+      tabs[id] = button(name, () => show(id, path), { cls: 'kp-tab', title: path });
+      row.append(tabs[id]);
+    }
+    const acts = el('div', 'kp-acts');
+    acts.append(
+      button('Редактор', () => { close(); openEditor(); }, { title: 'Редактор витрины' }),
+      button('Во весь экран ↗', () => { location.href = frame.contentWindow ? frame.contentWindow.location.pathname : cur; }, { title: 'Открыть раздел страницей панели' }),
+    );
+    frame = el('iframe', 'kp-frame');
+    frame.title = 'Раздел хранителя';
+    win.body.append(row, frame, acts);
+  }
+  function show(id, path) {
+    if (!win) build();
+    for (const [k, b] of Object.entries(tabs)) b.classList.toggle('on', k === id);
+    if (cur !== path || !frame.src) { cur = path; frame.src = path; }
+    store.set('kp:last', id);
+    win.show();
+    root.classList.add('kp-on');
+  }
+  function close() { if (win) win.hide(); root.classList.remove('kp-on'); }
+  function open(id) {
+    const s = SECTIONS.find((x) => x[0] === id) || SECTIONS.find((x) => x[0] === store.get('kp:last', 'queue')) || SECTIONS[0];
+    show(s[0], s[2]);
+  }
+  // область объекта с разделом хранителя → панель на этом разделе (редактор открыт — у него свои панели)
+  E.setPanel((widget) => { if (!root.classList.contains('ed-on')) open(widget); });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && root.classList.contains('kp-on') && !root.classList.contains('ed-on')) close(); });
+  return { open, close, get isOpen() { return root.classList.contains('kp-on'); } };
+}

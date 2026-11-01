@@ -1,0 +1,158 @@
+// Панель «Слои» (левый док): навигатор пространств и объекты открытого слоя.
+// Пространства — дерево переходных слоев: главная → алеф-нули внутри объектов и областей → узлы сети с ветвями.
+// Редактор правит один открытый слой; другой открывается здесь (или через «Слой → Открыть пространство внутри»).
+// Объекты — сверху вниз так, как они лежат на холсте (выше рисуется поверх и первым ловит клик);
+// перетаскивание в списке меняет порядок, под выделенным объектом — его области-входы.
+
+import { Win, button, el, section, store } from './dom.js';
+
+const KIND = (o) => (o.auto ? '⊙' : o.inner ? '◎' : o.slot ? '▶' : o.widget ? '▣' : o.window ? '¶' : o.href ? '↗' : '∿');
+const KIND_NAME = { '⊙': 'узел сети из базы', '◎': 'пространство внутри', '▶': 'место виджета', '▣': 'виджет', '¶': 'окно с текстом', '↗': 'страница сайта', '∿': 'жилы' };
+
+export function makeLayers(E, doc, ui) {
+  const win = new Win({ id: 'layers', title: 'Слои', dock: 'left', grow: true });
+  const spSec = section('Пространства', 'spaces');
+  const obSec = section('Объекты слоя', 'objects');
+  const tree = el('div', 'ed-tree');
+  const objs = el('div', 'ed-list');
+  spSec.body.append(tree);
+  const zRow = el('div', 'ed-row ed-zrow');
+  zRow.append(
+    button('⤒', () => z('top'), { cls: 'ed-ico', title: 'Наверх (Shift+])' }),
+    button('↑', () => z('up'), { cls: 'ed-ico', title: 'Выше (])' }),
+    button('↓', () => z('down'), { cls: 'ed-ico', title: 'Ниже ([)' }),
+    button('⤓', () => z('bottom'), { cls: 'ed-ico', title: 'Вниз (Shift+[)' }),
+  );
+  obSec.body.append(zRow, objs);
+  win.body.append(spSec.root, obSec.root);
+
+  /* ---------- пространства ---------- */
+  let items = [];
+  const opened = new Set(store.get('tree:open', ['main']));
+  const saveOpen = () => store.set('tree:open', [...opened]);
+  function setSpaces(list) { items = list; drawTree(); }
+  function drawTree() {
+    tree.textContent = '';
+    const kids = new Map();
+    const known = new Set(items.map((i) => i.space));
+    for (const it of items) {
+      const p = it.parent && known.has(it.parent) ? it.parent : null;
+      (kids.get(p) || kids.set(p, []).get(p)).push(it);
+    }
+    // путь к открытому слою раскрыт
+    for (let it = items.find((i) => i.space === E.space); it && it.parent; it = items.find((i) => i.space === it.parent)) opened.add(it.parent);
+    const roots = (kids.get(null) || []).sort((a, b) => (a.space === 'main' ? -1 : b.space === 'main' ? 1 : a.label.localeCompare(b.label)));
+    if (!items.some((i) => i.space === E.space)) roots.push({ space: E.space, label: E.space, state: 'пусто', parent: null });
+    const row = (it, depth) => {
+      const ch = kids.get(it.space) || [];
+      const r = el('div', 'ed-node' + (it.space === E.space ? ' on' : ''));
+      r.style.paddingLeft = 4 + depth * 14 + 'px';
+      const tw = el('button', 'ed-tw', ch.length ? (opened.has(it.space) ? '▾' : '▸') : '');
+      tw.type = 'button';
+      tw.tabIndex = -1;
+      tw.addEventListener('click', (e) => { e.stopPropagation(); if (opened.has(it.space)) opened.delete(it.space); else opened.add(it.space); saveOpen(); drawTree(); });
+      const l = doc.layer(it.space);
+      const name = el('span', 'ed-node-t', it.label);
+      const tag = el('span', 'ed-tag');
+      tag.textContent = (l && l.dirty ? '● ' : '') + (it.state === 'узел' ? 'узел' : it.state === 'пусто' ? 'пусто' : it.draft ? 'черновик' : '');
+      r.title = `${it.space}: ${it.state}${it.version ? ', опубликована версия ' + it.version : ''}${it.draft ? ', есть черновик новее' : ''}`;
+      r.append(tw, name, tag);
+      r.addEventListener('click', () => ui.openLayer(it.space, it.parent));
+      tree.append(r);
+      if (opened.has(it.space)) for (const c of ch.sort((a, b) => a.label.localeCompare(b.label))) row(c, depth + 1);
+    };
+    for (const it of roots) row(it, 0);
+  }
+
+  /* ---------- объекты ---------- */
+  const sorted = () => E.objects.map((o, i) => [o, i]).sort((a, b) => b[0].z - a[0].z || b[1] - a[1]).map((x) => x[0]);
+  let dragId = null;
+  function drawObjects() {
+    objs.textContent = '';
+    const list = sorted();
+    obSec.sum.textContent = `Объекты слоя · ${list.filter((o) => !o.auto).length}${list.some((o) => o.auto) ? ` + узлы ${list.filter((o) => o.auto).length}` : ''}`;
+    for (const o of list) {
+      const on = doc.sel.includes(o.id) || doc.peeked === o.id;
+      const r = el('div', 'ed-obj' + (on ? ' on' : '') + (o.auto ? ' auto' : ''));
+      const k = KIND(o);
+      const ico = el('span', 'ed-k', k);
+      ico.title = KIND_NAME[k];
+      r.append(ico, el('span', 'ed-obj-t', o.label || o.id), el('span', 'ed-tag', o.id));
+      if (o.inner) {
+        const go = button('↘', () => ui.openLayer(o.inner, E.space), { cls: 'ed-ico', title: `Открыть пространство «${o.inner}»` });
+        r.append(go);
+      }
+      r.addEventListener('click', (e) => {
+        if (o.auto) { doc.select([]); doc.peek(o.id); return; }
+        doc.peek(null);
+        doc.select(e.shiftKey ? (doc.sel.includes(o.id) ? doc.sel.filter((x) => x !== o.id) : [...doc.sel, o.id]) : [o.id]);
+      });
+      r.addEventListener('dblclick', () => { if (!o.auto) doc.select([o.id]); ui.fit(o); });
+      if (!o.auto) {
+        r.draggable = true;
+        r.addEventListener('dragstart', (e) => { dragId = o.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', o.id); });
+        r.addEventListener('dragend', () => { dragId = null; for (const n of objs.querySelectorAll('.drop-a, .drop-b')) n.classList.remove('drop-a', 'drop-b'); });
+      }
+      r.addEventListener('dragover', (e) => {
+        if (!dragId || dragId === o.id) return;
+        e.preventDefault();
+        const below = e.offsetY > r.offsetHeight / 2;
+        r.classList.toggle('drop-b', below);
+        r.classList.toggle('drop-a', !below);
+      });
+      r.addEventListener('dragleave', () => r.classList.remove('drop-a', 'drop-b'));
+      r.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const below = r.classList.contains('drop-b');
+        r.classList.remove('drop-a', 'drop-b');
+        const it = doc.byId(dragId);
+        if (!it || it === o) return;
+        const rest = sorted().filter((x) => x !== it), at = rest.indexOf(o);
+        const A = below ? o : rest[at - 1] || null, B = below ? rest[at + 1] || null : o;
+        moveBetween(it, A, B);
+        doc.commit('Порядок слоёв', null);
+      });
+      objs.append(r);
+      // области-входы выделенного объекта
+      if (doc.sel[0] === o.id) {
+        const areas = [[o.area, -1, 'Основная область'], ...(o.doors || []).map((d, i) => [d.area, i, `Вход ${i + 2}${d.label ? ' — ' + d.label : ''}`])];
+        for (const [a, i, t] of areas) {
+          const d = el('div', 'ed-door' + (doc.door === i ? ' on' : ''));
+          d.append(el('span', 'ed-k', a ? '◍' : '○'), el('span', 'ed-obj-t', t + (a ? '' : ' (не закрашена)')));
+          d.addEventListener('click', () => doc.select([o.id], i));
+          objs.append(d);
+        }
+      }
+    }
+    if (!list.length) objs.append(el('p', 'ed-hint', 'Слой пуст: «+» внизу — вставить, кисть — нарисовать.'));
+  }
+
+  /** Поставить объект между A (выше) и B (ниже) в порядке рисования: слой z — как у соседа, место в сцене — рядом. */
+  function moveBetween(o, A, B) {
+    const list = E.objects;
+    list.splice(list.indexOf(o), 1);
+    if (B) { o.z = B.z; list.splice(list.indexOf(B) + 1, 0, o); }
+    else if (A) { o.z = A.z; list.splice(list.indexOf(A), 0, o); }
+    else list.push(o);
+  }
+  /** Выше / ниже / наверх / вниз — для выделенных, по порядку рисования. */
+  function z(how) {
+    const sel = doc.selected();
+    if (!sel.length) return;
+    const order = how === 'up' || how === 'top' ? sel.slice().sort((a, b) => sorted().indexOf(a) - sorted().indexOf(b)) : sel.slice().sort((a, b) => sorted().indexOf(b) - sorted().indexOf(a));
+    for (const o of order) {
+      const s = sorted(), k = s.indexOf(o);
+      if (how === 'up') { if (k > 0) moveBetween(o, s[k - 2] || null, s[k - 1]); }
+      else if (how === 'down') { if (k < s.length - 1) moveBetween(o, s[k + 1], s[k + 2] || null); }
+      else if (how === 'top') { const r = s.filter((x) => x !== o); moveBetween(o, null, r[0] || null); }
+      else { const r = s.filter((x) => x !== o); moveBetween(o, r[r.length - 1] || null, null); }
+    }
+    doc.commit({ up: 'Выше', down: 'Ниже', top: 'Наверх', bottom: 'Вниз' }[how], null);
+  }
+
+  doc.on('sel', drawObjects);
+  doc.on('change', () => { drawObjects(); drawTree(); });
+  doc.on('saved', drawTree);
+  doc.on('layer', () => { drawObjects(); drawTree(); });
+  return { win, setSpaces, z, refresh() { drawObjects(); drawTree(); }, get items() { return items; } };
+}

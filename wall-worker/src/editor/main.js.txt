@@ -1,0 +1,12 @@
+// Редактор витрины v2: точка входа. Отдаётся как /k/ed/main.js только в сессии хранителя (без сессии кода нет нигде).
+// Работает поверх движка /vitrina.js: движок отдаёт себя событием vitrina:ready (или уже лежит в window.vitrinaEngine).
+
+import { boot } from './shell.js';
+
+const start = (E) => {
+  if (start.done || !E) return;
+  start.done = true;
+  window.vitrinaEditor = boot(E);
+};
+if (window.vitrinaEngine) start(window.vitrinaEngine);
+else document.addEventListener('vitrina:ready', (e) => start(e.detail), { once: true });

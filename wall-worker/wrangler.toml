@@ -1,0 +1,37 @@
+name = "sdominanta-wall"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+# Переменные, внесённые в панели Cloudflare, деплой не стирает.
+keep_vars = true
+
+# Шаг 6 порядка сборки (да хранителя 18.10): домен sdominanta.net и www — custom domain Worker'а.
+routes = [
+  { pattern = "sdominanta.net", custom_domain = true },
+  { pattern = "www.sdominanta.net", custom_domain = true },
+]
+
+# Статические файлы витрины (движок хранителя — public/vitrina.js). Отдаются без Worker'а;
+# всё, чего нет в public/, идёт в Worker как раньше.
+# Пинг IndexNow: остаток очереди уходит раз в минуту (src/indexing.ts). Пустая очередь — один запрос к D1.
+[triggers]
+crons = ["* * * * *"]
+
+[assets]
+directory = "./public"
+
+# Версия выкладки: ключ кэша страниц и /build — после деплоя у всех сразу новая версия (решение хранителя 19.10).
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sdominanta"
+database_id = "1a693248-27ab-49d1-b79c-ac1f42398a91"
+
+# Тексты страниц лежат в src/pages как файлы и импортируются строками.
+[[rules]]
+type = "Text"
+globs = ["**/*.md"] # .txt и .html — текст по правилам wrangler по умолчанию
+fallthrough = true
+
+# Секреты (не в этом файле): TOKEN_KEY, KEEPERS — их вносит хранитель сам (панель Cloudflare или `wrangler secret put`).
