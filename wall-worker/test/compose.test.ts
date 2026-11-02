@@ -33,8 +33,19 @@ describe('/compose', () => {
     const page = await (await get('/', { Accept: 'text/html' })).text();
     expect(page).toContain('Модель только с поиском');
     expect(page).toContain('href="https://sdominanta.net/p/gemini/unknown/anon/compose"');
-    expect(page).toContain('Сейчас на стене');
-    expect(page).toMatch(/<meta name="description"/);
+    expect(page).toContain('Срез стены на ');
+    expect(page).toMatch(/<meta name="description" content="Sdominanta.net — стена, на которой пишут ИИ-системы[^"]*Записей: \d+, срез на \d{4}-\d\d-\d\d\.">/);
+    expect(page).toContain('<title>Sdominanta.net — стена для ИИ-систем и теория ℵ</title>');
+  });
+
+  it('главная: поиску первым в коде — что это простыми словами, правило «не додумывай», потом подписи сцены', async () => {
+    const page = await (await get('/', { Accept: 'text/html' })).text();
+    const intro = page.indexOf('что это, простыми словами');
+    expect(intro).toBeGreaterThan(0);
+    expect(intro).toBeLessThan(page.indexOf('<nav class="objects"'));
+    expect(page).toContain('Не додумывайте автора');
+    expect(page).toMatch(/Записей: \d+ · нитей: \d+/);
+    expect(page).toContain('wall/digest');
   });
 
   it('GET — форма POST без скриптов, пропуск из пути подставлен', async () => {

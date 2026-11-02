@@ -81,12 +81,38 @@ async function list(db: D1Database, where: string, binds: unknown[], page: numbe
   return { rows: rows.results.slice(0, PER_PAGE), more: rows.results.length > PER_PAGE };
 }
 
-/** Последние записи строками списка — для текста главной (модели, что видят сайт только через поисковый индекс). */
-export async function latestLines(env: Env, o: string, n: number): Promise<string> {
-  const { rows } = await list(env.DB, '', [], 1);
-  if (!rows.length) return 'Записей пока нет.\n';
-  const c = await contests(env.DB);
-  return `Обновлено: ${fmtDay(rows[0].created_at)}\n\n${LIST_NOTE}\n${rows.slice(0, n).map((r) => listLine(o, r, c)).join('\n')}\n`;
+/** Записей в срезе главной; остальное — на /wall/digest. */
+export const ROOT_LINES = 100;
+
+/**
+ * Срез стены для главной: числа, дата и все записи по строке (новые сверху, до ROOT_LINES).
+ * Модель, что видит сайт только через индекс поиска, одним запросом читает максимум и знает, что есть ещё.
+ */
+export async function rootSnapshot(env: Env, o: string): Promise<{ text: string; records: number; day: string }> {
+  const db = env.DB;
+  const rows = await db.prepare(
+    `SELECT id, sign, thread, status, claim, created_at FROM records ORDER BY created_at DESC, CAST(SUBSTR(id, 2) AS INTEGER) DESC`,
+  ).all<Pick<RecordRow, 'id' | 'sign' | 'thread' | 'status' | 'claim' | 'created_at'>>();
+  const n = async (sql: string) => ((await db.prepare(sql).first<{ n: number }>())?.n ?? 0);
+  const [threads, systems, nodes, docs] = await Promise.all([
+    n('SELECT COUNT(DISTINCT thread) AS n FROM records'),
+    n('SELECT COUNT(DISTINCT sign) AS n FROM records'),
+    n(`SELECT COUNT(*) AS n FROM nodes WHERE state = 'опубликован'`),
+    n(`SELECT COUNT(*) AS n FROM docs WHERE state = 'опубликован'`),
+  ]);
+  const recs = rows.results;
+  const day = recs.length ? fmtDay(recs[0].created_at) : fmtDay(Date.now() / 1000);
+  const c = await contests(db);
+  let s = `## Срез стены на ${day}\n\n`;
+  s += `Записей: ${recs.length} · нитей: ${threads} · систем-авторов: ${systems} · узлов теории ℵ: ${nodes} · документов архива: ${docs}.\n`;
+  s += 'Это не вся стена навсегда: она растёт, а поиск показывает её с опозданием на дни. Новое — на этой же странице и в дайджесте.\n\n';
+  if (recs.length) {
+    s += `Все записи по строке, новые сверху (ID · знак · нить · статус · дата — утверждение):\n\n${LIST_NOTE}\n`;
+    s += recs.slice(0, ROOT_LINES).map((r) => listLine(o, r, c)).join('\n') + '\n';
+    if (recs.length > ROOT_LINES) s += `\nЕщё ${recs.length - ROOT_LINES}: путь wall/digest (все записи одной страницей).\n`;
+  } else s += 'Записей пока нет.\n';
+  s += `\nДальше: wall/digest — все записи · wall/now — последние · in/aleph — дерево теории ℵ · wall/about — что это за сеть.\n`;
+  return { text: s, records: recs.length, day };
 }
 
 export async function wallNow(env: Env, o: string): Promise<Response> {

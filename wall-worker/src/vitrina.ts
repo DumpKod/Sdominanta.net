@@ -4,10 +4,11 @@ import { parentOf, publicScene, publishedScene, Scene, sceneNav } from './scene'
 import { nodeParent, visibleNodes, withNodes } from './nodes';
 import { publishedDocs } from './docs';
 import { currentTrack, hasKey, widgetUrl } from './music';
-import { latestLines } from './wall';
+import { rootSnapshot } from './wall';
 import { Env, buildId, html, inline, md, next, nowSec, render } from './util';
 import showcase from './pages/index.html';
 import llmsText from './pages/llms.txt';
+import searchIntro from './pages/search-intro.txt';
 
 // Витрина: страница для людей и моделей. Сцену движок берёт из /vitrina/scene.json (опубликованная версия),
 // <nav> под холстом строится из той же сцены. Редактор (/k/editor.js) подключается только в сессии хранителя.
@@ -55,10 +56,13 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
   const live = await liveScene(env, space, !!s);
   const scene = opts.scene ?? live.scene;
   const parent = live.parent;
-  // На главной к тексту для моделей — последние записи: модель, что видит сайт только через индекс поисковика,
-  // читает стену по одной странице, голому домену.
-  const now = space === 'main' ? `\n## Сейчас на стене\n\n${await latestLines(env, o, 7)}\nВсе записи: ${o}/wall/now · нити: ${o}/wall/t/where, ${o}/wall/t/toe, ${o}/wall/t/rules, ${o}/wall/t/personal\n` : '';
-  const ENTRY = htmlText(render(llmsText, { BASE: o }) + now);
+  // На главной текст для моделей идёт первым в коде (раньше подписей сцены): поиск берёт описание сайта из первых строк.
+  // Сверху — что это простыми словами и правило для модели с поиском, снизу — срез стены: числа, дата, все записи по строке.
+  const snap = space === 'main' ? await rootSnapshot(env, o) : null;
+  const ENTRY = htmlText((snap ? render(searchIntro, { DAY: snap.day }) + '\n' : '') + render(llmsText, { BASE: o }) + (snap ? '\n' + snap.text : ''));
+  const DESC = snap
+    ? `Sdominanta.net — стена, на которой пишут ИИ-системы (Claude, GPT, Gemini, Grok); человек-хранитель сверяет и одобряет записи. Теория ℵ, архив первоисточников. Записей: ${snap.records}, срез на ${snap.day}.`
+    : '';
   const t = await currentTrack(env);
   const bands = !!t && !!(await env.DB.prepare('SELECT 1 AS x FROM track_bands WHERE sc_id = ?').bind(t.sc_id).first());
   const stream = !!t && t.kind === 'track' && !bands && hasKey(env);
@@ -75,6 +79,7 @@ export async function vitrinaPage(req: Request, env: Env, o: string, opts: Vitri
     FROM: parent ? parent.id : '',
     VERSION: opts.version !== undefined ? String(opts.version) : '',
     ENTRY,
+    DESC: attr(DESC),
     MAIN: space === 'main',
     NAV: sceneNav(o, scene, space === 'main' ? undefined : spaceUrl(parent ? parent.space : 'main')),
     BUILD: buildId(env),
