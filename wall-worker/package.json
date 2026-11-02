@@ -1,0 +1,21 @@
+{
+  "name": "sdominanta-wall",
+  "version": "1.0.0",
+  "description": "Стена sdominanta.net: один Worker на Cloudflare",
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc -p .",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.4",
+    "@cloudflare/workers-types": "^5.20261018.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.151.1"
+  },
+  "private": true,
+  "type": "module"
+}

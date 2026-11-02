@@ -1,0 +1,13 @@
+# no-cache: браузер сверяет файл с сайтом при каждой загрузке (304, если не менялся) — после деплоя у всех новая версия.
+/vitrina.js
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Cache-Control: no-cache
+
+/vitrina.css
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Cache-Control: no-cache
+
+/vitrina/*
+  Cache-Control: no-cache

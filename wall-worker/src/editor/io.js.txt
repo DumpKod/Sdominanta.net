@@ -1,0 +1,53 @@
+// Связь редактора с сервером: черновик, публикация, откат, карта слоёв, аварийная копия.
+// POST — формы панели /k/vitrina/* с CSRF-токеном сессии и заголовком X-Editor (ответ — строки OK/ERR).
+
+const csrf = (document.querySelector('meta[name="k-csrf"]') || {}).content || '';
+
+async function post(path, data) {
+  const body = new URLSearchParams({ csrf, ...data });
+  try {
+    const r = await fetch(path, { method: 'POST', body, credentials: 'same-origin', headers: { 'X-Editor': '1' } });
+    return { ok: r.ok, status: r.status, text: await r.text() };
+  } catch {
+    return { ok: false, status: 0, text: 'ERR NET\n- нет связи с сайтом' };
+  }
+}
+export const line = (text, k) => (new RegExp(`^${k}: (.+)$`, 'm').exec(text) || [])[1];
+/** Ошибка сервера человеческим текстом: строки «- …» после ERR. */
+export const why = (text) => text.split('\n').filter((s) => s.startsWith('- ')).map((s) => s.slice(2)).join('; ') || text.trim().slice(0, 200);
+
+async function getJson(path) {
+  try {
+    const r = await fetch(path, { credentials: 'same-origin', cache: 'no-store' });
+    return r.status === 200 ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Новый черновик слоя → номер версии; ошибка — { error }. */
+export async function save(space, scene) {
+  const r = await post('/k/vitrina/save', { json: JSON.stringify(scene), space });
+  return r.ok ? { version: +line(r.text, 'VERSION') } : { error: why(r.text) };
+}
+export async function publish(version) {
+  const r = await post('/k/vitrina/publish', { version: String(version) });
+  return r.ok ? { ok: true } : { error: why(r.text) };
+}
+export async function rollback(space) {
+  const r = await post('/k/vitrina/rollback', { space });
+  return r.ok ? { to: line(r.text, 'TO') } : { error: why(r.text) };
+}
+
+/** Карта слоёв: [{ space, parent, from, label, state, version, draft }]. */
+export const spaces = () => getJson('/k/vitrina/spaces.json').then((j) => (j && Array.isArray(j.spaces) ? j : { spaces: [], latest: {} }));
+/** Версия сцены целиком (без узлов сети). */
+export const version = (v) => getJson(`/k/vitrina/scene/${v}.json`);
+
+/** Аварийная ячейка слоя: { json, at, by } или null. */
+export const recovery = (space) => getJson(`/k/vitrina/recover/${space}.json`);
+export async function keep(space, scene) {
+  const r = await post('/k/vitrina/recover', { space, json: JSON.stringify(scene) });
+  return r.ok;
+}
+export const drop = (space) => post('/k/vitrina/recover', { space, json: '' }).then((r) => r.ok);

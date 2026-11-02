@@ -1,0 +1,500 @@
+// Инструменты на холсте (координаты мира) и всё, что редактор рисует поверх кадра.
+// Выбор V: клик по жиле или внутри рамки объекта, Shift — добавить, рамка выбора по пустому месту, перетаскивание;
+//   у рамки выделенного — ручки: углы и стороны растягивают (Shift — пропорционально, Alt — от центра),
+//   кружок сверху поворачивает (Shift — шагами по 15°).
+// Рука H: тянуть холст (то же — пробел или средняя кнопка в любом инструменте).
+// Точки P: тянуть точку жилы, клик по жиле — новая точка, двойной клик или Delete — убрать.
+// Кисть B: мазок в выделенный объект (ничего не выделено — новый объект). Ластик E: клик по жиле.
+// Область A: кистью по узлам закрашивается область входа (Alt — стирает). Связь L: тянуть от объекта к объекту.
+// Узлы сети из базы (auto) инструменты не трогают: их можно только посмотреть.
+
+import { paintArea, rdp, smoothPts, r1 } from './geom.js';
+
+export const TOOLS = [
+  { id: 'select', name: 'Выбор', key: 'V', ico: '➤' },
+  { id: 'hand', name: 'Рука', key: 'H', ico: '✋' },
+  { id: 'points', name: 'Точки', key: 'P', ico: '◇' },
+  { id: 'brush', name: 'Кисть', key: 'B', ico: '✎' },
+  { id: 'erase', name: 'Ластик', key: 'E', ico: '⌫' },
+  { id: 'area', name: 'Область', key: 'A', ico: '◍' },
+  { id: 'link', name: 'Связь', key: 'L', ico: '⟷' },
+];
+
+export function makeTools(E, doc, ui) {
+  const M = E.M;
+  let tool = 'select';
+  let drag = null, raw = [], paint = null, band = null, point = null, hoverPt = null, brushAt = null, link = null;
+  let miniMap = null;
+  const MINI = { w: 190, h: 124 };
+
+  const brushWorld = () => Math.round((ui.brush() / E.cam.zoom) * 100) / 100;
+  const sel = () => doc.selected();
+  const own = (i) => i >= 0 && !E.objects[i].auto;
+
+  function set(t) {
+    tool = t;
+    E.setTool(t);
+    E.cv.dataset.tool = t;
+    paint = null; point = null; link = null; band = null;
+    ui.toolChanged(t);
+  }
+
+  /* ---------- поиск под курсором ---------- */
+
+  /**
+   * Объект под точкой экрана: сначала тот, в чьей области точка (самый маленький), потом жила рядом,
+   * потом самый маленький, чья рамка содержит точку. Узлы сети — только если allowAuto; skip — не он.
+   */
+  function pickAt(x, y, allowAuto, skip) {
+    const [wx, wy] = E.toWorld(x, y);
+    const ok = (o) => !(o.auto && !allowAuto) && o !== skip;
+    const size = (o) => { const b = o.bounds(); return (b.x1 - b.x0) * (b.y1 - b.y0); };
+    let best = -1, area = Infinity;
+    E.objects.forEach((o, j) => {
+      if (ok(o) && o.areas().some((a) => a.length >= 3 && M.inPoly(a, wx, wy)) && size(o) < area) { best = j; area = size(o); }
+    });
+    if (best >= 0) return best;
+    const i = E.hit(x, y);
+    if (i >= 0 && ok(E.objects[i])) return i;
+    E.objects.forEach((o, j) => {
+      const b = o.bounds();
+      if (ok(o) && wx >= b.x0 && wx <= b.x1 && wy >= b.y0 && wy <= b.y1 && size(o) < area) { best = j; area = size(o); }
+    });
+    return best;
+  }
+  function nearPoint(x, y, d) {
+    let best = null;
+    for (const o of sel())
+      o.strokes.forEach((s, si) => s.pts.forEach((p, pi) => {
+        const [sx, sy] = E.toScreen(p[0], p[1]), dd = Math.hypot(sx - x, sy - y);
+        if (dd < d && (!best || dd < best.d)) best = { o, si, pi, d: dd };
+      }));
+    return best;
+  }
+  function nearSegment(x, y, d) {
+    let best = null;
+    for (const o of sel())
+      o.strokes.forEach((s, si) => {
+        const pts = s.closed ? [...s.pts, s.pts[0]] : s.pts;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const [ax, ay] = E.toScreen(pts[i][0], pts[i][1]), [bx, by] = E.toScreen(pts[i + 1][0], pts[i + 1][1]);
+          const ex = bx - ax, ey = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * ex + (y - ay) * ey) / (ex * ex + ey * ey || 1e-9)));
+          const dd = Math.hypot(x - ax - ex * t, y - ay - ey * t);
+          if (dd < d && (!best || dd < best.d)) best = { o, si, at: i + 1, d: dd };
+        }
+      });
+    return best;
+  }
+
+  /* ---------- ручки рамки выделенного ---------- */
+  const HANDLE = 6;
+  const selBounds = () => sel().reduce((a, o) => M.union(a, o.bounds()), { ...M.EMPTY });
+  function selBox() {
+    const b = selBounds();
+    if (M.isEmpty(b)) return null;
+    const [x0, y0] = E.toScreen(b.x0, b.y0), [x1, y1] = E.toScreen(b.x1, b.y1);
+    return { b, x0: x0 - 3, y0: y0 - 3, x1: x1 + 3, y1: y1 + 3 };
+  }
+  function handles() {
+    const s = selBox();
+    if (!s) return [];
+    const out = [];
+    for (const fy of [0, 0.5, 1]) for (const fx of [0, 0.5, 1]) {
+      if (fx === 0.5 && fy === 0.5) continue;
+      out.push({ fx, fy, x: s.x0 + (s.x1 - s.x0) * fx, y: s.y0 + (s.y1 - s.y0) * fy });
+    }
+    out.push({ rot: true, x: (s.x0 + s.x1) / 2, y: s.y0 - 22 });
+    return out;
+  }
+  const handleAt = (x, y) => handles().find((h) => Math.abs(h.x - x) <= HANDLE + 2 && Math.abs(h.y - y) <= HANDLE + 2) || null;
+  const keepOrig = () => sel().map((o) => ({ o, strokes: JSON.stringify(o.strokes), area: o.area ? JSON.stringify(o.area) : null, doors: o.doors ? JSON.stringify(o.doors) : null }));
+  const putOrig = (orig) => { for (const r of orig) { r.o.strokes = JSON.parse(r.strokes); r.o.area = r.area ? JSON.parse(r.area) : null; r.o.doors = r.doors ? JSON.parse(r.doors) : null; } };
+  function applyHandle(e, wx, wy) {
+    const { h, b, orig } = drag;
+    putOrig(orig);
+    const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+    if (drag.kind === 'rotate') {
+      let a = Math.atan2(wy - cy, wx - cx) - Math.atan2(drag.start[1] - cy, drag.start[0] - cx);
+      if (e.shiftKey) a = Math.round(a / (Math.PI / 12)) * (Math.PI / 12);
+      for (const r of orig) r.o.rotate(a, cx, cy);
+      drag.angle = a;
+    } else {
+      const hx = b.x0 + (b.x1 - b.x0) * h.fx, hy = b.y0 + (b.y1 - b.y0) * h.fy;
+      const px = e.altKey ? cx : b.x0 + (b.x1 - b.x0) * (1 - h.fx), py = e.altKey ? cy : b.y0 + (b.y1 - b.y0) * (1 - h.fy);
+      const lim = (v) => (Math.abs(v) < 0.02 ? (v < 0 ? -0.02 : 0.02) : v);
+      let sx = h.fx === 0.5 ? 1 : lim((wx - px) / (hx - px || 1e-9));
+      let sy = h.fy === 0.5 ? 1 : lim((wy - py) / (hy - py || 1e-9));
+      if (e.shiftKey) {
+        const k = h.fx === 0.5 ? sy : h.fy === 0.5 ? sx : Math.sign(sx) * Math.max(Math.abs(sx), Math.abs(sy));
+        sx = Math.sign(sx || 1) * Math.abs(k); sy = Math.sign(sy || 1) * Math.abs(k);
+      }
+      for (const r of orig) r.o.stretch(sx, sy, px, py);
+    }
+    drag.moved = true;
+    E.rebuild(2);
+  }
+
+  function deletePoint(pt) {
+    const s = pt.o.strokes[pt.si];
+    s.pts.splice(pt.pi, 1);
+    if (!s.pts.length) pt.o.strokes.splice(pt.si, 1);
+    point = null;
+    doc.commit('Точка убрана', [pt.o.id]);
+  }
+
+  /* ---------- ввод ---------- */
+
+  E.setInput({
+    down(e) {
+      const x = e.clientX, y = e.clientY, [wx, wy] = E.toWorld(x, y);
+      const mr = miniRect();
+      if (miniMap && ui.mini() && x >= mr.x && x <= mr.x + mr.w && y >= mr.y && y <= mr.y + mr.h) { drag = { kind: 'mini' }; miniJump(x, y); return; }
+      if (tool === 'hand') { drag = { kind: 'hand', x, y }; E.cv.classList.add('grab'); return; }
+      if (tool === 'select') {
+        const h = sel().length ? handleAt(x, y) : null;
+        if (h) { drag = { kind: h.rot ? 'rotate' : 'stretch', h, b: selBounds(), orig: keepOrig(), start: [wx, wy], moved: false }; return; }
+        // внутри рамки уже выделенного — тянуть его, даже если сверху лежит другой объект (как в редакторах)
+        if (!e.shiftKey && sel().some((o) => { const b = o.bounds(); return wx >= b.x0 && wx <= b.x1 && wy >= b.y0 && wy <= b.y1; })) {
+          drag = { kind: 'move', last: [wx, wy], moved: false };
+          return;
+        }
+        const i = pickAt(x, y, true);
+        if (i >= 0 && E.objects[i].auto) { doc.select([]); doc.peek(E.objects[i].id); return; }
+        doc.peek(null);
+        if (i >= 0) {
+          const id = E.objects[i].id;
+          if (e.shiftKey) doc.select(doc.sel.includes(id) ? doc.sel.filter((s) => s !== id) : [...doc.sel, id]);
+          else if (!doc.sel.includes(id)) doc.select([id]);
+          drag = { kind: 'move', last: [wx, wy], moved: false };
+        } else {
+          if (!e.shiftKey) doc.select([]);
+          band = { x0: x, y0: y, x1: x, y1: y, add: e.shiftKey };
+        }
+      } else if (tool === 'points') {
+        const p = nearPoint(x, y, 8);
+        if (p) { point = p; drag = { kind: 'point', moved: false }; return; }
+        const sg = nearSegment(x, y, 8);
+        if (sg) {
+          sg.o.strokes[sg.si].pts.splice(sg.at, 0, [r1(wx), r1(wy)]);
+          point = { o: sg.o, si: sg.si, pi: sg.at };
+          drag = { kind: 'point', moved: true };
+          E.rebuild(2);
+          return;
+        }
+        const i = pickAt(x, y);
+        doc.select(i >= 0 ? [E.objects[i].id] : []);
+        point = null;
+      } else if (tool === 'brush') {
+        let o = doc.first;
+        if (!o) {
+          o = new M.SceneObject({ id: E.scene.newId(), label: 'Новый объект', strokes: [] });
+          E.objects.push(o);
+          doc.select([o.id]);
+        }
+        raw = [[wx, wy]];
+        raw.r = brushWorld();
+        raw.id = o.id;
+        E.setLive({ obj: E.objects.indexOf(o), st: { r: raw.r, pts: raw.slice() } });
+      } else if (tool === 'erase') {
+        const n = E.nearest(x, y);
+        if (!n || n.sd > 14 || n.si < 0 || !own(n.obj)) return;
+        const o = E.objects[n.obj];
+        o.strokes.splice(n.si, 1);
+        doc.commit('Жила стёрта', [o.id]);
+      } else if (tool === 'area') {
+        if (!doc.first) { const i = pickAt(x, y); if (i >= 0) doc.select([E.objects[i].id]); }
+        paint = { pts: [[wx, wy]], r: brushWorld(), sub: e.altKey };
+      } else if (tool === 'link') {
+        const i = pickAt(x, y);
+        if (i >= 0) link = { from: E.objects[i].id, x, y };
+      }
+    },
+    move(e) {
+      const x = e.clientX, y = e.clientY, [wx, wy] = E.toWorld(x, y);
+      if (tool === 'points' && !drag) hoverPt = nearPoint(x, y, 8);
+      if (tool === 'brush' || tool === 'area') { brushAt = [x, y]; E.cameraChanged(1); }
+      if (link) { link.x = x; link.y = y; E.cameraChanged(1); return; }
+      if (paint) {
+        const l = paint.pts[paint.pts.length - 1];
+        if (Math.hypot(wx - l[0], wy - l[1]) > paint.r * 0.4) paint.pts.push([wx, wy]);
+        return;
+      }
+      if (!drag && !band && !raw.length) return;
+      if (drag && drag.kind === 'mini') miniJump(x, y);
+      else if (drag && drag.kind === 'hand') {
+        E.cam.x -= (x - drag.x) / E.cam.zoom; E.cam.y -= (y - drag.y) / E.cam.zoom;
+        drag.x = x; drag.y = y;
+        E.cameraChanged();
+      } else if (drag && (drag.kind === 'stretch' || drag.kind === 'rotate')) applyHandle(e, wx, wy);
+      else if (drag && drag.kind === 'move') {
+        const dx = wx - drag.last[0], dy = wy - drag.last[1];
+        if (!dx && !dy) return;
+        for (const o of sel()) o.translate(dx, dy);
+        drag.last = [wx, wy];
+        drag.moved = true;
+        E.rebuild(2);
+      } else if (drag && drag.kind === 'point' && point) {
+        const p = point.o.strokes[point.si].pts[point.pi];
+        p[0] = r1(wx); p[1] = r1(wy);
+        drag.moved = true;
+        E.rebuild(2);
+      } else if (band) { band.x1 = x; band.y1 = y; E.cameraChanged(1); }
+      else if (raw.length) {
+        const l = raw[raw.length - 1];
+        if (Math.hypot(wx - l[0], wy - l[1]) * E.cam.zoom > 1.5) {
+          raw.push([wx, wy]);
+          const o = doc.byId(raw.id);
+          if (o) E.setLive({ obj: E.objects.indexOf(o), st: { r: raw.r, pts: smoothPts(raw, 2) } });
+        }
+      }
+    },
+    up(e) {
+      E.cv.classList.remove('grab');
+      if (paint) { finishPaint(); return; }
+      if (link) { finishLink(e.clientX, e.clientY); return; }
+      if (drag && drag.moved) {
+        const label = { move: 'Перемещение', point: 'Точка жилы', stretch: 'Растяжение', rotate: 'Поворот' }[drag.kind];
+        if (label) doc.commit(label, doc.sel, false);
+      }
+      drag = null;
+      if (band) {
+        if (Math.hypot(band.x1 - band.x0, band.y1 - band.y0) > 4) {
+          const [ax, ay] = E.toWorld(band.x0, band.y0), [bx, by] = E.toWorld(band.x1, band.y1);
+          const ids = E.scene.visible(M.rectFrom(ax, ay, bx, by)).filter(own).map((i) => E.objects[i].id);
+          doc.select(band.add ? [...doc.sel, ...ids] : ids);
+        }
+        band = null;
+        E.cameraChanged(1);
+      }
+      if (raw.length) {
+        const o = doc.byId(raw.id);
+        if (raw.length > 1 && o) {
+          const pts = rdp(smoothPts(smoothPts(raw, 4), 2), 0.35 / E.cam.zoom).map((p) => p.map(r1));
+          o.strokes.push({ r: raw.r || brushWorld(), pts });
+        }
+        raw = [];
+        E.setLive(null);
+        if (o && !o.strokes.length && !o.area) { E.objects.splice(E.objects.indexOf(o), 1); doc.select([]); }
+        doc.commit('Мазок кисти', o ? [o.id] : null);
+      }
+    },
+    cancel,
+    dblclick(e) {
+      if (tool === 'points') { const p = nearPoint(e.clientX, e.clientY, 8); if (p) deletePoint(p); }
+      else if (tool === 'select' && pickAt(e.clientX, e.clientY) >= 0) fitSelection();
+    },
+  });
+
+  function cancel() {
+    if (drag && drag.orig) { putOrig(drag.orig); E.rebuild(2); }
+    drag = null; band = null; paint = null; link = null;
+    if (raw.length) { raw = []; E.setLive(null); }
+    E.cv.classList.remove('grab');
+  }
+
+  /** Мазок области: объект — выделенный, иначе тот, чьих точек жил под мазком больше. */
+  function finishPaint() {
+    const p = paint;
+    paint = null;
+    let o = doc.first;
+    if (!o) {
+      let best = 0;
+      for (const ob of E.objects) {
+        if (ob.auto) continue;
+        let n = 0;
+        for (const s of ob.strokes) for (const q of s.pts) if (p.pts.some((c) => Math.hypot(c[0] - q[0], c[1] - q[1]) < p.r)) n++;
+        if (n > best) { best = n; o = ob; }
+      }
+      if (!o) { ui.say('Выберите объект или ведите кистью области по его жилам.'); return; }
+      doc.select([o.id]);
+    }
+    const t = doc.target();
+    t.area = paintArea(t.area, p.pts, p.r, p.sub);
+    doc.commit(t.area ? 'Область закрашена' : 'Область стёрта', [o.id]);
+    doc.emit('sel');
+  }
+
+  function finishLink(x, y) {
+    const a = doc.byId(link.from), i = a ? pickAt(x, y, true, a) : -1, b = i >= 0 ? E.objects[i] : null;
+    link = null;
+    E.cameraChanged(1);
+    if (!a || !b || b.id === a.id) return;
+    a.links = a.links || [];
+    if (a.links.some((l) => l.to === b.id)) { ui.say(`Связь ${a.label} → ${b.label} уже есть.`); return; }
+    if (a.links.length >= 10) { ui.say('У объекта до 10 связей.'); return; }
+    a.links.push({ to: b.id, w: 0.5 });
+    doc.select([a.id]);
+    doc.commit('Связь', [a.id], false);
+    doc.emit('sel');
+    ui.say(`Связь ${a.label} → ${b.label}: вес 0.5, меняется в свойствах.`);
+  }
+
+  function fitSelection() {
+    const b = selBounds();
+    if (!M.isEmpty(b)) E.flyTo(M.expand(b, Math.max(b.x1 - b.x0, b.y1 - b.y0) * 0.15));
+  }
+
+  /** Сдвиг выделенного стрелками: шаг — пиксели экрана. */
+  function nudge(dx, dy) {
+    if (!sel().length) return;
+    for (const o of sel()) o.translate(dx / E.cam.zoom, dy / E.cam.zoom);
+    doc.commit('Сдвиг', doc.sel);
+  }
+
+  /* ---------- мини-карта ---------- */
+  function miniRect() {
+    const ins = ui.insets();
+    return { x: ins.l + 12, y: E.H - ins.b - MINI.h - 12, w: MINI.w, h: MINI.h };
+  }
+  function miniJump(x, y) {
+    const mr = miniRect();
+    E.cam.x = (x - mr.x - miniMap.ox) / miniMap.s;
+    E.cam.y = (y - mr.y - miniMap.oy) / miniMap.s;
+    E.cameraChanged();
+  }
+  function drawMini(c) {
+    const mr = miniRect();
+    const view = E.cam.view(E.W, E.H);
+    const world = M.union(E.scene.bounds(), view);
+    if (M.isEmpty(world)) { miniMap = null; return; }
+    const ww = world.x1 - world.x0, wh = world.y1 - world.y0, s = Math.min((mr.w - 8) / ww, (mr.h - 8) / wh);
+    miniMap = { s, ox: (mr.w - ww * s) / 2 - world.x0 * s, oy: (mr.h - wh * s) / 2 - world.y0 * s };
+    const X = (x) => mr.x + miniMap.ox + x * s, Y = (y) => mr.y + miniMap.oy + y * s;
+    c.fillStyle = 'rgba(12, 14, 18, 0.9)';
+    c.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+    c.fillRect(mr.x, mr.y, mr.w, mr.h);
+    c.strokeRect(mr.x + 0.5, mr.y + 0.5, mr.w - 1, mr.h - 1);
+    for (const o of E.objects) {
+      const b = o.bounds();
+      if (M.isEmpty(b)) continue;
+      c.fillStyle = doc.sel.includes(o.id) ? 'rgba(250, 204, 21, 0.85)' : o.auto ? 'rgba(148, 163, 184, 0.35)' : 'rgba(0, 242, 254, 0.5)';
+      c.fillRect(X(b.x0), Y(b.y0), Math.max(1.5, (b.x1 - b.x0) * s), Math.max(1.5, (b.y1 - b.y0) * s));
+    }
+    c.strokeStyle = 'rgba(240, 255, 255, 0.9)';
+    c.strokeRect(X(view.x0), Y(view.y0), (view.x1 - view.x0) * s, (view.y1 - view.y0) * s);
+  }
+
+  /* ---------- поверх кадра ---------- */
+  const center = (o) => { const b = o.bounds(); return E.toScreen((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2); };
+  function drawLinks(c, objs, strong) {
+    for (const a of objs) {
+      for (const l of a.links || []) {
+        const b = doc.any(l.to);
+        if (!b) continue;
+        const [ax, ay] = center(a), [bx, by] = center(b);
+        c.strokeStyle = strong ? 'rgba(250, 204, 21, 0.85)' : 'rgba(250, 204, 21, 0.35)';
+        c.lineWidth = 1 + 2 * (l.w ?? 0.5);
+        c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
+        const ang = Math.atan2(by - ay, bx - ax), mx = (ax + bx) / 2, my = (ay + by) / 2;
+        c.beginPath(); c.moveTo(mx + Math.cos(ang) * 6, my + Math.sin(ang) * 6);
+        c.lineTo(mx + Math.cos(ang + 2.5) * 6, my + Math.sin(ang + 2.5) * 6);
+        c.lineTo(mx + Math.cos(ang - 2.5) * 6, my + Math.sin(ang - 2.5) * 6);
+        c.closePath(); c.fillStyle = c.strokeStyle; c.fill();
+      }
+    }
+    c.lineWidth = 1;
+  }
+  function overlay(c) {
+    if (ui.hidden()) { E.marks = []; return; }
+    E.marks = sel().flatMap((o) => o.areas());
+    c.lineWidth = 1;
+    drawLinks(c, tool === 'link' ? E.objects.filter((o) => !o.auto) : sel(), tool !== 'link');
+    c.setLineDash([3, 6]);
+    for (const o of sel()) {
+      const b = o.bounds();
+      if (M.isEmpty(b)) continue;
+      const [x0, y0] = E.toScreen(b.x0, b.y0), [x1, y1] = E.toScreen(b.x1, b.y1);
+      c.strokeStyle = 'rgba(0, 242, 254, 0.6)';
+      c.strokeRect(x0 - 3, y0 - 3, x1 - x0 + 6, y1 - y0 + 6);
+      const list = [[o.area, -1], ...(o.doors || []).map((d, k) => [d.area, k])];
+      for (const [a, k] of list) {
+        if (!a || a.length < 3) continue;
+        const on = o === doc.first && k === doc.door;
+        c.strokeStyle = on ? 'rgba(250, 204, 21, 0.95)' : 'rgba(250, 204, 21, 0.45)';
+        c.fillStyle = on ? 'rgba(250, 204, 21, 0.09)' : 'rgba(250, 204, 21, 0.03)';
+        c.beginPath();
+        a.forEach(([x, y], j) => { const [sx, sy] = E.toScreen(x, y); j ? c.lineTo(sx, sy) : c.moveTo(sx, sy); });
+        c.closePath(); c.fill(); c.stroke();
+        const [lx, ly] = E.toScreen(a[0][0], a[0][1]);
+        c.fillStyle = 'rgba(250, 204, 21, 0.9)';
+        c.font = '11px ui-monospace, monospace';
+        c.fillText(k < 0 ? '1' : String(k + 2), lx + 4, ly - 4);
+      }
+    }
+    const pk = doc.peeked && doc.any(doc.peeked);
+    if (pk) {
+      const b = pk.bounds(), [x0, y0] = E.toScreen(b.x0, b.y0), [x1, y1] = E.toScreen(b.x1, b.y1);
+      c.strokeStyle = 'rgba(148, 163, 184, 0.7)';
+      c.strokeRect(x0 - 3, y0 - 3, x1 - x0 + 6, y1 - y0 + 6);
+    }
+    c.setLineDash([]);
+    if (tool === 'select' && sel().length) {
+      for (const hd of handles()) {
+        c.fillStyle = 'rgba(12, 14, 18, 0.95)';
+        c.strokeStyle = 'rgba(165, 243, 252, 0.95)';
+        c.beginPath();
+        if (hd.rot) c.arc(hd.x, hd.y, HANDLE - 1, 0, Math.PI * 2);
+        else c.rect(hd.x - HANDLE / 2 - 1, hd.y - HANDLE / 2 - 1, HANDLE + 2, HANDLE + 2);
+        c.fill(); c.stroke();
+      }
+      if (drag && drag.kind === 'rotate' && typeof drag.angle === 'number') {
+        const hd = handles().find((q) => q.rot);
+        c.fillStyle = 'rgba(165, 243, 252, 0.95)';
+        c.font = '12px ui-monospace, monospace';
+        if (hd) c.fillText(`${Math.round((drag.angle * 180) / Math.PI)}°`, hd.x + 10, hd.y - 8);
+      }
+    }
+    if (paint) {
+      c.fillStyle = paint.sub ? 'rgba(248, 113, 113, 0.18)' : 'rgba(250, 204, 21, 0.16)';
+      const rs = paint.r * E.cam.zoom;
+      c.beginPath();
+      for (const [x, y] of paint.pts) { const [sx, sy] = E.toScreen(x, y); c.moveTo(sx + rs, sy); c.arc(sx, sy, rs, 0, Math.PI * 2); }
+      c.fill();
+    }
+    if (band) {
+      c.strokeStyle = 'rgba(165, 243, 252, 0.8)';
+      c.fillStyle = 'rgba(0, 242, 254, 0.06)';
+      const x = Math.min(band.x0, band.x1), y = Math.min(band.y0, band.y1), w = Math.abs(band.x1 - band.x0), h = Math.abs(band.y1 - band.y0);
+      c.fillRect(x, y, w, h);
+      c.strokeRect(x, y, w, h);
+    }
+    if (link) {
+      const a = doc.byId(link.from);
+      if (a) {
+        const [ax, ay] = center(a);
+        c.strokeStyle = 'rgba(250, 204, 21, 0.9)';
+        c.setLineDash([6, 4]);
+        c.beginPath(); c.moveTo(ax, ay); c.lineTo(link.x, link.y); c.stroke();
+        c.setLineDash([]);
+      }
+    }
+    if (tool === 'points') {
+      for (const o of sel())
+        o.strokes.forEach((s, si) => s.pts.forEach((p, pi) => {
+          const [sx, sy] = E.toScreen(p[0], p[1]);
+          if (sx < -8 || sy < -8 || sx > E.W + 8 || sy > E.H + 8) return;
+          const on = point && point.o === o && point.si === si && point.pi === pi;
+          const hov = hoverPt && hoverPt.o === o && hoverPt.si === si && hoverPt.pi === pi;
+          c.fillStyle = on ? 'rgba(250, 204, 21, 0.95)' : hov ? 'rgba(240, 255, 255, 0.95)' : 'rgba(0, 242, 254, 0.75)';
+          const d = on || hov ? 4 : 2.5;
+          c.fillRect(sx - d, sy - d, d * 2, d * 2);
+        }));
+    }
+    if ((tool === 'area' || tool === 'brush') && brushAt) {
+      const o = doc.first, th = tool === 'brush' ? (o ? o.get('thick') : M.STYLE.thick[2]) : 1;
+      c.strokeStyle = tool === 'area' ? 'rgba(250, 204, 21, 0.75)' : 'rgba(165, 243, 252, 0.7)';
+      c.beginPath();
+      c.arc(brushAt[0], brushAt[1], Math.max(1, ui.brush() * th), 0, Math.PI * 2);
+      c.stroke();
+    }
+    if (ui.mini()) drawMini(c);
+  }
+  E.setOverlay(overlay);
+
+  return {
+    set, cancel, nudge, fitSelection,
+    get tool() { return tool; },
+    get point() { return point; },
+    deletePoint() { if (point) deletePoint(point); },
+  };
+}
